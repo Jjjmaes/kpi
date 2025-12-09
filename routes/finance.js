@@ -202,11 +202,19 @@ router.get('/reports/summary', async (req, res) => {
   try {
     const { month } = req.query;
     const q = {};
+    
+    // 排除已取消的项目
+    q.status = { $ne: 'cancelled' };
+    
     if (month) {
       const [y, m] = month.split('-').map(Number);
       const start = new Date(y, m - 1, 1);
       const end = new Date(y, m, 0, 23, 59, 59);
-      q.completedAt = { $gte: start, $lte: end };
+      // 时间范围：已完成用 completedAt，未完成用 createdAt
+      q.$or = [
+        { completedAt: { $gte: start, $lte: end } },
+        { completedAt: { $exists: false }, createdAt: { $gte: start, $lte: end } }
+      ];
     }
     const projects = await Project.find(q).populate('customerId', 'name').populate('createdBy', 'name');
     const byCustomer = {};
