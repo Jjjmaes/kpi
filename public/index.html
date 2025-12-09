@@ -180,7 +180,10 @@
                 <!-- 回款记录 -->
                 <div id="financeSection-paymentRecords" class="finance-section-content" style="display: none;">
                     <div class="card" style="margin-bottom:16px;">
-                        <div class="card-title">回款记录</div>
+                        <div class="card-title">
+                            <span id="paymentCardTitle">回款记录</span>
+                            <span id="paymentFilterNotice" style="display:none;font-size:12px;color:#666;font-weight:400;margin-left:8px;">仅显示我创建的项目回款</span>
+                        </div>
                         <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
                             <input type="month" id="paymentMonth" style="padding:6px; min-width:150px; cursor:pointer;" title="选择月份" onchange="loadPaymentRecordsProjects()">
                             <input type="date" id="paymentStartDate" style="padding:6px; min-width:150px; cursor:pointer;" title="起始日期" onchange="loadPaymentRecordsProjects()">

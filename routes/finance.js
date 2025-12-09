@@ -28,8 +28,11 @@ router.get('/receivables', allowViewFinance, async (req, res) => {
     // 收集所有基础条件
     const baseConditions = {};
     if (customerId) baseConditions.customerId = customerId;
-    // 财务/管理员可按销售筛选；销售本人只能看自己可见的项目
+    // 财务/管理员可按销售筛选；销售本人仅看自己创建的项目
     if (salesId && isAdminOrFinance) baseConditions.createdBy = salesId;
+    if (!isAdminOrFinance) {
+      baseConditions.createdBy = req.user._id;
+    }
     if (status) {
       baseConditions.status = status;
     } else {
@@ -37,16 +40,7 @@ router.get('/receivables', allowViewFinance, async (req, res) => {
       baseConditions.status = { $ne: 'cancelled' };
     }
     
-    // 销售/兼职销售仅能查看自己创建或参与的项目
-    if (!isAdminOrFinance) {
-      const memberProjects = await ProjectMember.find({ userId: req.user._id }).distinct('projectId');
-      const createdProjects = await Project.find({ createdBy: req.user._id }).distinct('_id');
-      const accessibleIds = [...new Set([...memberProjects.map(String), ...createdProjects.map(String)])];
-      if (accessibleIds.length === 0) {
-        return res.json({ success: true, data: [] });
-      }
-      baseConditions._id = { $in: accessibleIds };
-    }
+    // 销售/兼职销售仅能查看自己创建的项目（不包含其他人的项目）
     
     // 收集需要 $or 的条件
     const orConditions = [];
@@ -288,8 +282,7 @@ router.get('/payment/:projectId', allowViewFinance, async (req, res) => {
     const isAdminOrFinance = roles.includes('admin') || roles.includes('finance');
     if (!isAdminOrFinance) {
       const isOwner = project.createdBy?.toString() === req.user._id.toString();
-      const isMember = await ProjectMember.exists({ projectId, userId: req.user._id });
-      if (!isOwner && !isMember) {
+      if (!isOwner) {
         return res.status(403).json({ success: false, message: '无权查看该项目回款' });
       }
     }
@@ -725,22 +718,16 @@ router.get('/receivables/export', allowViewFinance, async (req, res) => {
     const baseConditions = {};
     if (customerId) baseConditions.customerId = customerId;
     if (salesId && isAdminOrFinance) baseConditions.createdBy = salesId;
+    if (!isAdminOrFinance) {
+      baseConditions.createdBy = req.user._id;
+    }
     if (status) {
       baseConditions.status = status;
     } else {
       baseConditions.status = { $ne: 'cancelled' };
     }
     
-    // 销售/兼职销售仅能导出自己创建或参与的项目
-    if (!isAdminOrFinance) {
-      const memberProjects = await ProjectMember.find({ userId: req.user._id }).distinct('projectId');
-      const createdProjects = await Project.find({ createdBy: req.user._id }).distinct('_id');
-      const accessibleIds = [...new Set([...memberProjects.map(String), ...createdProjects.map(String)])];
-      if (accessibleIds.length === 0) {
-        return res.json({ success: true, data: [] });
-      }
-      baseConditions._id = { $in: accessibleIds };
-    }
+    // 销售/兼职销售仅能导出自己创建的项目
     
     const orConditions = [];
     // 预期回款日期筛选（支持日期范围）

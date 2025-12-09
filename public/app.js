@@ -320,8 +320,8 @@ function showSection(sectionId, triggerBtn) {
         } else if (isSalesRole() && salesFinanceView) {
             // 销售从看板跳转进入，只读视图
         } else {
-            showToast('无权限访问财务模块', 'error');
-            return;
+        showToast('无权限访问财务模块', 'error');
+        return;
         }
     } else {
         salesFinanceView = false; // 切换到其他模块时关闭销售财务视图
@@ -358,6 +358,8 @@ function showFinanceSection(sectionName) {
     if (salesFinanceView && !isFinanceRole()) {
         sectionName = 'paymentRecords';
     }
+    const financeTitle = document.querySelector('#finance h2');
+    const financeNav = document.getElementById('financeNavCards');
     // 隐藏所有section内容
     document.querySelectorAll('.finance-section-content').forEach(s => {
         s.style.display = 'none';
@@ -386,8 +388,32 @@ function showFinanceSection(sectionName) {
             const sec = card.getAttribute('data-section');
             card.style.display = sec === 'paymentRecords' ? 'flex' : 'none';
         });
+        if (financeTitle) financeTitle.textContent = '回款预警';
+        if (financeNav) financeNav.style.display = 'none';
+        // 锁定筛选：销售只能看自己创建的项目
+        const paymentSales = document.getElementById('paymentSales');
+        if (paymentSales) {
+            paymentSales.value = currentUser?._id || '';
+            paymentSales.disabled = true;
+        }
+        const paymentCustomer = document.getElementById('paymentCustomer');
+        if (paymentCustomer) paymentCustomer.disabled = false; // 可按客户筛选自己的项目
+        const paymentFilterNotice = document.getElementById('paymentFilterNotice');
+        if (paymentFilterNotice) {
+            paymentFilterNotice.style.display = 'block';
+        }
     } else {
         document.querySelectorAll('.finance-nav-card').forEach(card => card.style.display = 'flex');
+        if (financeTitle) financeTitle.textContent = '财务管理';
+        if (financeNav) financeNav.style.display = 'grid';
+        const paymentSales = document.getElementById('paymentSales');
+        if (paymentSales) paymentSales.disabled = false;
+        const paymentCustomer = document.getElementById('paymentCustomer');
+        if (paymentCustomer) paymentCustomer.disabled = false;
+        const paymentFilterNotice = document.getElementById('paymentFilterNotice');
+        if (paymentFilterNotice) {
+            paymentFilterNotice.style.display = 'none';
+        }
     }
 }
 
@@ -4841,7 +4867,7 @@ async function loadPaymentRecordsProjects() {
     const status = document.getElementById('paymentStatusFilter')?.value || '';
     const paymentStatus = document.getElementById('paymentProjectPaymentStatus')?.value || '';
     const customerId = document.getElementById('paymentCustomer')?.value || '';
-    const salesId = document.getElementById('paymentSales')?.value || '';
+    const salesId = isFinanceRole() ? (document.getElementById('paymentSales')?.value || '') : currentUser?._id || '';
     const params = new URLSearchParams();
     if (status) params.append('status', status);
     if (paymentStatus) params.append('paymentStatus', paymentStatus);
