@@ -178,6 +178,76 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
     const recentPaymentOverdue = paymentWarnings.filter(w => w.expectedAt && w.expectedAt >= sevenDaysAgo).length;
     const recentDeliveryOverdue = deliveryWarnings.filter(w => w.deadline && w.deadline >= sevenDaysAgo).length;
 
+    // 今日指标（根据角色不同）
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    let todayDeals = null; // 今日成交（销售和兼职销售）
+    let todayDelivery = null; // 今日进入交付（销售和兼职销售）
+    let todayMyDueProjects = null; // 今日本人应完成项目（翻译、审校、排版）
+
+    if (isSales && !isAdmin && !isFinance) {
+      // 销售和兼职销售：今日成交和进入交付
+      // 今日成交：今天创建的项目
+      const todayCreatedQuery = { ...projectQuery };
+      todayCreatedQuery.createdAt = { $gte: today, $lt: tomorrow };
+      delete todayCreatedQuery.$or; // 移除月份查询条件
+      const todayCreatedProjects = await Project.find(todayCreatedQuery);
+      todayDeals = {
+        count: todayCreatedProjects.length,
+        amount: todayCreatedProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0)
+      };
+
+      // 今日进入交付：今天开始执行的项目（startedAt在今天）
+      const todayStartedQuery = { ...projectQuery };
+      todayStartedQuery.startedAt = { $gte: today, $lt: tomorrow };
+      todayStartedQuery.status = 'in_progress';
+      delete todayStartedQuery.$or; // 移除月份查询条件
+      const todayStartedProjects = await Project.find(todayStartedQuery);
+      todayDelivery = {
+        count: todayStartedProjects.length,
+        amount: todayStartedProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0)
+      };
+    } else {
+      // 翻译、审校、排版：今日本人应完成项目
+      const userRoles = req.user.roles || [];
+      const isWorker = userRoles.includes('translator') || userRoles.includes('reviewer') || userRoles.includes('layout');
+      
+      if (isWorker) {
+        // 查找今天deadline的项目，且用户是项目成员
+        const todayDueQuery = {
+          deadline: { $gte: today, $lt: tomorrow },
+          status: { $ne: 'completed' }, // 未完成的项目
+          _id: { $in: [] } // 初始化为空，后面会填充
+        };
+
+        // 获取用户作为成员的项目ID
+        const userMemberProjects = await ProjectMember.find({ userId: req.user._id }).distinct('projectId');
+        if (userMemberProjects.length > 0) {
+          todayDueQuery._id = { $in: userMemberProjects };
+          const todayDueProjects = await Project.find(todayDueQuery)
+            .select('_id projectName deadline status businessType')
+            .populate('customerId', 'name');
+          
+          todayMyDueProjects = {
+            count: todayDueProjects.length,
+            projects: todayDueProjects.map(p => ({
+              projectId: p._id,
+              projectName: p.projectName,
+              deadline: p.deadline,
+              status: p.status,
+              businessType: p.businessType,
+              customerName: p.customerId?.name || ''
+            }))
+          };
+        } else {
+          todayMyDueProjects = { count: 0, projects: [] };
+        }
+      }
+    }
+
     res.json({
       success: true,
       data: {
@@ -197,7 +267,10 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
         kpiTrend,
         recentCompleted,
         recentPaymentOverdue,
-        recentDeliveryOverdue
+        recentDeliveryOverdue,
+        todayDeals,
+        todayDelivery,
+        todayMyDueProjects
       }
     });
   } catch (error) {

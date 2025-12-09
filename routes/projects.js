@@ -121,6 +121,17 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
     const config = await KpiConfig.getActiveConfig();
     const lockedRatios = config.getLockedRatios();
 
+    // 检查：销售创建项目时不能设置兼职排版，应由项目经理添加
+    const isSales = req.user.roles.includes('sales') || req.user.roles.includes('part_time_sales');
+    const isAdmin = req.user.roles.includes('admin');
+    
+    if (isSales && !isAdmin && partTimeLayout?.isPartTime) {
+      return res.status(400).json({
+        success: false,
+        message: '销售创建项目时不能设置兼职排版，兼职排版应由项目经理在项目详情中添加'
+      });
+    }
+
     // 处理兼职排版费用校验
     if (partTimeLayout?.isPartTime && partTimeLayout?.layoutCost) {
       const tempProject = new Project({ projectAmount: finalAmount });
@@ -293,6 +304,18 @@ router.put('/:id', authorize('admin', 'pm', 'sales'), async (req, res) => {
       });
     }
 
+    // 检查：销售编辑项目时不能设置兼职排版，应由项目经理添加
+    const isSales = req.user.roles.includes('sales') || req.user.roles.includes('part_time_sales');
+    const isAdmin = req.user.roles.includes('admin');
+    const isPM = req.user.roles.includes('pm');
+    
+    if (isSales && !isAdmin && !isPM && req.body.partTimeLayout?.isPartTime) {
+      return res.status(400).json({
+        success: false,
+        message: '销售编辑项目时不能设置兼职排版，兼职排版应由项目经理在项目详情中添加'
+      });
+    }
+
     // 校验兼职排版费用
     if (project.partTimeLayout?.isPartTime && project.partTimeLayout?.layoutCost) {
       const validation = project.validateLayoutCost(project.partTimeLayout.layoutCost);
@@ -410,7 +433,8 @@ router.get('/:id', async (req, res) => {
   try {
     const project = await Project.findById(req.params.id)
       .populate('createdBy', 'name username')
-      .populate('customerId', 'name shortName contactPerson phone email address');
+      .populate('customerId', 'name shortName contactPerson phone email address')
+      .populate('partTimeLayout.layoutAssignedTo', 'name username');
 
     if (!project) {
       return res.status(404).json({ 
@@ -458,7 +482,7 @@ router.get('/:id', async (req, res) => {
 // 添加项目成员
 router.post('/:id/add-member', async (req, res) => {
   try {
-    const { userId, role, translatorType, wordRatio } = req.body;
+    const { userId, role, translatorType, wordRatio, layoutCost } = req.body;
     const projectId = req.params.id;
 
     if (!userId || !role) {
@@ -486,6 +510,41 @@ router.post('/:id/add-member', async (req, res) => {
         success: false, 
         message: '无权添加成员' 
       });
+    }
+
+    // 如果是兼职排版且提供了排版费用，验证并更新项目信息
+    if (role === 'layout' && layoutCost && layoutCost > 0) {
+      // 验证排版费用是否超过项目总金额的5%
+      const validation = project.validateLayoutCost(layoutCost);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: validation.message
+        });
+      }
+
+      // 更新项目的兼职排版信息
+      project.partTimeLayout = {
+        isPartTime: true,
+        layoutCost: layoutCost,
+        layoutAssignedTo: userId,
+        layoutCostPercentage: validation.percentage || 0
+      };
+      await project.save();
+    } else if (role === 'layout') {
+      // 如果添加了兼职排版成员但没有填写费用，只更新排版员信息，不更新费用
+      if (!project.partTimeLayout) {
+        project.partTimeLayout = {
+          isPartTime: true,
+          layoutCost: 0,
+          layoutAssignedTo: userId,
+          layoutCostPercentage: 0
+        };
+      } else {
+        project.partTimeLayout.layoutAssignedTo = userId;
+        project.partTimeLayout.isPartTime = true;
+      }
+      await project.save();
     }
 
     // 确定使用的系数
