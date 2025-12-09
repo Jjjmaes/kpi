@@ -3059,6 +3059,9 @@ function getProjectTypeText(type) {
 // ==================== Dashboard ====================
 async function loadDashboard() {
     try {
+        // 销毁之前的图表
+        destroyCharts();
+        
         const month = document.getElementById('dashboardMonth')?.value || new Date().toISOString().slice(0, 7);
         const status = document.getElementById('dashboardStatus')?.value || '';
         const businessType = document.getElementById('dashboardBusinessType')?.value || '';
@@ -3084,7 +3087,7 @@ async function loadDashboard() {
         renderDashboardCards(data);
         renderDashboardCharts(data);
     } catch (error) {
-        showAlert('dashboardCards', '加载Dashboard失败: ' + error.message, 'error');
+        showAlert('dashboardCards', '加载业务看板失败: ' + error.message, 'error');
     }
 }
 
@@ -3110,83 +3113,125 @@ function renderDashboardCards(data) {
     
     const cards = `
         <div class="card-grid">
-            <div class="card">
-                <div class="card-title">当月项目数</div>
-                <div class="card-value">${data.projectCount || 0}</div>
-                <div class="card-desc">月份：${data.month}</div>
+            <div class="card stat-card stat-primary">
+                <div class="stat-icon">📊</div>
+                <div class="stat-content">
+                    <div class="card-title">当月项目数</div>
+                    <div class="card-value">${data.projectCount || 0}</div>
+                    <div class="card-desc">月份：${data.month}</div>
+                </div>
             </div>
             ${showSalesAmount && data.totalProjectAmount !== undefined ? `
-            <div class="card">
-                <div class="card-title">成交额合计</div>
-                <div class="card-value">¥${(data.totalProjectAmount || 0).toLocaleString()}</div>
-                <div class="card-desc">根据筛选条件汇总</div>
+            <div class="card stat-card stat-success">
+                <div class="stat-icon">💰</div>
+                <div class="stat-content">
+                    <div class="card-title">成交额合计</div>
+                    <div class="card-value">¥${(data.totalProjectAmount || 0).toLocaleString()}</div>
+                    <div class="card-desc">根据筛选条件汇总</div>
+                </div>
             </div>
             ` : ''}
             ${!showSalesAmount ? `
             ${data.totalProjectAmount !== undefined ? `
-            <div class="card">
-                <div class="card-title">项目金额合计</div>
-                <div class="card-value">¥${(data.totalProjectAmount || 0).toLocaleString()}</div>
-                <div class="card-desc">可见范围内金额</div>
+            <div class="card stat-card stat-success">
+                <div class="stat-icon">💰</div>
+                <div class="stat-content">
+                    <div class="card-title">项目金额合计</div>
+                    <div class="card-value">¥${(data.totalProjectAmount || 0).toLocaleString()}</div>
+                    <div class="card-desc">可见范围内金额</div>
+                </div>
             </div>
             ` : ''}
-            <div class="card">
-                <div class="card-title">KPI合计</div>
-                <div class="card-value">¥${(data.kpiTotal || 0).toLocaleString()}</div>
-                <div class="card-desc">根据角色权限汇总</div>
+            <div class="card stat-card stat-info">
+                <div class="stat-icon">📈</div>
+                <div class="stat-content">
+                    <div class="card-title">KPI合计</div>
+                    <div class="card-value">¥${(data.kpiTotal || 0).toLocaleString()}</div>
+                    <div class="card-desc">根据角色权限汇总</div>
+                </div>
             </div>
             ` : ''}
-            <div class="card">
-                <div class="card-title">完成率</div>
-                <div class="card-value">${completionRate}%</div>
-                <div class="subtext">完成/总项目：${completed}/${total}</div>
+            <div class="card stat-card stat-primary">
+                <div class="stat-icon">✅</div>
+                <div class="stat-content">
+                    <div class="card-title">完成率</div>
+                    <div class="card-value">${completionRate}%</div>
+                    <div class="subtext">完成/总项目：${completed}/${total}</div>
+                </div>
             </div>
-            <div class="card">
-                <div class="card-title">进行中</div>
-                <div class="card-value">${inProgress}</div>
-                <div class="subtext">当前执行的项目</div>
+            <div class="card stat-card stat-warning">
+                <div class="stat-icon">🔄</div>
+                <div class="stat-content">
+                    <div class="card-title">进行中</div>
+                    <div class="card-value">${inProgress}</div>
+                    <div class="subtext">当前执行的项目</div>
+                </div>
             </div>
-            <div class="card">
-                <div class="card-title">已完成</div>
-                <div class="card-value">${completed}</div>
-                <div class="subtext">本月完成项目</div>
+            <div class="card stat-card stat-success">
+                <div class="stat-icon">✓</div>
+                <div class="stat-content">
+                    <div class="card-title">已完成</div>
+                    <div class="card-value">${completed}</div>
+                    <div class="subtext">本月完成项目</div>
+                </div>
             </div>
-            <div class="card">
-                <div class="card-title">待开始</div>
-                <div class="card-value">${pending}</div>
-                <div class="subtext">待排期项目</div>
+            <div class="card stat-card stat-info">
+                <div class="stat-icon">⏳</div>
+                <div class="stat-content">
+                    <div class="card-title">待开始</div>
+                    <div class="card-value">${pending}</div>
+                    <div class="subtext">待排期项目</div>
+                </div>
             </div>
-            <div class="card warning">
-                <div class="card-title">回款预警</div>
-                <div class="card-value">${(data.paymentWarnings?.length || 0)}</div>
-                <div class="card-desc">逾期未回款项目</div>
+            <div class="card stat-card stat-danger">
+                <div class="stat-icon">⚠️</div>
+                <div class="stat-content">
+                    <div class="card-title">回款预警</div>
+                    <div class="card-value">${(data.paymentWarnings?.length || 0)}</div>
+                    <div class="card-desc">逾期未回款项目</div>
+                </div>
             </div>
-            <div class="card warning">
-                <div class="card-title">交付逾期</div>
-                <div class="card-value">${(data.deliveryWarnings?.length || 0)}</div>
-                <div class="card-desc">截止已过未完成</div>
+            <div class="card stat-card stat-danger">
+                <div class="stat-icon">🚨</div>
+                <div class="stat-content">
+                    <div class="card-title">交付逾期</div>
+                    <div class="card-value">${(data.deliveryWarnings?.length || 0)}</div>
+                    <div class="card-desc">截止已过未完成</div>
+                </div>
             </div>
             ${paymentRate !== null ? `
-            <div class="card">
-                <div class="card-title">回款完成率</div>
-                <div class="card-value">${paymentRate}%</div>
-                <div class="subtext">已回款/项目金额</div>
+            <div class="card stat-card stat-success">
+                <div class="stat-icon">💵</div>
+                <div class="stat-content">
+                    <div class="card-title">回款完成率</div>
+                    <div class="card-value">${paymentRate}%</div>
+                    <div class="subtext">已回款/项目金额</div>
+                </div>
             </div>
             ` : ''}
-            <div class="card">
-                <div class="card-title">近7天完成</div>
-                <div class="card-value">${recentCompleted}</div>
-                <div class="subtext">近7天完成项目数</div>
+            <div class="card stat-card stat-info">
+                <div class="stat-icon">📅</div>
+                <div class="stat-content">
+                    <div class="card-title">近7天完成</div>
+                    <div class="card-value">${recentCompleted}</div>
+                    <div class="subtext">近7天完成项目数</div>
+                </div>
             </div>
-            <div class="card warning">
-                <div class="card-title">近7天回款预警</div>
-                <div class="card-value">${recentPaymentOverdue}</div>
-                <div class="card-desc">近7天逾期回款项目</div>
+            <div class="card stat-card stat-danger">
+                <div class="stat-icon">⚠️</div>
+                <div class="stat-content">
+                    <div class="card-title">近7天回款预警</div>
+                    <div class="card-value">${recentPaymentOverdue}</div>
+                    <div class="card-desc">近7天逾期回款项目</div>
+                </div>
             </div>
-            <div class="card warning">
-                <div class="card-title">近7天交付预警</div>
-                <div class="card-value">${recentDeliveryOverdue}</div>
-                <div class="card-desc">近7天交付逾期项目</div>
+            <div class="card stat-card stat-danger">
+                <div class="stat-icon">🚨</div>
+                <div class="stat-content">
+                    <div class="card-title">近7天交付预警</div>
+                    <div class="card-value">${recentDeliveryOverdue}</div>
+                    <div class="card-desc">近7天交付逾期项目</div>
+                </div>
             </div>
         </div>
     `;
@@ -3720,7 +3765,20 @@ async function loadFinanceSummary() {
         </div>
     `;
 }
+// 存储图表实例
+let chartInstances = [];
+
+function destroyCharts() {
+    chartInstances.forEach(chart => {
+        if (chart) chart.destroy();
+    });
+    chartInstances = [];
+}
+
 function renderDashboardCharts(data) {
+    // 销毁之前的图表
+    destroyCharts();
+    
     // 判断是否是销售或兼职销售
     const isSales = currentUser?.roles?.includes('sales') || currentUser?.roles?.includes('part_time_sales');
     const isAdmin = currentUser?.roles?.includes('admin');
@@ -3728,53 +3786,163 @@ function renderDashboardCharts(data) {
     const showSalesAmount = isSales && !isAdmin && !isFinance;
     
     const charts = [];
-
-    const renderBarList = (entries, labelMapper = (k) => k, formatValue = (v) => v) => {
-        if (!entries.length) return '<div class="card-desc">暂无数据</div>';
-        const max = Math.max(...entries.map(([, v]) => v || 0), 1);
-        return `
-            <div class="bar-list">
-                ${entries.map(([k, v]) => `
-                    <div class="bar-row">
-                        <span class="bar-label">${labelMapper(k)}</span>
-                        <div class="bar-track">
-                            <div class="bar-fill" style="width:${Math.min((v / max) * 100, 100)}%"></div>
-                        </div>
-                        <span class="bar-value">${formatValue(v)}</span>
-                    </div>
-                `).join('')}
-            </div>
-        `;
-    };
+    let chartIndex = 0;
 
     // KPI按角色（销售和兼职销售不显示）
     if (!showSalesAmount) {
         const kpiEntries = Object.entries(data.kpiByRole || {});
-        charts.push(`
-            <div class="card">
-                <div class="card-title">KPI按角色</div>
-                ${renderBarList(kpiEntries, getRoleText, (v) => `¥${(v || 0).toLocaleString()}`)}
-            </div>
-        `);
+        if (kpiEntries.length > 0) {
+            const chartId = `kpiRoleChart-${chartIndex++}`;
+            charts.push(`
+                <div class="card">
+                    <div class="card-title" style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">KPI按角色</div>
+                    <div class="chart-container">
+                        <canvas id="${chartId}"></canvas>
+                    </div>
+                </div>
+            `);
+            setTimeout(() => {
+                const ctx = document.getElementById(chartId);
+                if (ctx) {
+                    const chart = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: kpiEntries.map(([k]) => getRoleText(k)),
+                            datasets: [{
+                                label: 'KPI金额',
+                                data: kpiEntries.map(([, v]) => v || 0),
+                                backgroundColor: 'rgba(102, 126, 234, 0.8)',
+                                borderColor: 'rgba(102, 126, 234, 1)',
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    callbacks: {
+                                        label: (context) => `¥${(context.parsed.y || 0).toLocaleString()}`
+                                    }
+                                }
+                            },
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    ticks: {
+                                        callback: (value) => '¥' + value.toLocaleString()
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    chartInstances.push(chart);
+                }
+            }, 100);
+        }
     }
 
-    // 项目状态分布
+    // 项目状态分布 - 饼图
     const statusEntries = Object.entries(data.statusCounts || {});
-    charts.push(`
-        <div class="card">
-            <div class="card-title">项目状态分布</div>
-            ${renderBarList(statusEntries, getStatusText, (v) => v || 0)}
-        </div>
-    `);
+    if (statusEntries.length > 0) {
+        const chartId = `statusChart-${chartIndex++}`;
+        charts.push(`
+            <div class="card">
+                <div class="card-title" style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">项目状态分布</div>
+                <div class="chart-container">
+                    <canvas id="${chartId}"></canvas>
+                </div>
+            </div>
+        `);
+        setTimeout(() => {
+            const ctx = document.getElementById(chartId);
+            if (ctx) {
+                const colors = ['#667eea', '#2ecc71', '#f39c12', '#e74c3c'];
+                const chart = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: statusEntries.map(([k]) => getStatusText(k)),
+                        datasets: [{
+                            data: statusEntries.map(([, v]) => v || 0),
+                            backgroundColor: colors.slice(0, statusEntries.length),
+                            borderWidth: 2,
+                            borderColor: '#fff'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom'
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: (context) => {
+                                        const label = context.label || '';
+                                        const value = context.parsed || 0;
+                                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                        const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                        return `${label}: ${value} (${percentage}%)`;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                chartInstances.push(chart);
+            }
+        }, 100);
+    }
 
-    // 业务类型分布
+    // 业务类型分布 - 柱状图
     const btEntries = Object.entries(data.businessTypeCounts || {});
-    charts.push(`
-        <div class="card">
-            <div class="card-title">业务类型分布</div>
-            ${renderBarList(btEntries, getBusinessTypeText, (v) => v || 0)}
-        </div>
-    `);
+    if (btEntries.length > 0) {
+        const chartId = `businessTypeChart-${chartIndex++}`;
+        charts.push(`
+            <div class="card">
+                <div class="card-title" style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">业务类型分布</div>
+                <div class="chart-container">
+                    <canvas id="${chartId}"></canvas>
+                </div>
+            </div>
+        `);
+        setTimeout(() => {
+            const ctx = document.getElementById(chartId);
+            if (ctx) {
+                const chart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: btEntries.map(([k]) => getBusinessTypeText(k)),
+                        datasets: [{
+                            label: '项目数量',
+                            data: btEntries.map(([, v]) => v || 0),
+                            backgroundColor: 'rgba(52, 152, 219, 0.8)',
+                            borderColor: 'rgba(52, 152, 219, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    stepSize: 1
+                                }
+                            }
+                        }
+                    }
+                });
+                chartInstances.push(chart);
+            }
+        }, 100);
+    }
 
     // 回款预警
     charts.push(`
@@ -3810,30 +3978,85 @@ function renderDashboardCharts(data) {
         </div>
     `);
 
-    // KPI/成交额趋势
+    // KPI/成交额趋势 - 折线图
     const trend = data.kpiTrend || [];
     const trendTitle = showSalesAmount ? '成交额趋势（近3个月）' : 'KPI趋势（近3个月）';
-    charts.push(`
-        <div class="card">
-            <div class="card-title">${trendTitle}</div>
-            ${trend.length === 0 ? '<div class="card-desc">暂无数据</div>' : `
-                <div class="bar-list">
-                    ${trend.map(t => `
-                        <div class="bar-row">
-                            <span class="bar-label">${t.month}</span>
-                            <div class="bar-track">
-                                <div class="bar-fill" style="width:${Math.min((t.total || 0) / Math.max(...trend.map(x => x.total || 1)) * 100, 100)}%"></div>
-                            </div>
-                            <span class="bar-value">¥${(t.total || 0).toLocaleString()}</span>
-                        </div>
-                    `).join('')}
+    if (trend.length > 0) {
+        const chartId = `trendChart-${chartIndex++}`;
+        charts.push(`
+            <div class="card">
+                <div class="card-title" style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">${trendTitle}</div>
+                <div class="chart-container">
+                    <canvas id="${chartId}"></canvas>
                 </div>
-            `}
-        </div>
-    `);
+            </div>
+        `);
+        setTimeout(() => {
+            const ctx = document.getElementById(chartId);
+            if (ctx) {
+                const chart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: trend.map(t => t.month),
+                        datasets: [{
+                            label: showSalesAmount ? '成交额' : 'KPI',
+                            data: trend.map(t => t.total || 0),
+                            borderColor: 'rgba(46, 204, 113, 1)',
+                            backgroundColor: 'rgba(46, 204, 113, 0.1)',
+                            borderWidth: 3,
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 6,
+                            pointHoverRadius: 8,
+                            pointBackgroundColor: 'rgba(46, 204, 113, 1)',
+                            pointBorderColor: '#fff',
+                            pointBorderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: (context) => `¥${(context.parsed.y || 0).toLocaleString()}`
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    callback: (value) => '¥' + value.toLocaleString()
+                                },
+                                grid: {
+                                    color: 'rgba(0, 0, 0, 0.05)'
+                                }
+                            },
+                            x: {
+                                grid: {
+                                    display: false
+                                }
+                            }
+                        }
+                    }
+                });
+                chartInstances.push(chart);
+            }
+        }, 100);
+    }
 
     const el = document.getElementById('dashboardCharts');
-    if (el) el.innerHTML = `<div class="chart-grid">${charts.join('')}</div>`;
+    if (el) {
+        el.innerHTML = `<div class="chart-grid">${charts.join('')}</div>`;
+        // 确保图表在DOM更新后渲染
+        setTimeout(() => {
+            chartIndex = 0;
+        }, 200);
+    }
 }
 
 // 实时KPI

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>KPI绩效管理系统</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <!-- 登录页面 -->
@@ -38,7 +39,7 @@
             </header>
 
             <nav class="nav">
-                <button onclick="showSection('dashboard')" class="active">Dashboard</button>
+                <button onclick="showSection('dashboard')" class="active">业务看板</button>
                 <button onclick="showSection('projects')">项目管理</button>
                 <button onclick="showSection('customers')" id="customersBtn" style="display:none;">客户管理</button>
                 <button onclick="showSection('kpi')">KPI查询</button>
@@ -48,10 +49,10 @@
                 <button onclick="showSection('languages')" id="languagesBtn" style="display:none;">语种管理</button>
             </nav>
 
-            <!-- Dashboard -->
+            <!-- 业务看板 -->
             <div id="dashboard" class="section active">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
-                    <h2 style="margin: 0;">Dashboard</h2>
+                    <h2 style="margin: 0;">业务看板</h2>
                     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                         <input type="month" id="dashboardMonth" style="padding: 6px;" onchange="loadDashboard()">
                         <select id="dashboardStatus" style="padding: 6px;" onchange="loadDashboard()">
@@ -80,8 +81,8 @@
                         <button onclick="loadDashboard()" style="padding: 6px 12px;">刷新</button>
                     </div>
                 </div>
-                <div id="dashboardCards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;"></div>
-                <div id="dashboardCharts" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px;"></div>
+                <div id="dashboardCards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px;"></div>
+                <div id="dashboardCharts" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;"></div>
             </div>
 
             <!-- 财务管理 -->

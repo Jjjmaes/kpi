@@ -357,13 +357,19 @@ tr:hover {
     background: #e9ecef !important;
 }
 
-/* Dashboard 组件 */
+/* 业务看板组件 */
 .card {
     background: #fff;
     border: 1px solid #eee;
-    border-radius: 8px;
-    padding: 14px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
 }
 
 .card.warning {
@@ -373,14 +379,79 @@ tr:hover {
 
 .card-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
 }
 
 .chart-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 20px;
+}
+
+/* 统计卡片样式 */
+.stat-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    position: relative;
+    overflow: hidden;
+}
+
+.stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--stat-color), var(--stat-color-light));
+}
+
+.stat-card.stat-primary {
+    --stat-color: #667eea;
+    --stat-color-light: #9aa7f0;
+    border-left: 4px solid #667eea;
+}
+
+.stat-card.stat-success {
+    --stat-color: #2ecc71;
+    --stat-color-light: #58d68d;
+    border-left: 4px solid #2ecc71;
+}
+
+.stat-card.stat-info {
+    --stat-color: #3498db;
+    --stat-color-light: #5dade2;
+    border-left: 4px solid #3498db;
+}
+
+.stat-card.stat-warning {
+    --stat-color: #f39c12;
+    --stat-color-light: #f7c471;
+    border-left: 4px solid #f39c12;
+}
+
+.stat-card.stat-danger {
+    --stat-color: #e74c3c;
+    --stat-color-light: #ec7063;
+    border-left: 4px solid #e74c3c;
+}
+
+.stat-icon {
+    font-size: 36px;
+    line-height: 1;
+    opacity: 0.8;
+}
+
+.stat-content {
+    flex: 1;
+}
+
+.chart-container {
+    position: relative;
+    height: 300px;
+    margin-top: 10px;
 }
 
 .subtext {
@@ -441,19 +512,28 @@ table th {
 .card-title {
     font-size: 14px;
     color: #666;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
+    font-weight: 500;
 }
 
 .card-value {
-    font-size: 24px;
+    font-size: 28px;
     font-weight: 700;
     color: #333;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
+    line-height: 1.2;
 }
 
 .card-desc {
     font-size: 12px;
     color: #888;
+    line-height: 1.4;
+}
+
+.subtext {
+    color: #999;
+    font-size: 12px;
+    margin-top: 4px;
 }
 
 .list {
