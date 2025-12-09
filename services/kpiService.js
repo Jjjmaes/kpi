@@ -92,15 +92,15 @@ async function generateMonthlyKPIRecords(month) {
 
           let kpiResult;
 
-      if (member.role === 'sales') {
-        // 销售：金额奖励 + 回款奖励（均计入）
-        const salesCompletion = calculateCompletionFactorForSales(project);
-        const salesResult = calculateSalesCombined(project, salesCompletion);
-        effectiveRatio = project.locked_ratios.sales_bonus;
-        kpiResult = {
-          kpiValue: salesResult.kpiValue,
-          formula: salesResult.formula
-        };
+          if (member.role === 'sales') {
+            // 销售：金额奖励 + 回款奖励（均计入）
+            const salesCompletion = calculateCompletionFactorForSales(project);
+            const salesResult = calculateSalesCombined(project, salesCompletion);
+            effectiveRatio = project.locked_ratios.sales_bonus;
+            kpiResult = {
+              kpiValue: salesResult.kpiValue,
+              formula: salesResult.formula
+            };
       } else if (member.role === 'part_time_sales') {
         // 兼职销售：成交额 - 公司应收 - 税费 = 返还佣金
         const commission = project.calculatePartTimeSalesCommission();
@@ -310,17 +310,17 @@ async function generateProjectKPI(projectId) {
         });
       }
 
-          // 创建KPI记录
-          await KpiRecord.create({
-            userId: member.userId._id,
-            projectId: project._id,
-            role: member.role,
-            month,
-            kpiValue: kpiResult.kpiValue,
-            calculationDetails: {
-              projectAmount: project.projectAmount,
-              ratio: effectiveRatio,
-              wordRatio: member.role === 'translator' ? wordRatio : undefined,
+      // 创建KPI记录
+      await KpiRecord.create({
+        userId: member.userId._id,
+        projectId: project._id,
+        role: member.role,
+        month,
+        kpiValue: kpiResult.kpiValue,
+        calculationDetails: {
+          projectAmount: project.projectAmount,
+          ratio: effectiveRatio,
+          wordRatio: member.role === 'translator' ? wordRatio : undefined,
               completionFactor: member.role === 'sales' ? calculateCompletionFactorForSales(project) : completionFactor,
               formula: member.role === 'sales' ? kpiResult.formula : appendComplaintNote(kpiResult.formula, project),
               complaintPenalty: member.role === 'sales' ? 0 : (project.hasComplaint ? 0.2 : 0),
@@ -329,8 +329,8 @@ async function generateProjectKPI(projectId) {
               partTimeSalesCommission: member.role === 'part_time_sales' ? kpiResult.kpiValue : undefined,
               // 兼职排版相关
               layoutCost: member.role === 'layout' ? kpiResult.kpiValue : undefined
-            }
-          });
+        }
+      });
 
       recordCount++;
     } catch (memberError) {
@@ -413,17 +413,17 @@ async function calculateProjectRealtime(projectId) {
 
     let kpiResult;
 
-      if (member.role === 'sales') {
-        // 销售：金额奖励 + 回款奖励（均计入），不受客诉扣减，但受返修/延期影响
-        const salesCompletion = calculateCompletionFactorForSales(project);
-        const salesResult = calculateSalesCombined(project, salesCompletion);
-        effectiveRatio = project.locked_ratios.sales_bonus;
-        kpiResult = {
-          kpiValue: salesResult.kpiValue,
-          formula: salesResult.formula,
-          bonusPart: salesResult.bonusPart,
-          commissionPart: salesResult.commissionPart
-        };
+    if (member.role === 'sales') {
+      // 销售：金额奖励 + 回款奖励（均计入），不受客诉扣减，但受返修/延期影响
+      const salesCompletion = calculateCompletionFactorForSales(project);
+      const salesResult = calculateSalesCombined(project, salesCompletion);
+      effectiveRatio = project.locked_ratios.sales_bonus;
+      kpiResult = {
+        kpiValue: salesResult.kpiValue,
+        formula: salesResult.formula,
+        bonusPart: salesResult.bonusPart,
+        commissionPart: salesResult.commissionPart
+      };
       } else if (member.role === 'part_time_sales') {
         // 兼职销售：成交额 - 公司应收 - 税费 = 返还佣金
         const commission = project.calculatePartTimeSalesCommission();

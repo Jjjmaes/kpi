@@ -99,6 +99,17 @@
                             <option value="completed">已完成</option>
                             <option value="cancelled">已取消</option>
                         </select>
+                        <select id="financePaymentStatus" style="padding:6px;" onchange="loadReceivables()">
+                            <option value="">全部回款状态</option>
+                            <option value="unpaid">未支付</option>
+                            <option value="partially_paid">部分支付</option>
+                            <option value="paid">已支付</option>
+                        </select>
+                        <select id="financeHasInvoice" style="padding:6px;" onchange="loadReceivables()">
+                            <option value="">全部发票状态</option>
+                            <option value="true">已开票</option>
+                            <option value="false">未开票</option>
+                        </select>
                         <select id="financeCustomer" style="padding:6px; min-width:160px;" onchange="loadReceivables()">
                             <option value="">全部客户</option>
                         </select>
@@ -119,13 +130,59 @@
                 <div class="card" style="margin-bottom:16px;">
                     <div class="card-title">回款记录</div>
                     <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
-                        <select id="paymentProjectId" style="padding:6px; min-width:220px;" onchange="loadPaymentRecords(this.value)">
-                            <option value="">选择项目</option>
+                        <input type="month" id="paymentMonth" style="padding:6px;" onchange="loadPaymentRecordsProjects()">
+                        <select id="paymentStatusFilter" style="padding:6px;" onchange="loadPaymentRecordsProjects()">
+                            <option value="">全部状态</option>
+                            <option value="pending">待开始</option>
+                            <option value="in_progress">进行中</option>
+                            <option value="completed">已完成</option>
+                            <option value="cancelled">已取消</option>
                         </select>
-                        <input type="number" id="paymentAmount" placeholder="金额" style="padding:6px; width:120px;">
+                        <select id="paymentProjectPaymentStatus" style="padding:6px;" onchange="loadPaymentRecordsProjects()">
+                            <option value="">全部回款状态</option>
+                            <option value="unpaid">未支付</option>
+                            <option value="partially_paid">部分支付</option>
+                            <option value="paid">已支付</option>
+                        </select>
+                        <select id="paymentCustomer" style="padding:6px; min-width:160px;" onchange="loadPaymentRecordsProjects()">
+                            <option value="">全部客户</option>
+                        </select>
+                        <select id="paymentSales" style="padding:6px; min-width:160px;" onchange="loadPaymentRecordsProjects()">
+                            <option value="">全部销售</option>
+                        </select>
+                        <select id="paymentPageSize" style="padding:6px;" onchange="renderPaymentRecordsProjects()">
+                            <option value="10">每页10</option>
+                            <option value="20">每页20</option>
+                            <option value="50">每页50</option>
+                        </select>
+                        <button onclick="loadPaymentRecordsProjects()" style="padding:6px 12px;">刷新</button>
+                    </div>
+                    <div id="paymentProjectsList"></div>
+                </div>
+                
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-title">新增回款</div>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
+                        <div style="position: relative; min-width: 300px;">
+                            <input type="text" id="paymentProjectSearch" placeholder="搜索项目（编号/名称/客户）" 
+                                   style="padding:6px; width:100%;" 
+                                   onfocus="showProjectSelector('payment')"
+                                   readonly>
+                            <input type="hidden" id="paymentProjectId">
+                            <div id="paymentProjectInfo" style="font-size: 12px; color: #666; margin-top: 4px;"></div>
+                        </div>
+                        <input type="number" id="paymentAmount" placeholder="回款金额" step="0.01" min="0" style="padding:6px; width:120px;">
                         <input type="date" id="paymentDate" style="padding:6px;">
+                        <select id="paymentMethod" style="padding:6px;">
+                            <option value="bank">银行转账</option>
+                            <option value="cash">现金</option>
+                            <option value="alipay">支付宝</option>
+                            <option value="wechat">微信</option>
+                            <option value="other">其他</option>
+                        </select>
+                        <input type="text" id="paymentReference" placeholder="凭证号/备注" style="padding:6px; width:150px;">
+                        <input type="text" id="paymentInvoiceNumber" placeholder="关联发票号（可选）" style="padding:6px; width:150px;">
                         <button onclick="addPaymentRecord()" style="padding:6px 12px;">新增回款</button>
-                        <button onclick="loadPaymentRecords(document.getElementById('paymentProjectId').value)" style="padding:6px 12px;">刷新</button>
                     </div>
                     <div id="paymentRecords"></div>
                 </div>
@@ -133,22 +190,69 @@
                 <div class="card" style="margin-bottom:16px;">
                     <div class="card-title">发票管理</div>
                     <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
-                        <select id="invoiceStatus" style="padding:6px;" onchange="loadInvoices()">
-                            <option value="">全部</option>
+                        <input type="month" id="invoiceMonth" style="padding:6px;" onchange="loadInvoiceProjects()">
+                        <select id="invoiceStatusFilter" style="padding:6px;" onchange="loadInvoiceProjects()">
+                            <option value="">全部状态</option>
                             <option value="pending">待开</option>
                             <option value="issued">已开</option>
+                            <option value="paid">已支付</option>
                             <option value="void">作废</option>
                         </select>
-                        <select id="invoiceProjectId" style="padding:6px; min-width:220px;" onchange="loadInvoices()">
-                            <option value="">选择项目</option>
+                        <select id="invoiceTypeFilter" style="padding:6px;" onchange="loadInvoiceProjects()">
+                            <option value="">全部类型</option>
+                            <option value="vat">增值税发票</option>
+                            <option value="normal">普通发票</option>
+                            <option value="other">其他</option>
                         </select>
-                        <input type="text" id="invoiceNumber" placeholder="发票号" style="padding:6px;min-width:120px;">
-                        <input type="number" id="invoiceAmount" placeholder="金额" style="padding:6px; width:120px;">
-                        <input type="date" id="invoiceDate" style="padding:6px;">
-                        <button onclick="addInvoice()" style="padding:6px 12px;">新增发票</button>
-                        <button onclick="loadInvoices()" style="padding:6px 12px;">刷新</button>
+                        <select id="invoiceCustomer" style="padding:6px; min-width:160px;" onchange="loadInvoiceProjects()">
+                            <option value="">全部客户</option>
+                        </select>
+                        <select id="invoiceSales" style="padding:6px; min-width:160px;" onchange="loadInvoiceProjects()">
+                            <option value="">全部销售</option>
+                        </select>
+                        <select id="invoicePageSize" style="padding:6px;" onchange="renderInvoiceProjects()">
+                            <option value="10">每页10</option>
+                            <option value="20">每页20</option>
+                            <option value="50">每页50</option>
+                        </select>
+                        <button onclick="loadInvoiceProjects()" style="padding:6px 12px;">刷新</button>
                     </div>
-                    <div id="invoiceList"></div>
+                    <div id="invoiceProjectsList"></div>
+                </div>
+                
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-title">新增发票</div>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
+                        <div style="position: relative; min-width: 300px;">
+                            <input type="text" id="invoiceProjectSearch" placeholder="搜索项目（编号/名称/客户）" 
+                                   style="padding:6px; width:100%;" 
+                                   onfocus="showProjectSelector('invoice')"
+                                   readonly>
+                            <input type="hidden" id="invoiceProjectId">
+                            <div id="invoiceProjectInfo" style="font-size: 12px; color: #666; margin-top: 4px;"></div>
+                        </div>
+                        <input type="text" id="invoiceNumber" placeholder="发票号" style="padding:6px;min-width:120px;">
+                        <input type="number" id="invoiceAmount" placeholder="金额" step="0.01" min="0" style="padding:6px; width:120px;">
+                        <input type="date" id="invoiceDate" style="padding:6px;">
+                        <select id="invoiceType" style="padding:6px;">
+                            <option value="vat">增值税发票</option>
+                            <option value="normal">普通发票</option>
+                            <option value="other">其他</option>
+                        </select>
+                        <input type="text" id="invoiceNote" placeholder="备注" style="padding:6px; width:150px;">
+                        <button onclick="addInvoice()" style="padding:6px 12px;">新增发票</button>
+                    </div>
+                </div>
+                
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-title">回款与发票对账</div>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
+                        <input type="date" id="reconciliationStartDate" style="padding:6px;" placeholder="开始日期">
+                        <input type="date" id="reconciliationEndDate" style="padding:6px;" placeholder="结束日期">
+                        <button onclick="loadReconciliation()" style="padding:6px 12px;">查询对账</button>
+                        <button onclick="exportReconciliation()" style="padding:6px 12px;">导出对账表</button>
+                    </div>
+                    <div id="reconciliationList"></div>
                 </div>
 
                 <div class="card" style="margin-bottom:16px;">

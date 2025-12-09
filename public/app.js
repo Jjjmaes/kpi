@@ -27,6 +27,12 @@ let allProjectsCache = []; // 缓存项目列表
 let receivablesCache = []; // 缓存应收结果
 let projectPage = 1;
 let receivablePage = 1;
+let paymentRecordsProjectsCache = []; // 缓存回款记录项目列表
+let paymentRecordsProjectsPage = 1;
+let expandedPaymentProjectId = null; // 当前展开显示回款记录的项目ID
+let invoiceProjectsCache = []; // 缓存发票项目列表
+let invoiceProjectsPage = 1;
+let expandedInvoiceProjectId = null; // 当前展开显示发票的项目ID
 let languagesCache = [];
 
 // 初始化
@@ -173,12 +179,10 @@ function showMainApp() {
     loadProjects();
     loadKPI();
     if (isAdmin || isFinance) {
-        const financeMonthInput = document.getElementById('financeMonth');
-        if (financeMonthInput && !financeMonthInput.value) {
-            financeMonthInput.value = new Date().toISOString().slice(0, 7);
-        }
+        // 不自动设置月份，让用户自己选择
         loadReceivables();
-        loadInvoices();
+        loadPaymentRecordsProjects(); // 加载回款记录项目列表
+        loadInvoiceProjects(); // 加载发票项目列表
         loadPendingKpi();
         loadFinanceSummary();
     }
@@ -197,6 +201,23 @@ function showSection(sectionId) {
     document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
     document.getElementById(sectionId).classList.add('active');
     event.target.classList.add('active');
+    
+    // 切换到财务管理时，确保筛选条件已填充
+    if (sectionId === 'finance') {
+        const isAdmin = currentUser?.roles?.includes('admin');
+        const isFinance = currentUser?.roles?.includes('finance');
+        if ((isAdmin || isFinance) && (!allUsers?.length || !allCustomers?.length)) {
+            // 如果数据还没加载，重新加载
+            loadUsersForSelect().then(() => {
+                loadCustomers().then(() => {
+                    fillFinanceFilters();
+                });
+            });
+        } else if (isAdmin || isFinance) {
+            // 如果数据已加载，直接填充
+            fillFinanceFilters();
+        }
+    }
 }
 
 // ==================== 语种管理 ====================
@@ -433,12 +454,18 @@ async function loadUsersForSelect() {
         });
         const data = await response.json();
         if (data.success) {
+            // 保存到全局变量，供其他功能使用
+            allUsers = data.data;
             const select = document.getElementById('kpiUserSelect');
-            select.innerHTML = '<option value="">全部用户</option>' +
-                data.data.map(u => `<option value="${u._id}">${u.name}</option>`).join('');
+            if (select) {
+                select.innerHTML = '<option value="">全部用户</option>' +
+                    data.data.map(u => `<option value="${u._id}">${u.name}</option>`).join('');
+            }
         }
+        return data;
     } catch (error) {
         console.error('加载用户列表失败:', error);
+        return { success: false };
     }
 }
 
@@ -1041,17 +1068,189 @@ function fillFinanceFilters() {
     }
     const salesSel = document.getElementById('financeSales');
     if (salesSel && allUsers?.length) {
-        const sales = allUsers.filter(u => (u.roles || []).includes('sales'));
-        salesSel.innerHTML = '<option value="">全部销售</option>' + sales.map(s => `<option value="${s._id}">${s.name}</option>`).join('');
+        // 包含销售和兼职销售
+        const sales = allUsers.filter(u => {
+            const roles = u.roles || [];
+            return roles.includes('sales') || roles.includes('part_time_sales');
+        });
+        salesSel.innerHTML = '<option value="">全部销售</option>' + sales.map(s => `<option value="${s._id}">${s.name}${(s.roles || []).includes('part_time_sales') ? ' (兼职)' : ''}</option>`).join('');
+    } else if (salesSel && !allUsers?.length) {
+        // 如果用户列表还没加载，显示提示
+        salesSel.innerHTML = '<option value="">加载中...</option>';
+    }
+    
+    // 填充回款记录部分的筛选下拉框
+    const paymentCustSel = document.getElementById('paymentCustomer');
+    if (paymentCustSel) {
+        paymentCustSel.innerHTML = '<option value="">全部客户</option>' + (allCustomers || []).map(c => `<option value="${c._id}">${c.name}</option>`).join('');
+    }
+    const paymentSalesSel = document.getElementById('paymentSales');
+    if (paymentSalesSel && allUsers?.length) {
+        // 包含销售和兼职销售
+        const sales = allUsers.filter(u => {
+            const roles = u.roles || [];
+            return roles.includes('sales') || roles.includes('part_time_sales');
+        });
+        paymentSalesSel.innerHTML = '<option value="">全部销售</option>' + sales.map(s => `<option value="${s._id}">${s.name}${(s.roles || []).includes('part_time_sales') ? ' (兼职)' : ''}</option>`).join('');
+    } else if (paymentSalesSel && !allUsers?.length) {
+        // 如果用户列表还没加载，显示提示
+        paymentSalesSel.innerHTML = '<option value="">加载中...</option>';
+    }
+    
+    // 填充发票管理部分的筛选下拉框
+    const invoiceCustSel = document.getElementById('invoiceCustomer');
+    if (invoiceCustSel) {
+        invoiceCustSel.innerHTML = '<option value="">全部客户</option>' + (allCustomers || []).map(c => `<option value="${c._id}">${c.name}</option>`).join('');
+    }
+    const invoiceSalesSel = document.getElementById('invoiceSales');
+    if (invoiceSalesSel && allUsers?.length) {
+        // 包含销售和兼职销售
+        const sales = allUsers.filter(u => {
+            const roles = u.roles || [];
+            return roles.includes('sales') || roles.includes('part_time_sales');
+        });
+        invoiceSalesSel.innerHTML = '<option value="">全部销售</option>' + sales.map(s => `<option value="${s._id}">${s.name}${(s.roles || []).includes('part_time_sales') ? ' (兼职)' : ''}</option>`).join('');
+    } else if (invoiceSalesSel && !allUsers?.length) {
+        // 如果用户列表还没加载，显示提示
+        invoiceSalesSel.innerHTML = '<option value="">加载中...</option>';
     }
 }
 
 function fillFinanceProjectSelects() {
-    const paymentSel = document.getElementById('paymentProjectId');
-    const invoiceSel = document.getElementById('invoiceProjectId');
-    const options = (allProjectsCache || []).map(p => `<option value="${p._id}">${p.projectNumber || p.projectName}</option>`).join('');
-    if (paymentSel) paymentSel.innerHTML = '<option value="">选择项目</option>' + options;
-    if (invoiceSel) invoiceSel.innerHTML = '<option value="">选择项目</option>' + options;
+    // 不再需要填充下拉框，改为使用搜索选择器
+}
+
+// 显示项目选择器模态框
+async function showProjectSelector(type) {
+    // 确保项目列表已加载
+    if (allProjectsCache.length === 0) {
+        try {
+            const response = await fetch(`${API_BASE}/projects`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json();
+            if (data.success) {
+                allProjectsCache = data.data;
+            }
+        } catch (error) {
+            showToast('加载项目列表失败: ' + error.message, 'error');
+            return;
+        }
+    }
+    
+    const content = `
+        <div style="max-width: 800px; width: 90vw;">
+            <div style="margin-bottom: 16px;">
+                <div style="display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap;">
+                    <input type="text" id="projectSelectorSearch" placeholder="搜索项目编号、名称或客户..." 
+                           style="flex: 1; min-width: 200px; padding: 8px; border: 1px solid #ddd; border-radius: 4px;"
+                           onkeyup="filterProjectSelector()">
+                    <select id="projectSelectorStatus" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;" onchange="filterProjectSelector()">
+                        <option value="">全部状态</option>
+                        <option value="pending">待开始</option>
+                        <option value="in_progress">进行中</option>
+                        <option value="completed">已完成</option>
+                        <option value="cancelled">已取消</option>
+                    </select>
+                    <select id="projectSelectorBusinessType" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;" onchange="filterProjectSelector()">
+                        <option value="">全部业务</option>
+                        <option value="translation">笔译</option>
+                        <option value="interpretation">口译</option>
+                        <option value="transcription">转录</option>
+                        <option value="localization">本地化</option>
+                        <option value="other">其他</option>
+                    </select>
+                </div>
+                <div style="font-size: 12px; color: #666;">
+                    共 ${allProjectsCache.length} 个项目，使用搜索和筛选快速找到目标项目
+                </div>
+            </div>
+            <div id="projectSelectorList" style="max-height: 400px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px;">
+                ${renderProjectSelectorList(allProjectsCache, type)}
+            </div>
+        </div>
+    `;
+    
+    showModal('选择项目', content);
+    
+    // 存储当前选择类型
+    window.currentProjectSelectorType = type;
+}
+
+function renderProjectSelectorList(projects, type) {
+    if (projects.length === 0) {
+        return '<div style="padding: 20px; text-align: center; color: #999;">暂无项目</div>';
+    }
+    
+    return `
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead style="background: #f5f5f5; position: sticky; top: 0;">
+                <tr>
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">项目编号</th>
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">项目名称</th>
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">客户</th>
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">业务类型</th>
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">状态</th>
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">金额</th>
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #ddd;">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${projects.map(p => `
+                    <tr style="border-bottom: 1px solid #eee; cursor: pointer;" 
+                        onmouseover="this.style.background='#f9f9f9'" 
+                        onmouseout="this.style.background=''"
+                        onclick="selectProject('${p._id}', '${(p.projectNumber || p.projectName || '').replace(/'/g, "\\'")}', '${(p.customerId?.name || p.clientName || '').replace(/'/g, "\\'")}', '${type}')">
+                        <td style="padding: 10px;">${p.projectNumber || '-'}</td>
+                        <td style="padding: 10px;">${p.projectName || '-'}</td>
+                        <td style="padding: 10px;">${p.customerId?.name || p.clientName || '-'}</td>
+                        <td style="padding: 10px;">${getBusinessTypeText(p.businessType)}</td>
+                        <td style="padding: 10px;"><span class="badge ${getStatusBadgeClass(p.status)}">${getStatusText(p.status)}</span></td>
+                        <td style="padding: 10px;">¥${(p.projectAmount || 0).toLocaleString()}</td>
+                        <td style="padding: 10px;">
+                            <button class="btn-small" onclick="event.stopPropagation(); selectProject('${p._id}', '${(p.projectNumber || p.projectName || '').replace(/'/g, "\\'")}', '${(p.customerId?.name || p.clientName || '').replace(/'/g, "\\'")}', '${type}')">选择</button>
+                        </td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+}
+
+function filterProjectSelector() {
+    const search = document.getElementById('projectSelectorSearch')?.value?.toLowerCase() || '';
+    const status = document.getElementById('projectSelectorStatus')?.value || '';
+    const businessType = document.getElementById('projectSelectorBusinessType')?.value || '';
+    const type = window.currentProjectSelectorType || 'payment';
+    
+    const filtered = allProjectsCache.filter(p => {
+        const matchesSearch = !search || 
+            (p.projectNumber || '').toLowerCase().includes(search) ||
+            (p.projectName || '').toLowerCase().includes(search) ||
+            ((p.customerId?.name || p.clientName || '')).toLowerCase().includes(search);
+        const matchesStatus = !status || p.status === status;
+        const matchesBusinessType = !businessType || p.businessType === businessType;
+        return matchesSearch && matchesStatus && matchesBusinessType;
+    });
+    
+    const listContainer = document.getElementById('projectSelectorList');
+    if (listContainer) {
+        listContainer.innerHTML = renderProjectSelectorList(filtered, type);
+    }
+}
+
+function selectProject(projectId, projectName, customerName, type) {
+    if (type === 'payment') {
+        document.getElementById('paymentProjectId').value = projectId;
+        document.getElementById('paymentProjectSearch').value = `${projectName} - ${customerName}`;
+        document.getElementById('paymentProjectInfo').textContent = `已选择：${projectName}`;
+    } else if (type === 'invoice') {
+        document.getElementById('invoiceProjectId').value = projectId;
+        document.getElementById('invoiceProjectSearch').value = `${projectName} - ${customerName}`;
+        document.getElementById('invoiceProjectInfo').textContent = `已选择：${projectName}`;
+        // 不需要自动刷新，用户点击新增发票时会刷新
+    }
+    closeModal();
 }
 
 async function showCreateProjectModal() {
@@ -3561,10 +3760,14 @@ function renderDashboardCards(data) {
 async function loadReceivables() {
     const month = document.getElementById('financeMonth')?.value || '';
     const status = document.getElementById('financeStatus')?.value || '';
+    const paymentStatus = document.getElementById('financePaymentStatus')?.value || '';
+    const hasInvoice = document.getElementById('financeHasInvoice')?.value || '';
     const customerId = document.getElementById('financeCustomer')?.value || '';
     const salesId = document.getElementById('financeSales')?.value || '';
     const params = new URLSearchParams();
     if (status) params.append('status', status);
+    if (paymentStatus) params.append('paymentStatus', paymentStatus);
+    if (hasInvoice) params.append('hasInvoice', hasInvoice);
     // month 可用于到期过滤
     if (month) {
         const [y, m] = month.split('-');
@@ -3581,7 +3784,13 @@ async function loadReceivables() {
         showAlert('receivablesList', data.message || '加载失败', 'error');
         return;
     }
+    console.log('应收对账API返回:', {
+        success: data.success,
+        dataLength: data.data?.length || 0,
+        firstItem: data.data?.[0] || null
+    });
     receivablesCache = data.data || [];
+    console.log('receivablesCache长度:', receivablesCache.length);
     receivablePage = 1;
     renderReceivables();
 }
@@ -3610,13 +3819,32 @@ function exportReceivables() {
 }
 
 function renderReceivables() {
+    console.log('renderReceivables被调用, receivablesCache长度:', receivablesCache.length);
     const pageSizeSel = document.getElementById('financePageSize');
     const pageSize = pageSizeSel ? parseInt(pageSizeSel.value || '10', 10) : 10;
     const totalPages = Math.max(1, Math.ceil(receivablesCache.length / pageSize));
     if (receivablePage > totalPages) receivablePage = totalPages;
     const start = (receivablePage - 1) * pageSize;
     const pageData = receivablesCache.slice(start, start + pageSize);
-    const rows = pageData.map(r => `
+    console.log('分页数据:', {
+        totalPages,
+        currentPage: receivablePage,
+        pageSize,
+        start,
+        pageDataLength: pageData.length,
+        firstItem: pageData[0] || null
+    });
+    const paymentStatusText = {
+        'unpaid': '未支付',
+        'partially_paid': '部分支付',
+        'paid': '已支付'
+    };
+    
+    const rows = pageData.map(r => {
+        const paymentStatus = r.paymentStatus || 'unpaid';
+        const paymentStatusBadge = paymentStatus === 'paid' ? 'badge-success' : 
+                                   paymentStatus === 'partially_paid' ? 'badge-warning' : 'badge-danger';
+        return `
         <tr class="${r.overdue ? 'row-overdue' : ''}">
             <td>${r.projectNumber || '-'}</td>
             <td>${r.projectName}</td>
@@ -3626,9 +3854,21 @@ function renderReceivables() {
             <td>¥${(r.receivedAmount || 0).toLocaleString()}</td>
             <td>¥${(r.outstanding || 0).toLocaleString()}</td>
             <td>${r.expectedAt ? new Date(r.expectedAt).toLocaleDateString() : '-'}</td>
-            <td>${r.isFullyPaid ? '<span class="badge badge-success">已回款</span>' : (r.overdue ? '<span class="badge badge-danger">逾期</span>' : '<span class="badge badge-warning">未回款</span>')}</td>
+            <td>
+                <span class="badge ${paymentStatusBadge}">
+                    ${paymentStatusText[paymentStatus] || paymentStatus}
+                </span>
+            </td>
+            <td>
+                ${r.hasInvoice ? 
+                    `<span class="badge badge-info">已开票${r.invoiceCount > 0 ? `(${r.invoiceCount})` : ''}</span>` : 
+                    '<span class="badge badge-secondary">未开票</span>'
+                }
+            </td>
+            <td>${r.overdue ? '<span class="badge badge-danger">逾期</span>' : ''}</td>
         </tr>
-    `).join('');
+    `;
+    }).join('');
     document.getElementById('receivablesList').innerHTML = `
         <table class="table-sticky">
             <thead>
@@ -3641,11 +3881,13 @@ function renderReceivables() {
                     <th>已回款</th>
                     <th>未回款</th>
                     <th>约定回款日</th>
-                    <th>状态</th>
+                    <th>回款状态</th>
+                    <th>发票状态</th>
+                    <th>逾期</th>
                 </tr>
             </thead>
             <tbody>
-                ${rows || '<tr><td colspan="7" style="text-align:center;">暂无数据</td></tr>'}
+                ${rows || '<tr><td colspan="11" style="text-align:center;">暂无数据</td></tr>'}
             </tbody>
         </table>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
@@ -3665,9 +3907,11 @@ function jumpReceivablePage(val, total) {
 
 async function loadInvoices() {
     const status = document.getElementById('invoiceStatus')?.value || '';
+    const type = document.getElementById('invoiceTypeFilter')?.value || '';
     const projectId = document.getElementById('invoiceProjectId')?.value || '';
     const params = new URLSearchParams();
     if (status) params.append('status', status);
+    if (type) params.append('type', type);
     if (projectId) params.append('projectId', projectId);
     const res = await fetch(`${API_BASE}/finance/invoice?${params.toString()}`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -3677,23 +3921,50 @@ async function loadInvoices() {
             showAlert('invoiceList', data.message || '加载失败', 'error');
         return;
     }
-    const rows = data.data.map(i => `
+    // 获取项目信息以便显示项目名称
+    const projectMap = {};
+    if (allProjectsCache.length > 0) {
+        allProjectsCache.forEach(p => {
+            projectMap[p._id] = p;
+        });
+    }
+    
+    const rows = data.data.map(i => {
+        // 优先使用后端返回的项目信息
+        const project = i.projectId && typeof i.projectId === 'object' ? i.projectId : projectMap[i.projectId];
+        const projectDisplay = project ? 
+            `${project.projectNumber || ''}${project.projectNumber ? ' - ' : ''}${project.projectName || ''}` : 
+            (i.projectId?._id || i.projectId || '');
+        
+        const statusBadge = i.status === 'paid' ? 'badge-success' : 
+                           i.status === 'issued' ? 'badge-info' : 
+                           i.status === 'void' ? 'badge-danger' : 'badge-warning';
+        const statusText = i.status === 'paid' ? '已支付' : 
+                          i.status === 'issued' ? '已开' : 
+                          i.status === 'void' ? '作废' : '待开';
+        
+        const typeText = i.type === 'vat' ? '增值税' : 
+                        i.type === 'normal' ? '普通' : 
+                        i.type === 'other' ? '其他' : i.type || '-';
+        
+        return `
         <tr>
-            <td>${i.invoiceNumber}</td>
-            <td>${i.projectId || ''}</td>
+            <td>${i.invoiceNumber || '-'}</td>
+            <td>${projectDisplay}</td>
             <td>¥${(i.amount || 0).toLocaleString()}</td>
             <td>${i.issueDate ? new Date(i.issueDate).toLocaleDateString() : '-'}</td>
-            <td>${i.status}</td>
-            <td>${i.type || '-'}</td>
-            <td>${i.note || ''}</td>
+            <td><span class="badge ${statusBadge}">${statusText}</span></td>
+            <td>${typeText}</td>
+            <td>${i.note || '-'}</td>
         </tr>
-    `).join('');
+    `;
+    }).join('');
     document.getElementById('invoiceList').innerHTML = `
-        <table>
+        <table class="table-sticky">
             <thead>
                 <tr>
                     <th>发票号</th>
-                    <th>项目ID</th>
+                    <th>项目</th>
                     <th>金额</th>
                     <th>开票日期</th>
                     <th>状态</th>
@@ -3714,16 +3985,63 @@ async function addInvoice() {
     const amount = document.getElementById('invoiceAmount')?.value;
     const issueDate = document.getElementById('invoiceDate')?.value;
     if (!projectId || !invoiceNumber || !amount || !issueDate) {
-        alert('请填写项目ID、发票号、金额、开票日期');
+        showToast('请选择项目、填写发票号、金额和开票日期', 'error');
         return;
     }
-    const payload = {
-        invoiceNumber,
-        amount: parseFloat(amount),
-        issueDate,
-        status: document.getElementById('invoiceStatus')?.value || 'issued'
-    };
+    
+    const invoiceAmount = parseFloat(amount);
+    if (isNaN(invoiceAmount) || invoiceAmount <= 0) {
+        showToast('发票金额必须大于0', 'error');
+        return;
+    }
+    
     try {
+        // 先获取项目信息
+        const projectRes = await fetch(`${API_BASE}/projects/${projectId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const projectData = await projectRes.json();
+        if (!projectData.success) {
+            showToast('获取项目信息失败', 'error');
+            return;
+        }
+        const project = projectData.data;
+        const projectAmount = project.projectAmount || 0;
+        
+        // 获取该项目的所有历史发票（排除作废的）
+        const invoiceRes = await fetch(`${API_BASE}/finance/invoice?projectId=${projectId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const invoiceData = await invoiceRes.json();
+        
+        if (invoiceData.success) {
+            // 计算累计开票金额（排除作废的发票）
+            const existingInvoices = invoiceData.data || [];
+            const totalInvoiceAmount = existingInvoices
+                .filter(inv => inv.status !== 'void') // 排除作废的发票
+                .reduce((sum, inv) => sum + (parseFloat(inv.amount) || 0), 0);
+            
+            // 检查累计开票金额（包括本次）是否超过项目金额
+            const newTotalAmount = totalInvoiceAmount + invoiceAmount;
+            if (newTotalAmount > projectAmount) {
+                const remaining = projectAmount - totalInvoiceAmount;
+                showToast(
+                    `累计开票金额不能超过项目金额！\n项目金额：¥${projectAmount.toLocaleString()}\n已开票金额：¥${totalInvoiceAmount.toLocaleString()}\n本次开票：¥${invoiceAmount.toLocaleString()}\n最多可开票：¥${Math.max(0, remaining).toLocaleString()}`,
+                    'error'
+                );
+                return;
+            }
+        }
+        
+        const payload = {
+            invoiceNumber,
+            amount: invoiceAmount,
+            issueDate,
+            status: 'issued',
+            type: document.getElementById('invoiceType')?.value || 'vat',
+            note: document.getElementById('invoiceNote')?.value || ''
+        };
+        
         const res = await fetch(`${API_BASE}/finance/invoice/${projectId}`, {
             method: 'POST',
             headers: {
@@ -3737,7 +4055,12 @@ async function addInvoice() {
             showToast(data.message || '新增失败', 'error');
             return;
         }
-        loadInvoices();
+        // 清空表单
+        document.getElementById('invoiceNumber').value = '';
+        document.getElementById('invoiceAmount').value = '';
+        document.getElementById('invoiceDate').value = '';
+        document.getElementById('invoiceNote').value = '';
+        loadInvoiceProjects(); // 刷新发票项目列表
         showToast('发票已新增', 'success');
     } catch (error) {
         showToast('新增失败: ' + error.message, 'error');
@@ -3748,13 +4071,20 @@ async function addPaymentRecord() {
     const projectId = document.getElementById('paymentProjectId')?.value;
     const amount = document.getElementById('paymentAmount')?.value;
     const receivedAt = document.getElementById('paymentDate')?.value;
+    const method = document.getElementById('paymentMethod')?.value || 'bank';
+    const reference = document.getElementById('paymentReference')?.value || '';
+    const invoiceNumber = document.getElementById('paymentInvoiceNumber')?.value || '';
+    
     if (!projectId || !amount || !receivedAt) {
-        alert('请填写项目ID、金额、回款日期');
+        showToast('请选择项目、填写金额和回款日期', 'error');
         return;
     }
     const payload = {
         amount: parseFloat(amount),
-        receivedAt
+        receivedAt,
+        method,
+        reference,
+        invoiceNumber
     };
     try {
         const res = await fetch(`${API_BASE}/finance/payment/${projectId}`, {
@@ -3771,9 +4101,14 @@ async function addPaymentRecord() {
             return;
         }
         showToast('回款已记录', 'success');
+        // 清空表单
+        document.getElementById('paymentAmount').value = '';
+        document.getElementById('paymentReference').value = '';
+        document.getElementById('paymentInvoiceNumber').value = '';
         // 重新加载应收与回款列表
         loadReceivables();
         loadPaymentRecords(projectId);
+        loadPaymentRecordsProjects(); // 刷新回款记录项目列表
     } catch (error) {
         showToast('新增失败: ' + error.message, 'error');
     }
@@ -3781,11 +4116,15 @@ async function addPaymentRecord() {
 
 async function loadPaymentRecords(projectId) {
     if (!projectId) {
-        document.getElementById('paymentRecords').innerHTML = '<div class="card-desc">请在上方填写项目ID后点击新增或刷新应收以查看</div>';
+        document.getElementById('paymentRecords').innerHTML = '<div class="card-desc">请在上方选择项目后点击新增或刷新以查看回款记录</div>';
         return;
     }
     try {
-        const res = await fetch(`${API_BASE}/finance/payment/${projectId}`, {
+        const paymentStatus = document.getElementById('paymentRecordStatus')?.value || '';
+        const params = new URLSearchParams();
+        if (paymentStatus) params.append('paymentStatus', paymentStatus);
+        
+        const res = await fetch(`${API_BASE}/finance/payment/${projectId}?${params.toString()}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await res.json();
@@ -3793,26 +4132,131 @@ async function loadPaymentRecords(projectId) {
             showAlert('paymentRecords', data.message || '加载失败', 'error');
             return;
         }
+        // 获取项目信息以显示回款状态
+        const projectRes = await fetch(`${API_BASE}/projects/${projectId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const projectData = await projectRes.json();
+        const project = projectData.success ? projectData.data : null;
+        
+        const paymentStatusText = {
+            'unpaid': '未支付',
+            'partially_paid': '部分支付',
+            'paid': '已支付'
+        };
+        
+        // 如果没有数据，显示提示信息
+        if (!data.data || data.data.length === 0) {
+            const filterStatus = document.getElementById('paymentRecordStatus')?.value || '';
+            const statusText = filterStatus === 'unpaid' ? '未支付' : 
+                              filterStatus === 'partially_paid' ? '部分支付' : 
+                              filterStatus === 'paid' ? '已支付' : '';
+            const totalReceived = 0;
+            const projectAmount = project?.projectAmount || 0;
+            const remainingAmount = Math.max(0, projectAmount - totalReceived);
+            const projectPaymentStatus = project?.payment?.paymentStatus || 'unpaid';
+            
+            document.getElementById('paymentRecords').innerHTML = `
+                ${project ? `
+                <div style="background: #f0f9ff; padding: 12px; border-radius: 4px; margin-bottom: 12px; display: flex; gap: 20px; flex-wrap: wrap;">
+                    <div>
+                        <div style="font-size: 12px; color: #666;">项目金额</div>
+                        <div style="font-size: 16px; font-weight: bold;">¥${projectAmount.toLocaleString()}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666;">已回款</div>
+                        <div style="font-size: 16px; font-weight: bold; color: #10b981;">¥${totalReceived.toLocaleString()}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666;">剩余应收</div>
+                        <div style="font-size: 16px; font-weight: bold; color: ${remainingAmount > 0 ? '#f59e0b' : '#10b981'};">¥${remainingAmount.toLocaleString()}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666;">回款状态</div>
+                        <div>
+                            <span class="badge ${projectPaymentStatus === 'paid' ? 'badge-success' : projectPaymentStatus === 'partially_paid' ? 'badge-warning' : 'badge-danger'}">
+                                ${paymentStatusText[projectPaymentStatus] || projectPaymentStatus}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+                <div class="card-desc">${filterStatus ? `没有${statusText}状态的回款记录` : '暂无回款记录'}</div>
+            `;
+            return;
+        }
+        
         const rows = data.data.map(r => `
             <tr>
                 <td>${new Date(r.receivedAt).toLocaleDateString()}</td>
                 <td>¥${(r.amount || 0).toLocaleString()}</td>
-                <td>${r.method || '-'}</td>
-                <td>${r.reference || ''}</td>
-                <td>${r.note || ''}</td>
-                <td>${r.recordedBy || ''}</td>
+                <td>${r.method === 'bank' ? '银行转账' : r.method === 'cash' ? '现金' : r.method === 'alipay' ? '支付宝' : r.method === 'wechat' ? '微信' : r.method || '-'}</td>
+                <td>${r.reference || '-'}</td>
+                <td>${r.invoiceNumber || '-'}</td>
+                <td>${r.recordedBy?.name || '-'}</td>
                 <td><button class="btn-small btn-danger" onclick="removePaymentRecord('${r._id}', '${projectId}')">删除</button></td>
             </tr>
         `).join('');
+        
+        const totalReceived = data.data.reduce((sum, r) => sum + (r.amount || 0), 0);
+        const projectAmount = project?.projectAmount || 0;
+        const remainingAmount = Math.max(0, projectAmount - totalReceived);
+        const projectPaymentStatus = project?.payment?.paymentStatus || 'unpaid';
+        
+        // 获取当前筛选条件
+        const currentFilterStatus = document.getElementById('paymentRecordStatus')?.value || '';
+        const filterStatusText = currentFilterStatus === 'unpaid' ? '未支付' : 
+                                currentFilterStatus === 'partially_paid' ? '部分支付' : 
+                                currentFilterStatus === 'paid' ? '已支付' : '全部';
+        
         document.getElementById('paymentRecords').innerHTML = `
-            <table>
+            ${project ? `
+            <div style="background: #f0f9ff; padding: 12px; border-radius: 4px; margin-bottom: 12px;">
+                <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 8px;">
+                    <div>
+                        <div style="font-size: 12px; color: #666;">项目金额</div>
+                        <div style="font-size: 16px; font-weight: bold;">¥${projectAmount.toLocaleString()}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666;">已回款</div>
+                        <div style="font-size: 16px; font-weight: bold; color: #10b981;">¥${totalReceived.toLocaleString()}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666;">剩余应收</div>
+                        <div style="font-size: 16px; font-weight: bold; color: ${remainingAmount > 0 ? '#f59e0b' : '#10b981'};">¥${remainingAmount.toLocaleString()}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666;">回款状态</div>
+                        <div>
+                            <span class="badge ${projectPaymentStatus === 'paid' ? 'badge-success' : projectPaymentStatus === 'partially_paid' ? 'badge-warning' : 'badge-danger'}">
+                                ${paymentStatusText[projectPaymentStatus] || projectPaymentStatus}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid #e0e7ff;">
+                    <div style="font-size: 12px; color: #666;">
+                        筛选条件: <span style="color: #333; font-weight: 500;">${filterStatusText}</span>
+                    </div>
+                    <div style="font-size: 12px; color: #666;">
+                        显示结果: <span style="color: #333; font-weight: 500;">共 ${data.data.length} 条回款记录</span>
+                    </div>
+                    ${currentFilterStatus ? `
+                    <button class="btn-small" onclick="document.getElementById('paymentRecordStatus').value=''; loadPaymentRecords('${projectId}');" style="padding: 4px 8px; font-size: 12px;">
+                        清除筛选
+                    </button>
+                    ` : ''}
+                </div>
+            </div>
+            ` : ''}
+            <table class="table-sticky">
                 <thead>
                     <tr>
                         <th>回款日期</th>
                         <th>金额</th>
-                        <th>方式</th>
-                        <th>凭证</th>
-                        <th>备注</th>
+                        <th>支付方式</th>
+                        <th>凭证号</th>
+                        <th>关联发票号</th>
                         <th>记录人</th>
                         <th>操作</th>
                     </tr>
@@ -3842,9 +4286,611 @@ async function removePaymentRecord(recordId, projectId) {
         showToast('已删除回款记录', 'success');
         loadPaymentRecords(projectId);
         loadReceivables();
+        loadPaymentRecordsProjects(); // 刷新项目列表
     } catch (error) {
         alert('删除失败: ' + error.message);
     }
+}
+
+// 加载回款记录项目列表（类似应收对账）
+async function loadPaymentRecordsProjects() {
+    const month = document.getElementById('paymentMonth')?.value || '';
+    const status = document.getElementById('paymentStatusFilter')?.value || '';
+    const paymentStatus = document.getElementById('paymentProjectPaymentStatus')?.value || '';
+    const customerId = document.getElementById('paymentCustomer')?.value || '';
+    const salesId = document.getElementById('paymentSales')?.value || '';
+    const params = new URLSearchParams();
+    if (status) params.append('status', status);
+    if (paymentStatus) params.append('paymentStatus', paymentStatus);
+    // month 可用于到期过滤
+    if (month) {
+        const [y, m] = month.split('-');
+        const end = new Date(y, m, 0).toISOString();
+        params.append('dueBefore', end);
+    }
+    if (customerId) params.append('customerId', customerId);
+    if (salesId) params.append('salesId', salesId);
+    const res = await fetch(`${API_BASE}/finance/receivables?${params.toString()}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (!data.success) {
+        showAlert('paymentProjectsList', data.message || '加载失败', 'error');
+        return;
+    }
+    paymentRecordsProjectsCache = data.data || [];
+    paymentRecordsProjectsPage = 1;
+    renderPaymentRecordsProjects();
+}
+
+// 渲染回款记录项目列表
+function renderPaymentRecordsProjects() {
+    const pageSizeSel = document.getElementById('paymentPageSize');
+    const pageSize = pageSizeSel ? parseInt(pageSizeSel.value || '10', 10) : 10;
+    const totalPages = Math.max(1, Math.ceil(paymentRecordsProjectsCache.length / pageSize));
+    if (paymentRecordsProjectsPage > totalPages) paymentRecordsProjectsPage = totalPages;
+    const start = (paymentRecordsProjectsPage - 1) * pageSize;
+    const pageData = paymentRecordsProjectsCache.slice(start, start + pageSize);
+    const paymentStatusText = {
+        'unpaid': '未支付',
+        'partially_paid': '部分支付',
+        'paid': '已支付'
+    };
+    
+    const rows = pageData.map(r => {
+        const paymentStatus = r.paymentStatus || 'unpaid';
+        const paymentStatusBadge = paymentStatus === 'paid' ? 'badge-success' : 
+                                   paymentStatus === 'partially_paid' ? 'badge-warning' : 'badge-danger';
+        const projectId = r.id || r.projectId; // 后端返回的是 id
+        const isExpanded = expandedPaymentProjectId === projectId;
+        return `
+        <tr class="${r.overdue ? 'row-overdue' : ''}">
+            <td>${r.projectNumber || '-'}</td>
+            <td>${r.projectName}</td>
+            <td>${r.customerName || ''}</td>
+            <td>${r.salesName || ''}</td>
+            <td>¥${(r.projectAmount || 0).toLocaleString()}</td>
+            <td>¥${(r.receivedAmount || 0).toLocaleString()}</td>
+            <td>¥${(r.outstanding || 0).toLocaleString()}</td>
+            <td>${r.expectedAt ? new Date(r.expectedAt).toLocaleDateString() : '-'}</td>
+            <td>
+                <span class="badge ${paymentStatusBadge}">
+                    ${paymentStatusText[paymentStatus] || paymentStatus}
+                </span>
+            </td>
+            <td>
+                <button class="btn-small" onclick="togglePaymentRecords('${projectId}')" style="padding: 4px 8px;">
+                    ${isExpanded ? '收起' : '查看回款记录'}
+                </button>
+            </td>
+        </tr>
+        ${isExpanded ? `
+        <tr id="payment-records-${projectId}">
+            <td colspan="10" style="padding: 0;">
+                <div id="payment-records-detail-${projectId}" style="padding: 16px; background: #f9fafb;">
+                    <div style="text-align: center; color: #666;">加载中...</div>
+                </div>
+            </td>
+        </tr>
+        ` : ''}
+    `;
+    }).join('');
+    
+    // 获取当前筛选条件
+    const month = document.getElementById('paymentMonth')?.value || '';
+    const status = document.getElementById('paymentStatusFilter')?.value || '';
+    const paymentStatus = document.getElementById('paymentProjectPaymentStatus')?.value || '';
+    const customerId = document.getElementById('paymentCustomer')?.value || '';
+    const salesId = document.getElementById('paymentSales')?.value || '';
+    
+    let filterText = [];
+    if (month) filterText.push(`月份: ${month}`);
+    if (status) {
+        const statusText = { 'pending': '待开始', 'in_progress': '进行中', 'completed': '已完成', 'cancelled': '已取消' };
+        filterText.push(`状态: ${statusText[status] || status}`);
+    }
+    if (paymentStatus) filterText.push(`回款状态: ${paymentStatusText[paymentStatus] || paymentStatus}`);
+    if (customerId) {
+        const customer = allCustomers.find(c => c._id === customerId);
+        if (customer) filterText.push(`客户: ${customer.name}`);
+    }
+    if (salesId) {
+        const sales = allUsers.find(u => u._id === salesId);
+        if (sales) filterText.push(`销售: ${sales.name}`);
+    }
+    
+    document.getElementById('paymentProjectsList').innerHTML = `
+        ${filterText.length > 0 ? `
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 12px; background: #f0f9ff; border-radius: 4px; margin-bottom: 12px;">
+            <div style="font-size: 12px; color: #666;">
+                筛选条件: <span style="color: #333; font-weight: 500;">${filterText.join(' | ')}</span>
+            </div>
+            <div style="font-size: 12px; color: #666;">
+                显示结果: <span style="color: #333; font-weight: 500;">共 ${paymentRecordsProjectsCache.length} 个项目</span>
+            </div>
+            <button class="btn-small" onclick="clearPaymentRecordsFilters()" style="padding: 4px 8px; font-size: 12px;">
+                清除筛选
+            </button>
+        </div>
+        ` : ''}
+        <table class="table-sticky">
+            <thead>
+                <tr>
+                    <th>项目编号</th>
+                    <th>项目名称</th>
+                    <th>客户</th>
+                    <th>销售</th>
+                    <th>项目金额</th>
+                    <th>已回款</th>
+                    <th>未回款</th>
+                    <th>约定回款日</th>
+                    <th>回款状态</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${rows || '<tr><td colspan="10" style="text-align:center;">暂无数据</td></tr>'}
+            </tbody>
+        </table>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
+            <button class="btn-small" ${paymentRecordsProjectsPage<=1?'disabled':''} onclick="paymentRecordsProjectsPage=Math.max(1, paymentRecordsProjectsPage-1);renderPaymentRecordsProjects();">上一页</button>
+            <span style="align-self:center;">${paymentRecordsProjectsPage} / ${totalPages}</span>
+            <button class="btn-small" ${paymentRecordsProjectsPage>=totalPages?'disabled':''} onclick="paymentRecordsProjectsPage=Math.min(${totalPages}, paymentRecordsProjectsPage+1);renderPaymentRecordsProjects();">下一页</button>
+            <input type="number" min="1" max="${totalPages}" value="${paymentRecordsProjectsPage}" style="width:70px;padding:6px;" onchange="jumpPaymentRecordsProjectsPage(this.value, ${totalPages})">
+        </div>
+    `;
+    
+    // 如果当前有展开的项目，加载其回款记录
+    if (expandedPaymentProjectId) {
+        // 使用 setTimeout 确保 DOM 已经渲染完成
+        setTimeout(() => {
+            loadPaymentRecordsForProject(expandedPaymentProjectId);
+        }, 100);
+    }
+}
+
+// 切换项目回款记录的展开/收起
+function togglePaymentRecords(projectId) {
+    console.log('togglePaymentRecords called with projectId:', projectId, 'current expanded:', expandedPaymentProjectId);
+    // 确保 projectId 是字符串类型进行比较
+    const projectIdStr = String(projectId);
+    if (expandedPaymentProjectId === projectIdStr) {
+        expandedPaymentProjectId = null;
+    } else {
+        expandedPaymentProjectId = projectIdStr;
+    }
+    renderPaymentRecordsProjects();
+}
+
+// 为项目列表中的项目加载回款记录
+async function loadPaymentRecordsForProject(projectId) {
+    const containerId = `payment-records-detail-${projectId}`;
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/finance/payment/${projectId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!data.success) {
+            container.innerHTML = `<div style="text-align: center; color: #ef4444;">加载失败: ${data.message || '未知错误'}</div>`;
+            return;
+        }
+        
+        // 获取项目信息
+        const projectRes = await fetch(`${API_BASE}/projects/${projectId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const projectData = await projectRes.json();
+        const project = projectData.success ? projectData.data : null;
+        
+        const paymentStatusText = {
+            'unpaid': '未支付',
+            'partially_paid': '部分支付',
+            'paid': '已支付'
+        };
+        
+        if (!data.data || data.data.length === 0) {
+            const projectAmount = project?.projectAmount || 0;
+            const projectPaymentStatus = project?.payment?.paymentStatus || 'unpaid';
+            container.innerHTML = `
+                <div style="background: #f0f9ff; padding: 12px; border-radius: 4px; margin-bottom: 12px; display: flex; gap: 20px; flex-wrap: wrap;">
+                    <div>
+                        <div style="font-size: 12px; color: #666;">项目金额</div>
+                        <div style="font-size: 16px; font-weight: bold;">¥${projectAmount.toLocaleString()}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666;">已回款</div>
+                        <div style="font-size: 16px; font-weight: bold; color: #10b981;">¥0</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666;">剩余应收</div>
+                        <div style="font-size: 16px; font-weight: bold; color: #f59e0b;">¥${projectAmount.toLocaleString()}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666;">回款状态</div>
+                        <div>
+                            <span class="badge ${projectPaymentStatus === 'paid' ? 'badge-success' : projectPaymentStatus === 'partially_paid' ? 'badge-warning' : 'badge-danger'}">
+                                ${paymentStatusText[projectPaymentStatus] || projectPaymentStatus}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-desc">暂无回款记录</div>
+            `;
+            return;
+        }
+        
+        const rows = data.data.map(r => `
+            <tr>
+                <td>${new Date(r.receivedAt).toLocaleDateString()}</td>
+                <td>¥${(r.amount || 0).toLocaleString()}</td>
+                <td>${r.method === 'bank' ? '银行转账' : r.method === 'cash' ? '现金' : r.method === 'alipay' ? '支付宝' : r.method === 'wechat' ? '微信' : r.method || '-'}</td>
+                <td>${r.reference || '-'}</td>
+                <td>${r.invoiceNumber || '-'}</td>
+                <td>${r.recordedBy?.name || '-'}</td>
+                <td><button class="btn-small btn-danger" onclick="removePaymentRecord('${r._id}', '${projectId}')">删除</button></td>
+            </tr>
+        `).join('');
+        
+        const totalReceived = data.data.reduce((sum, r) => sum + (r.amount || 0), 0);
+        const projectAmount = project?.projectAmount || 0;
+        const remainingAmount = Math.max(0, projectAmount - totalReceived);
+        const projectPaymentStatus = project?.payment?.paymentStatus || 'unpaid';
+        
+        container.innerHTML = `
+            <div style="background: #f0f9ff; padding: 12px; border-radius: 4px; margin-bottom: 12px; display: flex; gap: 20px; flex-wrap: wrap;">
+                <div>
+                    <div style="font-size: 12px; color: #666;">项目金额</div>
+                    <div style="font-size: 16px; font-weight: bold;">¥${projectAmount.toLocaleString()}</div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: #666;">已回款</div>
+                    <div style="font-size: 16px; font-weight: bold; color: #10b981;">¥${totalReceived.toLocaleString()}</div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: #666;">剩余应收</div>
+                    <div style="font-size: 16px; font-weight: bold; color: ${remainingAmount > 0 ? '#f59e0b' : '#10b981'};">¥${remainingAmount.toLocaleString()}</div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: #666;">回款状态</div>
+                    <div>
+                        <span class="badge ${projectPaymentStatus === 'paid' ? 'badge-success' : projectPaymentStatus === 'partially_paid' ? 'badge-warning' : 'badge-danger'}">
+                            ${paymentStatusText[projectPaymentStatus] || projectPaymentStatus}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <table class="table-sticky">
+                <thead>
+                    <tr>
+                        <th>回款日期</th>
+                        <th>金额</th>
+                        <th>支付方式</th>
+                        <th>凭证号</th>
+                        <th>关联发票号</th>
+                        <th>记录人</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows}
+                </tbody>
+            </table>
+        `;
+    } catch (error) {
+        container.innerHTML = `<div style="text-align: center; color: #ef4444;">加载失败: ${error.message}</div>`;
+    }
+}
+
+// 清除回款记录筛选条件
+function clearPaymentRecordsFilters() {
+    document.getElementById('paymentMonth').value = '';
+    document.getElementById('paymentStatusFilter').value = '';
+    document.getElementById('paymentProjectPaymentStatus').value = '';
+    document.getElementById('paymentCustomer').value = '';
+    document.getElementById('paymentSales').value = '';
+    loadPaymentRecordsProjects();
+}
+
+// 跳转到指定页面
+function jumpPaymentRecordsProjectsPage(page, maxPage) {
+    const p = Math.max(1, Math.min(maxPage, parseInt(page) || 1));
+    paymentRecordsProjectsPage = p;
+    renderPaymentRecordsProjects();
+}
+
+// ==================== 发票管理项目列表 ====================
+// 加载发票项目列表（类似应收对账）
+async function loadInvoiceProjects() {
+    const month = document.getElementById('invoiceMonth')?.value || '';
+    const status = document.getElementById('invoiceStatusFilter')?.value || '';
+    const type = document.getElementById('invoiceTypeFilter')?.value || '';
+    const customerId = document.getElementById('invoiceCustomer')?.value || '';
+    const salesId = document.getElementById('invoiceSales')?.value || '';
+    const params = new URLSearchParams();
+    // month 可用于到期过滤
+    if (month) {
+        const [y, m] = month.split('-');
+        const end = new Date(y, m, 0).toISOString();
+        params.append('dueBefore', end);
+    }
+    if (customerId) params.append('customerId', customerId);
+    if (salesId) params.append('salesId', salesId);
+    
+    // 先获取项目列表
+    const res = await fetch(`${API_BASE}/finance/receivables?${params.toString()}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (!data.success) {
+        showAlert('invoiceProjectsList', data.message || '加载失败', 'error');
+        return;
+    }
+    
+    let projects = data.data || [];
+    
+    // 如果有发票状态或类型筛选，需要进一步过滤
+    if (status || type) {
+        // 获取所有匹配的发票
+        const invoiceParams = new URLSearchParams();
+        if (status) invoiceParams.append('status', status);
+        if (type) invoiceParams.append('type', type);
+        
+        const invoiceRes = await fetch(`${API_BASE}/finance/invoice?${invoiceParams.toString()}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const invoiceData = await invoiceRes.json();
+        
+        if (invoiceData.success && invoiceData.data) {
+            // 获取有匹配发票的项目ID集合
+            const projectIdsWithMatchingInvoices = new Set(
+                invoiceData.data.map(inv => {
+                    const pid = inv.projectId;
+                    return String(pid?._id || pid || '');
+                })
+            );
+            
+            // 如果筛选状态是"待开"，显示没有发票的项目
+            if (status === 'pending') {
+                projects = projects.filter(p => {
+                    const pid = String(p.id || p.projectId);
+                    return !projectIdsWithMatchingInvoices.has(pid);
+                });
+            } else {
+                // 其他状态，只显示有匹配发票的项目
+                projects = projects.filter(p => {
+                    const pid = String(p.id || p.projectId);
+                    return projectIdsWithMatchingInvoices.has(pid);
+                });
+            }
+        } else if (status === 'pending') {
+            // 如果筛选"待开"但没有发票数据，保留所有项目
+            // 项目列表保持不变
+        } else {
+            // 其他状态但没有匹配的发票，返回空列表
+            projects = [];
+        }
+    }
+    
+    invoiceProjectsCache = projects;
+    invoiceProjectsPage = 1;
+    renderInvoiceProjects();
+}
+
+// 渲染发票项目列表
+function renderInvoiceProjects() {
+    const pageSizeSel = document.getElementById('invoicePageSize');
+    const pageSize = pageSizeSel ? parseInt(pageSizeSel.value || '10', 10) : 10;
+    const totalPages = Math.max(1, Math.ceil(invoiceProjectsCache.length / pageSize));
+    if (invoiceProjectsPage > totalPages) invoiceProjectsPage = totalPages;
+    const start = (invoiceProjectsPage - 1) * pageSize;
+    const pageData = invoiceProjectsCache.slice(start, start + pageSize);
+    
+    const rows = pageData.map(r => {
+        const projectId = r.id || r.projectId; // 后端返回的是 id
+        const isExpanded = expandedInvoiceProjectId === projectId;
+        return `
+        <tr class="${r.overdue ? 'row-overdue' : ''}">
+            <td>${r.projectNumber || '-'}</td>
+            <td>${r.projectName}</td>
+            <td>${r.customerName || ''}</td>
+            <td>${r.salesName || ''}</td>
+            <td>¥${(r.projectAmount || 0).toLocaleString()}</td>
+            <td>${r.hasInvoice ? `<span class="badge badge-info">已开票${r.invoiceCount > 0 ? `(${r.invoiceCount})` : ''}</span>` : '<span class="badge badge-secondary">未开票</span>'}</td>
+            <td>
+                <button class="btn-small" onclick="toggleInvoiceRecords('${projectId}')" style="padding: 4px 8px;">
+                    ${isExpanded ? '收起' : '查看发票'}
+                </button>
+            </td>
+        </tr>
+        ${isExpanded ? `
+        <tr id="invoice-records-${projectId}">
+            <td colspan="7" style="padding: 0;">
+                <div id="invoice-records-detail-${projectId}" style="padding: 16px; background: #f9fafb;">
+                    <div style="text-align: center; color: #666;">加载中...</div>
+                </div>
+            </td>
+        </tr>
+        ` : ''}
+    `;
+    }).join('');
+    
+    // 获取当前筛选条件
+    const month = document.getElementById('invoiceMonth')?.value || '';
+    const status = document.getElementById('invoiceStatusFilter')?.value || '';
+    const type = document.getElementById('invoiceTypeFilter')?.value || '';
+    const customerId = document.getElementById('invoiceCustomer')?.value || '';
+    const salesId = document.getElementById('invoiceSales')?.value || '';
+    
+    let filterText = [];
+    if (month) filterText.push(`月份: ${month}`);
+    if (status) {
+        const statusText = { 'pending': '待开', 'issued': '已开', 'paid': '已支付', 'void': '作废' };
+        filterText.push(`状态: ${statusText[status] || status}`);
+    }
+    if (type) {
+        const typeText = { 'vat': '增值税发票', 'normal': '普通发票', 'other': '其他' };
+        filterText.push(`类型: ${typeText[type] || type}`);
+    }
+    if (customerId) {
+        const customer = allCustomers.find(c => c._id === customerId);
+        if (customer) filterText.push(`客户: ${customer.name}`);
+    }
+    if (salesId) {
+        const sales = allUsers.find(u => u._id === salesId);
+        if (sales) filterText.push(`销售: ${sales.name}`);
+    }
+    
+    document.getElementById('invoiceProjectsList').innerHTML = `
+        ${filterText.length > 0 ? `
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 12px; background: #f0f9ff; border-radius: 4px; margin-bottom: 12px;">
+            <div style="font-size: 12px; color: #666;">
+                筛选条件: <span style="color: #333; font-weight: 500;">${filterText.join(' | ')}</span>
+            </div>
+            <div style="font-size: 12px; color: #666;">
+                显示结果: <span style="color: #333; font-weight: 500;">共 ${invoiceProjectsCache.length} 个项目</span>
+            </div>
+            <button class="btn-small" onclick="clearInvoiceFilters()" style="padding: 4px 8px; font-size: 12px;">
+                清除筛选
+            </button>
+        </div>
+        ` : ''}
+        <table class="table-sticky">
+            <thead>
+                <tr>
+                    <th>项目编号</th>
+                    <th>项目名称</th>
+                    <th>客户</th>
+                    <th>销售</th>
+                    <th>项目金额</th>
+                    <th>发票状态</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${rows || '<tr><td colspan="7" style="text-align:center;">暂无数据</td></tr>'}
+            </tbody>
+        </table>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
+            <button class="btn-small" ${invoiceProjectsPage<=1?'disabled':''} onclick="invoiceProjectsPage=Math.max(1, invoiceProjectsPage-1);renderInvoiceProjects();">上一页</button>
+            <span style="align-self:center;">${invoiceProjectsPage} / ${totalPages}</span>
+            <button class="btn-small" ${invoiceProjectsPage>=totalPages?'disabled':''} onclick="invoiceProjectsPage=Math.min(${totalPages}, invoiceProjectsPage+1);renderInvoiceProjects();">下一页</button>
+            <input type="number" min="1" max="${totalPages}" value="${invoiceProjectsPage}" style="width:70px;padding:6px;" onchange="jumpInvoiceProjectsPage(this.value, ${totalPages})">
+        </div>
+    `;
+    
+    // 如果当前有展开的项目，加载其发票
+    if (expandedInvoiceProjectId) {
+        // 使用 setTimeout 确保 DOM 已经渲染完成
+        setTimeout(() => {
+            loadInvoicesForProject(expandedInvoiceProjectId);
+        }, 100);
+    }
+}
+
+// 切换项目发票的展开/收起
+function toggleInvoiceRecords(projectId) {
+    console.log('toggleInvoiceRecords called with projectId:', projectId, 'current expanded:', expandedInvoiceProjectId);
+    // 确保 projectId 是字符串类型进行比较
+    const projectIdStr = String(projectId);
+    if (expandedInvoiceProjectId === projectIdStr) {
+        expandedInvoiceProjectId = null;
+    } else {
+        expandedInvoiceProjectId = projectIdStr;
+    }
+    renderInvoiceProjects();
+}
+
+// 为项目列表中的项目加载发票
+async function loadInvoicesForProject(projectId) {
+    const containerId = `invoice-records-detail-${projectId}`;
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    try {
+        const status = document.getElementById('invoiceStatusFilter')?.value || '';
+        const type = document.getElementById('invoiceTypeFilter')?.value || '';
+        const params = new URLSearchParams();
+        if (status) params.append('status', status);
+        if (type) params.append('type', type);
+        params.append('projectId', projectId);
+        
+        const res = await fetch(`${API_BASE}/finance/invoice?${params.toString()}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!data.success) {
+            container.innerHTML = `<div style="text-align: center; color: #ef4444;">加载失败: ${data.message || '未知错误'}</div>`;
+            return;
+        }
+        
+        if (!data.data || data.data.length === 0) {
+            container.innerHTML = `<div class="card-desc">暂无发票</div>`;
+            return;
+        }
+        
+        const rows = data.data.map(i => {
+            const statusBadge = i.status === 'paid' ? 'badge-success' : 
+                               i.status === 'issued' ? 'badge-info' : 
+                               i.status === 'void' ? 'badge-danger' : 'badge-warning';
+            const statusText = i.status === 'paid' ? '已支付' : 
+                              i.status === 'issued' ? '已开' : 
+                              i.status === 'void' ? '作废' : '待开';
+            const typeText = i.type === 'vat' ? '增值税' : 
+                            i.type === 'normal' ? '普通' : 
+                            i.type === 'other' ? '其他' : i.type || '-';
+            
+            return `
+            <tr>
+                <td>${i.invoiceNumber || '-'}</td>
+                <td>¥${(i.amount || 0).toLocaleString()}</td>
+                <td>${i.issueDate ? new Date(i.issueDate).toLocaleDateString() : '-'}</td>
+                <td><span class="badge ${statusBadge}">${statusText}</span></td>
+                <td>${typeText}</td>
+                <td>${i.note || '-'}</td>
+            </tr>
+        `;
+        }).join('');
+        
+        container.innerHTML = `
+            <table class="table-sticky">
+                <thead>
+                    <tr>
+                        <th>发票号</th>
+                        <th>金额</th>
+                        <th>开票日期</th>
+                        <th>状态</th>
+                        <th>类型</th>
+                        <th>备注</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows}
+                </tbody>
+            </table>
+        `;
+    } catch (error) {
+        container.innerHTML = `<div style="text-align: center; color: #ef4444;">加载失败: ${error.message}</div>`;
+    }
+}
+
+// 清除发票筛选条件
+function clearInvoiceFilters() {
+    document.getElementById('invoiceMonth').value = '';
+    document.getElementById('invoiceStatusFilter').value = '';
+    document.getElementById('invoiceTypeFilter').value = '';
+    document.getElementById('invoiceCustomer').value = '';
+    document.getElementById('invoiceSales').value = '';
+    loadInvoiceProjects();
+}
+
+// 跳转到指定页面
+function jumpInvoiceProjectsPage(page, maxPage) {
+    const p = Math.max(1, Math.min(maxPage, parseInt(page) || 1));
+    invoiceProjectsPage = p;
+    renderInvoiceProjects();
 }
 
 // 项目内回款
@@ -4576,4 +5622,225 @@ async function setLayoutCost(e, projectId) {
     } catch (error) {
         showToast('设置失败: ' + error.message, 'error');
     }
+}
+
+// 加载回款与发票对账
+async function loadReconciliation() {
+    const startDate = document.getElementById('reconciliationStartDate')?.value || '';
+    const endDate = document.getElementById('reconciliationEndDate')?.value || '';
+    
+    const params = new URLSearchParams();
+    if (startDate) params.append('startDate', startDate);
+    if (endDate) params.append('endDate', endDate);
+    
+    try {
+        const res = await fetch(`${API_BASE}/finance/reconciliation?${params.toString()}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!data.success) {
+            showAlert('reconciliationList', data.message || '加载失败', 'error');
+            return;
+        }
+        
+        const reconciliationData = data.data || [];
+        const summary = data.summary || {};
+        
+        if (reconciliationData.length === 0) {
+            document.getElementById('reconciliationList').innerHTML = '<div class="card-desc">暂无对账数据</div>';
+            return;
+        }
+        
+        const rows = reconciliationData.map(item => {
+            const paymentStatusText = {
+                'unpaid': '未支付',
+                'partially_paid': '部分支付',
+                'paid': '已支付'
+            };
+            
+            const paymentRows = item.payments.map(p => `
+                <tr>
+                    <td>${new Date(p.receivedAt).toLocaleDateString()}</td>
+                    <td>¥${(p.amount || 0).toLocaleString()}</td>
+                    <td>${p.method === 'bank' ? '银行' : p.method === 'cash' ? '现金' : p.method === 'alipay' ? '支付宝' : p.method === 'wechat' ? '微信' : p.method || '-'}</td>
+                    <td>${p.reference || '-'}</td>
+                    <td>${p.invoiceNumber || '-'}</td>
+                </tr>
+            `).join('');
+            
+            const invoiceRows = item.invoices.map(i => `
+                <tr>
+                    <td>${i.invoiceNumber || '-'}</td>
+                    <td>¥${(i.amount || 0).toLocaleString()}</td>
+                    <td>${new Date(i.issueDate).toLocaleDateString()}</td>
+                    <td><span class="badge ${i.status === 'paid' ? 'badge-success' : i.status === 'issued' ? 'badge-info' : i.status === 'void' ? 'badge-danger' : 'badge-warning'}">
+                        ${i.status === 'paid' ? '已支付' : i.status === 'issued' ? '已开' : i.status === 'void' ? '作废' : '待开'}
+                    </span></td>
+                    <td>${i.type === 'vat' ? '增值税' : i.type === 'normal' ? '普通' : i.type || '-'}</td>
+                </tr>
+            `).join('');
+            
+            return `
+                <div class="card" style="margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #ddd;">
+                        <div>
+                            <div style="font-weight: bold; font-size: 16px;">${item.projectNumber || '-'} - ${item.projectName}</div>
+                            <div style="font-size: 12px; color: #666; margin-top: 4px;">客户：${item.customerName} | 销售：${item.salesName}</div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 12px; color: #666;">项目金额</div>
+                            <div style="font-size: 18px; font-weight: bold;">¥${(item.projectAmount || 0).toLocaleString()}</div>
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;">
+                        <div style="background: #f0f9ff; padding: 10px; border-radius: 4px;">
+                            <div style="font-size: 12px; color: #666;">已回款</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #10b981;">¥${(item.receivedAmount || 0).toLocaleString()}</div>
+                        </div>
+                        <div style="background: #fef3c7; padding: 10px; border-radius: 4px;">
+                            <div style="font-size: 12px; color: #666;">剩余应收</div>
+                            <div style="font-size: 16px; font-weight: bold; color: #f59e0b;">¥${(item.remainingAmount || 0).toLocaleString()}</div>
+                        </div>
+                        <div style="background: #f0f9ff; padding: 10px; border-radius: 4px;">
+                            <div style="font-size: 12px; color: #666;">回款状态</div>
+                            <div>
+                                <span class="badge ${item.paymentStatus === 'paid' ? 'badge-success' : item.paymentStatus === 'partially_paid' ? 'badge-warning' : 'badge-danger'}">
+                                    ${paymentStatusText[item.paymentStatus] || item.paymentStatus}
+                                </span>
+                            </div>
+                        </div>
+                        <div style="background: ${item.isBalanced ? '#d1fae5' : '#fee2e2'}; padding: 10px; border-radius: 4px;">
+                            <div style="font-size: 12px; color: #666;">对账状态</div>
+                            <div>
+                                <span class="badge ${item.isBalanced ? 'badge-success' : 'badge-danger'}">
+                                    ${item.isBalanced ? '已对平' : '未对平'}
+                                </span>
+                            </div>
+                            ${!item.isBalanced ? `
+                                <div style="font-size: 11px; color: #dc2626; margin-top: 4px;">
+                                    差异：¥${Math.abs((item.totalPaymentAmount || 0) - (item.totalInvoiceAmount || 0)).toLocaleString()}
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                        <div>
+                            <div style="font-weight: 600; margin-bottom: 8px;">回款记录 (${item.paymentCount}笔，合计：¥${(item.totalPaymentAmount || 0).toLocaleString()})</div>
+                            <table style="width: 100%; font-size: 12px;">
+                                <thead>
+                                    <tr style="background: #f5f5f5;">
+                                        <th style="padding: 6px; text-align: left;">日期</th>
+                                        <th style="padding: 6px; text-align: left;">金额</th>
+                                        <th style="padding: 6px; text-align: left;">方式</th>
+                                        <th style="padding: 6px; text-align: left;">凭证</th>
+                                        <th style="padding: 6px; text-align: left;">发票号</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${paymentRows || '<tr><td colspan="5" style="text-align:center; padding: 10px;">无回款记录</td></tr>'}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div>
+                            <div style="font-weight: 600; margin-bottom: 8px;">发票记录 (${item.invoiceCount}张，合计：¥${(item.totalInvoiceAmount || 0).toLocaleString()})</div>
+                            <table style="width: 100%; font-size: 12px;">
+                                <thead>
+                                    <tr style="background: #f5f5f5;">
+                                        <th style="padding: 6px; text-align: left;">发票号</th>
+                                        <th style="padding: 6px; text-align: left;">金额</th>
+                                        <th style="padding: 6px; text-align: left;">开票日期</th>
+                                        <th style="padding: 6px; text-align: left;">状态</th>
+                                        <th style="padding: 6px; text-align: left;">类型</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${invoiceRows || '<tr><td colspan="5" style="text-align:center; padding: 10px;">无发票记录</td></tr>'}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        const summaryHtml = `
+            <div class="card" style="margin-bottom: 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px;">
+                    <div>
+                        <div style="font-size: 12px; opacity: 0.9;">项目总数</div>
+                        <div style="font-size: 24px; font-weight: bold;">${summary.totalProjects || 0}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; opacity: 0.9;">回款总额</div>
+                        <div style="font-size: 24px; font-weight: bold;">¥${(summary.totalPaymentAmount || 0).toLocaleString()}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; opacity: 0.9;">发票总额</div>
+                        <div style="font-size: 24px; font-weight: bold;">¥${(summary.totalInvoiceAmount || 0).toLocaleString()}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; opacity: 0.9;">已对平项目</div>
+                        <div style="font-size: 24px; font-weight: bold;">${summary.balancedProjects || 0}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; opacity: 0.9;">未对平项目</div>
+                        <div style="font-size: 24px; font-weight: bold; color: ${(summary.unbalancedProjects || 0) > 0 ? '#fbbf24' : 'white'};">${summary.unbalancedProjects || 0}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.getElementById('reconciliationList').innerHTML = summaryHtml + rows;
+    } catch (error) {
+        showAlert('reconciliationList', '加载失败: ' + error.message, 'error');
+    }
+}
+
+// 导出对账表
+function exportReconciliation() {
+    const startDate = document.getElementById('reconciliationStartDate')?.value || '';
+    const endDate = document.getElementById('reconciliationEndDate')?.value || '';
+    
+    const params = new URLSearchParams();
+    if (startDate) params.append('startDate', startDate);
+    if (endDate) params.append('endDate', endDate);
+    
+    fetch(`${API_BASE}/finance/reconciliation?${params.toString()}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (!data.success) {
+            showToast(data.message || '导出失败', 'error');
+            return;
+        }
+        
+        const reconciliationData = data.data || [];
+        const header = ['项目编号', '项目名称', '客户', '销售', '项目金额', '已回款', '剩余应收', '回款状态', '回款总额', '发票总额', '对账状态'];
+        const rows = reconciliationData.map(item => [
+            item.projectNumber || '-',
+            item.projectName || '-',
+            item.customerName || '-',
+            item.salesName || '-',
+            item.projectAmount || 0,
+            item.receivedAmount || 0,
+            item.remainingAmount || 0,
+            item.paymentStatus === 'paid' ? '已支付' : item.paymentStatus === 'partially_paid' ? '部分支付' : '未支付',
+            item.totalPaymentAmount || 0,
+            item.totalInvoiceAmount || 0,
+            item.isBalanced ? '已对平' : '未对平'
+        ]);
+        
+        const csv = [header, ...rows].map(r => r.map(v => `"${(v ?? '').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `对账表_${startDate || '全部'}_${endDate || '全部'}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    })
+    .catch(error => {
+        showToast('导出失败: ' + error.message, 'error');
+    });
 }

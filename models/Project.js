@@ -191,10 +191,16 @@ const projectSchema = new mongoose.Schema({
   }],
   // 回款信息
   payment: {
-    receivedAmount: { type: Number, default: 0 },
-    receivedAt: Date,
+    receivedAmount: { type: Number, default: 0 }, // 已收到回款金额
+    remainingAmount: { type: Number, default: 0 }, // 剩余应收金额（自动计算）
+    receivedAt: Date, // 最近一次回款日期
     expectedAt: Date, // 合同约定回款日期
-    isFullyPaid: { type: Boolean, default: false }
+    isFullyPaid: { type: Boolean, default: false }, // 是否已全额回款
+    paymentStatus: { // 回款状态
+      type: String,
+      enum: ['unpaid', 'partially_paid', 'paid'],
+      default: 'unpaid'
+    }
   },
   // 兼职销售相关字段
   partTimeSales: {
@@ -292,6 +298,25 @@ projectSchema.methods.validateLayoutCost = function(layoutCost) {
 // 更新完成系数和自动计算字段
 projectSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
+  
+  // 自动计算剩余应收金额和回款状态
+  if (this.payment && this.projectAmount !== undefined) {
+    const receivedAmount = this.payment.receivedAmount || 0;
+    const projectAmount = this.projectAmount || 0;
+    this.payment.remainingAmount = Math.max(0, projectAmount - receivedAmount);
+    
+    // 自动计算回款状态
+    if (receivedAmount >= projectAmount && projectAmount > 0) {
+      this.payment.paymentStatus = 'paid';
+      this.payment.isFullyPaid = true;
+    } else if (receivedAmount > 0) {
+      this.payment.paymentStatus = 'partially_paid';
+      this.payment.isFullyPaid = false;
+    } else {
+      this.payment.paymentStatus = 'unpaid';
+      this.payment.isFullyPaid = false;
+    }
+  }
   
   // 自动计算兼职销售佣金
   if (this.partTimeSales?.isPartTime) {

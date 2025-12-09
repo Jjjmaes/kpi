@@ -913,11 +913,15 @@ router.post('/:id/payment', authorize('finance', 'admin', 'sales'), async (req, 
       });
     }
 
-    if (receivedAmount !== undefined) project.payment.receivedAmount = receivedAmount;
+    if (receivedAmount !== undefined) {
+      project.payment.receivedAmount = receivedAmount;
+      // 自动计算剩余金额和回款状态（通过 pre-save 钩子）
+    }
     if (receivedAt) project.payment.receivedAt = new Date(receivedAt);
     if (expectedAt) project.payment.expectedAt = new Date(expectedAt);
     if (typeof isFullyPaid === 'boolean') project.payment.isFullyPaid = isFullyPaid;
 
+    // 保存时会自动通过 pre-save 钩子计算 paymentStatus 和 remainingAmount
     await project.save();
 
     res.json({

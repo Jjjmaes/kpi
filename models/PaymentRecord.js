@@ -21,7 +21,8 @@ const paymentRecordSchema = new mongoose.Schema({
     enum: ['bank', 'cash', 'alipay', 'wechat', 'other'],
     default: 'bank'
   },
-  reference: String,
+  reference: String, // 凭证号/备注
+  invoiceNumber: String, // 关联的发票号（如果有）
   note: String,
   recordedBy: {
     type: mongoose.Schema.Types.ObjectId,

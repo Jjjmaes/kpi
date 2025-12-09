@@ -23,7 +23,7 @@ const invoiceSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'issued', 'void'],
+    enum: ['pending', 'issued', 'paid', 'void'], // 添加paid状态（已支付）
     default: 'pending'
   },
   type: {
