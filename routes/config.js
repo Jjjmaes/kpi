@@ -3,7 +3,29 @@ const router = express.Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const KpiConfig = require('../models/KpiConfig');
 
-// 所有配置路由需要管理员权限
+// 公共接口：获取机构信息（无需登录）
+router.get('/public', async (req, res) => {
+  try {
+    const config = await KpiConfig.getActiveConfig();
+    res.json({
+      success: true,
+      data: {
+        companyName: config.companyName || '公司名称',
+        companyAddress: config.companyAddress || '',
+        companyContact: config.companyContact || '',
+        companyPhone: config.companyPhone || '',
+        companyEmail: config.companyEmail || ''
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// 以下路由需要管理员权限
 router.use(authenticate);
 router.use(authorize('admin'));
 
@@ -35,6 +57,11 @@ router.post('/update', async (req, res) => {
       sales_commission_ratio,
       admin_ratio,
       completion_factor,
+      companyName,
+      companyAddress,
+      companyContact,
+      companyPhone,
+      companyEmail,
       reason
     } = req.body;
 
@@ -50,7 +77,12 @@ router.post('/update', async (req, res) => {
       sales_bonus_ratio: currentConfig.sales_bonus_ratio,
       sales_commission_ratio: currentConfig.sales_commission_ratio,
       admin_ratio: currentConfig.admin_ratio,
-      completion_factor: currentConfig.completion_factor
+      completion_factor: currentConfig.completion_factor,
+      companyName: currentConfig.companyName,
+      companyAddress: currentConfig.companyAddress,
+      companyContact: currentConfig.companyContact,
+      companyPhone: currentConfig.companyPhone,
+      companyEmail: currentConfig.companyEmail
     };
 
     // 更新配置
@@ -62,6 +94,11 @@ router.post('/update', async (req, res) => {
     if (sales_commission_ratio !== undefined) currentConfig.sales_commission_ratio = sales_commission_ratio;
     if (admin_ratio !== undefined) currentConfig.admin_ratio = admin_ratio;
     if (completion_factor !== undefined) currentConfig.completion_factor = completion_factor;
+    if (companyName !== undefined) currentConfig.companyName = companyName;
+    if (companyAddress !== undefined) currentConfig.companyAddress = companyAddress;
+    if (companyContact !== undefined) currentConfig.companyContact = companyContact;
+    if (companyPhone !== undefined) currentConfig.companyPhone = companyPhone;
+    if (companyEmail !== undefined) currentConfig.companyEmail = companyEmail;
 
     currentConfig.version += 1;
     currentConfig.updatedAt = Date.now();
@@ -79,7 +116,12 @@ router.post('/update', async (req, res) => {
         sales_bonus_ratio: currentConfig.sales_bonus_ratio,
         sales_commission_ratio: currentConfig.sales_commission_ratio,
         admin_ratio: currentConfig.admin_ratio,
-        completion_factor: currentConfig.completion_factor
+        completion_factor: currentConfig.completion_factor,
+        companyName: currentConfig.companyName,
+        companyAddress: currentConfig.companyAddress,
+        companyContact: currentConfig.companyContact,
+        companyPhone: currentConfig.companyPhone,
+        companyEmail: currentConfig.companyEmail
       },
       reason: reason || '未提供原因'
     });
@@ -130,6 +172,7 @@ router.get('/history', async (req, res) => {
 });
 
 module.exports = router;
+
 
 
 

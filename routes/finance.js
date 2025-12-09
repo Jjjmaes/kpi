@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const Project = require('../models/Project');
+const ProjectMember = require('../models/ProjectMember');
 const PaymentRecord = require('../models/PaymentRecord');
 const Invoice = require('../models/Invoice');
 const KpiRecord = require('../models/KpiRecord');
@@ -9,17 +10,26 @@ const User = require('../models/User');
 
 // 财务模块需要认证
 router.use(authenticate);
-router.use(authorize('admin', 'finance'));
+
+// 角色分级：查看（含销售）、管理（仅财务/管理员）
+const allowViewFinance = authorize('admin', 'finance', 'sales', 'part_time_sales');
+const allowManageFinance = authorize('admin', 'finance');
 
 // 应收对账列表（支持客户/销售过滤，逾期标记，回款状态，发票状态）
-router.get('/receivables', async (req, res) => {
+router.get('/receivables', allowViewFinance, async (req, res) => {
   try {
-    const { customerId, status, dueBefore, salesId, paymentStatus, hasInvoice } = req.query;
+    const { customerId, status, dueBefore, salesId, paymentStatus, hasInvoice, expectedStartDate, expectedEndDate } = req.query;
+    
+    const roles = req.user.roles || [];
+    const isAdmin = roles.includes('admin');
+    const isFinance = roles.includes('finance');
+    const isAdminOrFinance = isAdmin || isFinance;
     
     // 收集所有基础条件
     const baseConditions = {};
     if (customerId) baseConditions.customerId = customerId;
-    if (salesId) baseConditions.createdBy = salesId;
+    // 财务/管理员可按销售筛选；销售本人只能看自己可见的项目
+    if (salesId && isAdminOrFinance) baseConditions.createdBy = salesId;
     if (status) {
       baseConditions.status = status;
     } else {
@@ -27,11 +37,38 @@ router.get('/receivables', async (req, res) => {
       baseConditions.status = { $ne: 'cancelled' };
     }
     
+    // 销售/兼职销售仅能查看自己创建或参与的项目
+    if (!isAdminOrFinance) {
+      const memberProjects = await ProjectMember.find({ userId: req.user._id }).distinct('projectId');
+      const createdProjects = await Project.find({ createdBy: req.user._id }).distinct('_id');
+      const accessibleIds = [...new Set([...memberProjects.map(String), ...createdProjects.map(String)])];
+      if (accessibleIds.length === 0) {
+        return res.json({ success: true, data: [] });
+      }
+      baseConditions._id = { $in: accessibleIds };
+    }
+    
     // 收集需要 $or 的条件
     const orConditions = [];
     
-    // 预期回款日期筛选
-    if (dueBefore) {
+    // 预期回款日期筛选（支持日期范围）
+    if (expectedStartDate || expectedEndDate) {
+      const dateCondition = {};
+      if (expectedStartDate) {
+        dateCondition.$gte = new Date(expectedStartDate);
+      }
+      if (expectedEndDate) {
+        dateCondition.$lte = new Date(expectedEndDate);
+      }
+      orConditions.push({
+        $or: [
+          { 'payment.expectedAt': dateCondition },
+          { 'payment.expectedAt': { $exists: false } },
+          { 'payment.expectedAt': null }
+        ]
+      });
+    } else if (dueBefore) {
+      // 兼容旧的dueBefore参数
       orConditions.push({
         $or: [
           { 'payment.expectedAt': { $lte: new Date(dueBefore) } },
@@ -160,7 +197,7 @@ router.get('/receivables', async (req, res) => {
 });
 
 // 新增回款记录并更新项目回款
-router.post('/payment/:projectId', async (req, res) => {
+router.post('/payment/:projectId', allowManageFinance, async (req, res) => {
   try {
     const { projectId } = req.params;
     const { amount, receivedAt, method, reference, invoiceNumber, note } = req.body;
@@ -236,19 +273,43 @@ router.post('/payment/:projectId', async (req, res) => {
 });
 
 // 查询项目回款记录（支持按回款状态筛选）
-router.get('/payment/:projectId', async (req, res) => {
+router.get('/payment/:projectId', allowViewFinance, async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { paymentStatus } = req.query;
+    const { paymentStatus, startDate, endDate } = req.query;
     
     // 获取项目信息
-    const project = await Project.findById(projectId).select('projectAmount payment');
+    const project = await Project.findById(projectId).select('projectAmount payment createdBy');
     if (!project) {
       return res.status(404).json({ success: false, message: '项目不存在' });
     }
     
+    const roles = req.user.roles || [];
+    const isAdminOrFinance = roles.includes('admin') || roles.includes('finance');
+    if (!isAdminOrFinance) {
+      const isOwner = project.createdBy?.toString() === req.user._id.toString();
+      const isMember = await ProjectMember.exists({ projectId, userId: req.user._id });
+      if (!isOwner && !isMember) {
+        return res.status(403).json({ success: false, message: '无权查看该项目回款' });
+      }
+    }
+    
+    // 构建查询条件（支持日期范围筛选）
+    const paymentQuery = { projectId };
+    if (startDate || endDate) {
+      paymentQuery.receivedAt = {};
+      if (startDate) {
+        paymentQuery.receivedAt.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        paymentQuery.receivedAt.$lte = end;
+      }
+    }
+    
     // 获取所有回款记录（按时间正序，以便计算累计状态）
-    let records = await PaymentRecord.find({ projectId })
+    let records = await PaymentRecord.find(paymentQuery)
       .populate('recordedBy', 'name')
       .sort({ receivedAt: 1, createdAt: 1 }); // 按时间正序
     
@@ -291,7 +352,7 @@ router.get('/payment/:projectId', async (req, res) => {
 });
 
 // 删除回款记录（若需修正）
-router.delete('/payment/:recordId', async (req, res) => {
+router.delete('/payment/:recordId', allowManageFinance, async (req, res) => {
   try {
     const { recordId } = req.params;
     const rec = await PaymentRecord.findById(recordId);
@@ -330,7 +391,7 @@ router.delete('/payment/:recordId', async (req, res) => {
 });
 
 // 新增发票
-router.post('/invoice/:projectId', async (req, res) => {
+router.post('/invoice/:projectId', allowManageFinance, async (req, res) => {
   try {
     const { projectId } = req.params;
     const { invoiceNumber, amount, issueDate, status, type, note } = req.body;
@@ -403,7 +464,7 @@ router.post('/invoice/:projectId', async (req, res) => {
 });
 
 // 更新发票
-router.put('/invoice/:invoiceId', async (req, res) => {
+router.put('/invoice/:invoiceId', allowManageFinance, async (req, res) => {
   try {
     const { invoiceId } = req.params;
     const invoice = await Invoice.findById(invoiceId).populate('projectId');
@@ -479,7 +540,7 @@ router.put('/invoice/:invoiceId', async (req, res) => {
 });
 
 // 发票列表（支持状态、类型筛选）
-router.get('/invoice', async (req, res) => {
+router.get('/invoice', allowManageFinance, async (req, res) => {
   try {
     const { projectId, status, type } = req.query;
     const query = {};
@@ -496,7 +557,7 @@ router.get('/invoice', async (req, res) => {
 });
 
 // KPI审核待办
-router.get('/kpi/pending', async (req, res) => {
+router.get('/kpi/pending', allowManageFinance, async (req, res) => {
   try {
     const { month } = req.query;
     const q = { isReviewed: false };
@@ -511,7 +572,7 @@ router.get('/kpi/pending', async (req, res) => {
 });
 
 // 报表：按客户、销售汇总
-router.get('/reports/summary', async (req, res) => {
+router.get('/reports/summary', allowManageFinance, async (req, res) => {
   try {
     const { month } = req.query;
     const q = {};
@@ -551,7 +612,7 @@ router.get('/reports/summary', async (req, res) => {
 });
 
 // 回款与发票对账报表
-router.get('/reconciliation', async (req, res) => {
+router.get('/reconciliation', allowManageFinance, async (req, res) => {
   try {
     const { projectId, startDate, endDate } = req.query;
     const query = {};
@@ -645,6 +706,292 @@ router.get('/reconciliation', async (req, res) => {
       }
     });
   } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// 导出应收对账CSV（使用GBK编码解决Excel乱码问题）
+router.get('/receivables/export', allowViewFinance, async (req, res) => {
+  try {
+    const iconv = require('iconv-lite');
+    const { customerId, status, dueBefore, salesId, paymentStatus, hasInvoice, expectedStartDate, expectedEndDate } = req.query;
+    
+    const roles = req.user.roles || [];
+    const isAdmin = roles.includes('admin');
+    const isFinance = roles.includes('finance');
+    const isAdminOrFinance = isAdmin || isFinance;
+    
+    // 使用与/receivables相同的查询逻辑
+    const baseConditions = {};
+    if (customerId) baseConditions.customerId = customerId;
+    if (salesId && isAdminOrFinance) baseConditions.createdBy = salesId;
+    if (status) {
+      baseConditions.status = status;
+    } else {
+      baseConditions.status = { $ne: 'cancelled' };
+    }
+    
+    // 销售/兼职销售仅能导出自己创建或参与的项目
+    if (!isAdminOrFinance) {
+      const memberProjects = await ProjectMember.find({ userId: req.user._id }).distinct('projectId');
+      const createdProjects = await Project.find({ createdBy: req.user._id }).distinct('_id');
+      const accessibleIds = [...new Set([...memberProjects.map(String), ...createdProjects.map(String)])];
+      if (accessibleIds.length === 0) {
+        return res.json({ success: true, data: [] });
+      }
+      baseConditions._id = { $in: accessibleIds };
+    }
+    
+    const orConditions = [];
+    // 预期回款日期筛选（支持日期范围）
+    if (expectedStartDate || expectedEndDate) {
+      const dateCondition = {};
+      if (expectedStartDate) {
+        dateCondition.$gte = new Date(expectedStartDate);
+      }
+      if (expectedEndDate) {
+        dateCondition.$lte = new Date(expectedEndDate);
+      }
+      orConditions.push({
+        $or: [
+          { 'payment.expectedAt': dateCondition },
+          { 'payment.expectedAt': { $exists: false } },
+          { 'payment.expectedAt': null }
+        ]
+      });
+    } else if (dueBefore) {
+      // 兼容旧的dueBefore参数
+      orConditions.push({
+        $or: [
+          { 'payment.expectedAt': { $lte: new Date(dueBefore) } },
+          { 'payment.expectedAt': { $exists: false } },
+          { 'payment.expectedAt': null }
+        ]
+      });
+    }
+    
+    if (paymentStatus) {
+      if (paymentStatus === 'unpaid') {
+        orConditions.push({
+          $or: [
+            { 'payment.paymentStatus': 'unpaid' },
+            { 'payment.paymentStatus': { $exists: false } },
+            { 'payment.paymentStatus': null }
+          ]
+        });
+      } else {
+        baseConditions['payment.paymentStatus'] = paymentStatus;
+      }
+    }
+    
+    const query = {};
+    if (orConditions.length > 0) {
+      query.$and = [
+        ...Object.keys(baseConditions).map(key => ({ [key]: baseConditions[key] })),
+        ...orConditions
+      ];
+    } else {
+      Object.assign(query, baseConditions);
+    }
+    
+    // 修复：只选择payment，不要单独选择payment.expectedAt，避免路径冲突
+    const projects = await Project.find(query)
+      .populate('customerId', 'name shortName')
+      .populate('createdBy', 'name')
+      .select('projectName projectAmount payment customerId createdBy status projectNumber');
+    
+    const projectIds = projects.map(p => p._id);
+    const invoices = await Invoice.find({ 
+      projectId: { $in: projectIds },
+      status: { $ne: 'void' }
+    }).select('projectId status');
+    
+    const projectInvoiceMap = {};
+    invoices.forEach(inv => {
+      const pid = inv.projectId.toString();
+      if (!projectInvoiceMap[pid]) {
+        projectInvoiceMap[pid] = [];
+      }
+      projectInvoiceMap[pid].push(inv);
+    });
+    
+    const rows = projects.map(p => {
+      const received = p.payment?.receivedAmount || 0;
+      const projectAmount = p.projectAmount || 0;
+      const outstanding = Math.max(0, projectAmount - received);
+      const projectInvoices = projectInvoiceMap[p._id.toString()] || [];
+      const hasInvoices = projectInvoices.length > 0;
+      
+      if (hasInvoice === 'true' && !hasInvoices) return null;
+      if (hasInvoice === 'false' && hasInvoices) return null;
+      
+      let pStatus = p.payment?.paymentStatus;
+      if (!pStatus) {
+        if (received >= projectAmount && projectAmount > 0) {
+          pStatus = 'paid';
+        } else if (received > 0) {
+          pStatus = 'partially_paid';
+        } else {
+          pStatus = 'unpaid';
+        }
+      }
+      
+      const statusText = pStatus === 'paid' ? '已支付' : 
+                        pStatus === 'partially_paid' ? '部分支付' : '未支付';
+      
+      const expectedAt = p.payment?.expectedAt;
+      const isOverdue = expectedAt && !p.payment?.isFullyPaid && new Date(expectedAt) < new Date();
+      
+      return [
+        p.projectNumber || '-',
+        p.projectName || '',
+        p.customerId?.name || '',
+        p.createdBy?.name || '',
+        projectAmount || 0,
+        received || 0,
+        outstanding || 0,
+        expectedAt ? new Date(expectedAt).toLocaleDateString('zh-CN') : '',
+        statusText,
+        hasInvoices ? '已开票' : '未开票',
+        isOverdue ? '逾期' : ''
+      ];
+    }).filter(row => row !== null);
+    
+    const header = ['项目编号', '项目名称', '客户', '销售', '项目金额', '已回款', '未回款', '约定回款日', '回款状态', '发票状态', '逾期'];
+    const csvData = [header, ...rows].map(row => 
+      row.map(cell => {
+        const str = (cell ?? '').toString();
+        return `"${str.replace(/"/g, '""').replace(/\n/g, ' ').replace(/\r/g, '')}"`;
+      }).join(',')
+    ).join('\r\n');
+    
+    // 转换为GBK编码（Windows Excel默认编码）
+    const gbkBuffer = iconv.encode(csvData, 'gbk');
+    
+    res.setHeader('Content-Type', 'text/csv;charset=gbk');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent('应收对账.csv')}`);
+    res.send(gbkBuffer);
+  } catch (error) {
+    console.error('导出应收对账失败:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// 导出对账表CSV（使用GBK编码解决Excel乱码问题）
+router.get('/reconciliation/export', allowManageFinance, async (req, res) => {
+  try {
+    const iconv = require('iconv-lite');
+    const { startDate, endDate } = req.query;
+    
+    // 使用与/reconciliation相同的查询逻辑
+    const query = { status: { $ne: 'cancelled' } };
+    
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) {
+        query.createdAt.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
+      }
+    }
+    
+    const projects = await Project.find(query)
+      .populate('customerId', 'name')
+      .populate('createdBy', 'name')
+      .select('projectName projectNumber projectAmount payment customerId createdBy');
+    
+    const projectIds = projects.map(p => p._id);
+    
+    // 获取回款记录
+    const paymentRecords = await PaymentRecord.find({ projectId: { $in: projectIds } })
+      .select('projectId amount paymentDate');
+    
+    // 获取发票记录
+    const invoices = await Invoice.find({ 
+      projectId: { $in: projectIds },
+      status: { $ne: 'void' }
+    }).select('projectId amount status');
+    
+    // 构建映射
+    const paymentMap = {};
+    paymentRecords.forEach(pr => {
+      const pid = pr.projectId.toString();
+      if (!paymentMap[pid]) {
+        paymentMap[pid] = [];
+      }
+      paymentMap[pid].push(pr);
+    });
+    
+    const invoiceMap = {};
+    invoices.forEach(inv => {
+      const pid = inv.projectId.toString();
+      if (!invoiceMap[pid]) {
+        invoiceMap[pid] = [];
+      }
+      invoiceMap[pid].push(inv);
+    });
+    
+    const rows = projects.map(p => {
+      const pid = p._id.toString();
+      const projectPayments = paymentMap[pid] || [];
+      const projectInvoices = invoiceMap[pid] || [];
+      
+      const totalPaymentAmount = projectPayments.reduce((sum, pr) => sum + (pr.amount || 0), 0);
+      const totalInvoiceAmount = projectInvoices.reduce((sum, inv) => sum + (inv.amount || 0), 0);
+      
+      const receivedAmount = p.payment?.receivedAmount || 0;
+      const projectAmount = p.projectAmount || 0;
+      const remainingAmount = Math.max(0, projectAmount - receivedAmount);
+      
+      let paymentStatus = p.payment?.paymentStatus;
+      if (!paymentStatus) {
+        if (receivedAmount >= projectAmount && projectAmount > 0) {
+          paymentStatus = 'paid';
+        } else if (receivedAmount > 0) {
+          paymentStatus = 'partially_paid';
+        } else {
+          paymentStatus = 'unpaid';
+        }
+      }
+      
+      const statusText = paymentStatus === 'paid' ? '已支付' : 
+                        paymentStatus === 'partially_paid' ? '部分支付' : '未支付';
+      const isBalanced = Math.abs(totalPaymentAmount - totalInvoiceAmount) < 0.01;
+      
+      return [
+        p.projectNumber || '-',
+        p.projectName || '',
+        p.customerId?.name || '',
+        p.createdBy?.name || '',
+        projectAmount || 0,
+        receivedAmount || 0,
+        remainingAmount || 0,
+        statusText,
+        totalPaymentAmount || 0,
+        totalInvoiceAmount || 0,
+        isBalanced ? '已对平' : '未对平'
+      ];
+    });
+    
+    const header = ['项目编号', '项目名称', '客户', '销售', '项目金额', '已回款', '剩余应收', '回款状态', '回款总额', '发票总额', '对账状态'];
+    const csvData = [header, ...rows].map(row => 
+      row.map(cell => {
+        const str = (cell ?? '').toString();
+        return `"${str.replace(/"/g, '""').replace(/\n/g, ' ').replace(/\r/g, '')}"`;
+      }).join(',')
+    ).join('\r\n');
+    
+    // 转换为GBK编码（Windows Excel默认编码）
+    const gbkBuffer = iconv.encode(csvData, 'gbk');
+    
+    res.setHeader('Content-Type', 'text/csv;charset=gbk');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent('对账表.csv')}`);
+    res.send(gbkBuffer);
+  } catch (error) {
+    console.error('导出对账表失败:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

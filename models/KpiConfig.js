@@ -63,6 +63,27 @@ const kpiConfigSchema = new mongoose.Schema({
     min: 0,
     max: 1
   },
+  // 机构信息
+  companyName: {
+    type: String,
+    default: '公司名称'
+  },
+  companyAddress: {
+    type: String,
+    default: ''
+  },
+  companyContact: {
+    type: String,
+    default: ''
+  },
+  companyPhone: {
+    type: String,
+    default: ''
+  },
+  companyEmail: {
+    type: String,
+    default: ''
+  },
   // 版本号和变更记录
   version: {
     type: Number,
@@ -101,7 +122,9 @@ kpiConfigSchema.statics.getActiveConfig = async function() {
   let config = await this.findOne({ isActive: true });
   if (!config) {
     // 如果没有配置，创建默认配置
-    config = await this.create({});
+    config = await this.create({
+      companyName: '公司名称'
+    });
   }
   return config;
 };
@@ -121,6 +144,7 @@ kpiConfigSchema.methods.getLockedRatios = function() {
 };
 
 module.exports = mongoose.model('KpiConfig', kpiConfigSchema);
+
 
 
 

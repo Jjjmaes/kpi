@@ -11,7 +11,7 @@
     <!-- 登录页面 -->
     <div id="loginSection" class="container">
         <div class="login-form section active">
-            <h2>登录</h2>
+            <h2 id="loginTitle">KPI绩效管理系统</h2>
             <form id="loginForm">
                 <div class="form-group">
                     <label>用户名</label>
@@ -31,7 +31,7 @@
     <div id="mainApp" style="display: none;">
         <div class="container">
             <header>
-                <h1>KPI绩效管理系统</h1>
+                <h1 id="mainTitle">KPI绩效管理系统</h1>
                 <div class="user-info">
                     <span id="userName"></span>
                     <button class="logout-btn" onclick="logout()">退出</button>
@@ -88,10 +88,59 @@
             <!-- 财务管理 -->
             <div id="finance" class="section">
                 <h2>财务管理</h2>
-                <div class="card" style="margin-bottom:16px;">
-                    <div class="card-title">应收对账</div>
+                
+                <!-- 财务管理导航卡片 -->
+                <div id="financeNavCards" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;">
+                    <div class="finance-nav-card" onclick="showFinanceSection('receivables')" data-section="receivables">
+                        <div class="finance-nav-icon">💰</div>
+                        <div class="finance-nav-title">应收对账</div>
+                        <div class="finance-nav-desc">查看项目应收款项</div>
+                    </div>
+                    <div class="finance-nav-card" onclick="showFinanceSection('paymentRecords')" data-section="paymentRecords">
+                        <div class="finance-nav-icon">📋</div>
+                        <div class="finance-nav-title">回款记录</div>
+                        <div class="finance-nav-desc">查看项目回款记录</div>
+                    </div>
+                    <div class="finance-nav-card" onclick="showFinanceSection('addPayment')" data-section="addPayment">
+                        <div class="finance-nav-icon">➕</div>
+                        <div class="finance-nav-title">新增回款</div>
+                        <div class="finance-nav-desc">录入新的回款记录</div>
+                    </div>
+                    <div class="finance-nav-card" onclick="showFinanceSection('invoices')" data-section="invoices">
+                        <div class="finance-nav-icon">📄</div>
+                        <div class="finance-nav-title">发票管理</div>
+                        <div class="finance-nav-desc">查看项目发票信息</div>
+                    </div>
+                    <div class="finance-nav-card" onclick="showFinanceSection('addInvoice')" data-section="addInvoice">
+                        <div class="finance-nav-icon">➕</div>
+                        <div class="finance-nav-title">新增发票</div>
+                        <div class="finance-nav-desc">录入新的发票信息</div>
+                    </div>
+                    <div class="finance-nav-card" onclick="showFinanceSection('reconciliation')" data-section="reconciliation">
+                        <div class="finance-nav-icon">🔍</div>
+                        <div class="finance-nav-title">回款与发票对账</div>
+                        <div class="finance-nav-desc">对账报表查询</div>
+                    </div>
+                    <div class="finance-nav-card" onclick="showFinanceSection('pendingKpi')" data-section="pendingKpi">
+                        <div class="finance-nav-icon">⏳</div>
+                        <div class="finance-nav-title">KPI审核待办</div>
+                        <div class="finance-nav-desc">待审核的KPI记录</div>
+                    </div>
+                    <div class="finance-nav-card" onclick="showFinanceSection('summary')" data-section="summary">
+                        <div class="finance-nav-icon">📊</div>
+                        <div class="finance-nav-title">财务汇总</div>
+                        <div class="finance-nav-desc">财务数据汇总统计</div>
+                    </div>
+                </div>
+                
+                <!-- 应收对账 -->
+                <div id="financeSection-receivables" class="finance-section-content" style="display: none;">
+                    <div class="card" style="margin-bottom:16px;">
+                        <div class="card-title">应收对账</div>
                     <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
-                        <input type="month" id="financeMonth" style="padding:6px;" onchange="loadReceivables()">
+                        <input type="month" id="financeMonth" style="padding:6px; min-width:150px; cursor:pointer;" title="选择月份" onchange="loadReceivables()">
+                        <input type="date" id="financeStartDate" style="padding:6px; min-width:150px; cursor:pointer;" title="起始日期" onchange="loadReceivables()">
+                        <input type="date" id="financeEndDate" style="padding:6px; min-width:150px; cursor:pointer;" title="结束日期" onchange="loadReceivables()">
                         <select id="financeStatus" style="padding:6px;" onchange="loadReceivables()">
                             <option value="">全部状态</option>
                             <option value="pending">待开始</option>
@@ -125,43 +174,51 @@
                         <button onclick="loadReceivables()" style="padding:6px 12px;">刷新</button>
                     </div>
                     <div id="receivablesList"></div>
+                    </div>
                 </div>
 
-                <div class="card" style="margin-bottom:16px;">
-                    <div class="card-title">回款记录</div>
-                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
-                        <input type="month" id="paymentMonth" style="padding:6px;" onchange="loadPaymentRecordsProjects()">
-                        <select id="paymentStatusFilter" style="padding:6px;" onchange="loadPaymentRecordsProjects()">
-                            <option value="">全部状态</option>
-                            <option value="pending">待开始</option>
-                            <option value="in_progress">进行中</option>
-                            <option value="completed">已完成</option>
-                            <option value="cancelled">已取消</option>
-                        </select>
-                        <select id="paymentProjectPaymentStatus" style="padding:6px;" onchange="loadPaymentRecordsProjects()">
-                            <option value="">全部回款状态</option>
-                            <option value="unpaid">未支付</option>
-                            <option value="partially_paid">部分支付</option>
-                            <option value="paid">已支付</option>
-                        </select>
-                        <select id="paymentCustomer" style="padding:6px; min-width:160px;" onchange="loadPaymentRecordsProjects()">
-                            <option value="">全部客户</option>
-                        </select>
-                        <select id="paymentSales" style="padding:6px; min-width:160px;" onchange="loadPaymentRecordsProjects()">
-                            <option value="">全部销售</option>
-                        </select>
-                        <select id="paymentPageSize" style="padding:6px;" onchange="renderPaymentRecordsProjects()">
-                            <option value="10">每页10</option>
-                            <option value="20">每页20</option>
-                            <option value="50">每页50</option>
-                        </select>
-                        <button onclick="loadPaymentRecordsProjects()" style="padding:6px 12px;">刷新</button>
+                <!-- 回款记录 -->
+                <div id="financeSection-paymentRecords" class="finance-section-content" style="display: none;">
+                    <div class="card" style="margin-bottom:16px;">
+                        <div class="card-title">回款记录</div>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
+                            <input type="month" id="paymentMonth" style="padding:6px; min-width:150px; cursor:pointer;" title="选择月份" onchange="loadPaymentRecordsProjects()">
+                            <input type="date" id="paymentStartDate" style="padding:6px; min-width:150px; cursor:pointer;" title="起始日期" onchange="loadPaymentRecordsProjects()">
+                            <input type="date" id="paymentEndDate" style="padding:6px; min-width:150px; cursor:pointer;" title="结束日期" onchange="loadPaymentRecordsProjects()">
+                            <select id="paymentStatusFilter" style="padding:6px;" onchange="loadPaymentRecordsProjects()">
+                                <option value="">全部状态</option>
+                                <option value="pending">待开始</option>
+                                <option value="in_progress">进行中</option>
+                                <option value="completed">已完成</option>
+                                <option value="cancelled">已取消</option>
+                            </select>
+                            <select id="paymentProjectPaymentStatus" style="padding:6px;" onchange="loadPaymentRecordsProjects()">
+                                <option value="">全部回款状态</option>
+                                <option value="unpaid">未支付</option>
+                                <option value="partially_paid">部分支付</option>
+                                <option value="paid">已支付</option>
+                            </select>
+                            <select id="paymentCustomer" style="padding:6px; min-width:160px;" onchange="loadPaymentRecordsProjects()">
+                                <option value="">全部客户</option>
+                            </select>
+                            <select id="paymentSales" style="padding:6px; min-width:160px;" onchange="loadPaymentRecordsProjects()">
+                                <option value="">全部销售</option>
+                            </select>
+                            <select id="paymentPageSize" style="padding:6px;" onchange="renderPaymentRecordsProjects()">
+                                <option value="10">每页10</option>
+                                <option value="20">每页20</option>
+                                <option value="50">每页50</option>
+                            </select>
+                            <button onclick="loadPaymentRecordsProjects()" style="padding:6px 12px;">刷新</button>
+                        </div>
+                        <div id="paymentProjectsList"></div>
                     </div>
-                    <div id="paymentProjectsList"></div>
                 </div>
                 
-                <div class="card" style="margin-bottom:16px;">
-                    <div class="card-title">新增回款</div>
+                <!-- 新增回款 -->
+                <div id="financeSection-addPayment" class="finance-section-content" style="display: none;">
+                    <div class="card" style="margin-bottom:16px;">
+                        <div class="card-title">新增回款</div>
                     <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
                         <div style="position: relative; min-width: 300px;">
                             <input type="text" id="paymentProjectSearch" placeholder="搜索项目（编号/名称/客户）" 
@@ -185,10 +242,13 @@
                         <button onclick="addPaymentRecord()" style="padding:6px 12px;">新增回款</button>
                     </div>
                     <div id="paymentRecords"></div>
+                    </div>
                 </div>
 
-                <div class="card" style="margin-bottom:16px;">
-                    <div class="card-title">发票管理</div>
+                <!-- 发票管理 -->
+                <div id="financeSection-invoices" class="finance-section-content" style="display: none;">
+                    <div class="card" style="margin-bottom:16px;">
+                        <div class="card-title">发票管理</div>
                     <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
                         <input type="month" id="invoiceMonth" style="padding:6px;" onchange="loadInvoiceProjects()">
                         <select id="invoiceStatusFilter" style="padding:6px;" onchange="loadInvoiceProjects()">
@@ -218,10 +278,13 @@
                         <button onclick="loadInvoiceProjects()" style="padding:6px 12px;">刷新</button>
                     </div>
                     <div id="invoiceProjectsList"></div>
+                    </div>
                 </div>
                 
-                <div class="card" style="margin-bottom:16px;">
-                    <div class="card-title">新增发票</div>
+                <!-- 新增发票 -->
+                <div id="financeSection-addInvoice" class="finance-section-content" style="display: none;">
+                    <div class="card" style="margin-bottom:16px;">
+                        <div class="card-title">新增发票</div>
                     <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
                         <div style="position: relative; min-width: 300px;">
                             <input type="text" id="invoiceProjectSearch" placeholder="搜索项目（编号/名称/客户）" 
@@ -242,10 +305,13 @@
                         <input type="text" id="invoiceNote" placeholder="备注" style="padding:6px; width:150px;">
                         <button onclick="addInvoice()" style="padding:6px 12px;">新增发票</button>
                     </div>
+                    </div>
                 </div>
                 
-                <div class="card" style="margin-bottom:16px;">
-                    <div class="card-title">回款与发票对账</div>
+                <!-- 回款与发票对账 -->
+                <div id="financeSection-reconciliation" class="finance-section-content" style="display: none;">
+                    <div class="card" style="margin-bottom:16px;">
+                        <div class="card-title">回款与发票对账</div>
                     <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
                         <input type="date" id="reconciliationStartDate" style="padding:6px;" placeholder="开始日期">
                         <input type="date" id="reconciliationEndDate" style="padding:6px;" placeholder="结束日期">
@@ -253,24 +319,31 @@
                         <button onclick="exportReconciliation()" style="padding:6px 12px;">导出对账表</button>
                     </div>
                     <div id="reconciliationList"></div>
+                    </div>
                 </div>
 
-                <div class="card" style="margin-bottom:16px;">
-                    <div class="card-title">KPI审核待办</div>
-                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
-                        <input type="month" id="kpiPendingMonth" style="padding:6px;" onchange="loadPendingKpi()">
-                        <button onclick="loadPendingKpi()" style="padding:6px 12px;">刷新</button>
+                <!-- KPI审核待办 -->
+                <div id="financeSection-pendingKpi" class="finance-section-content" style="display: none;">
+                    <div class="card" style="margin-bottom:16px;">
+                        <div class="card-title">KPI审核待办</div>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
+                            <input type="month" id="kpiPendingMonth" style="padding:6px;" onchange="loadPendingKpi()">
+                            <button onclick="loadPendingKpi()" style="padding:6px 12px;">刷新</button>
+                        </div>
+                        <div id="pendingKpiList"></div>
                     </div>
-                    <div id="pendingKpiList"></div>
                 </div>
 
-                <div class="card">
-                    <div class="card-title">报表（按客户/销售）</div>
-                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
-                        <input type="month" id="reportMonth" style="padding:6px;" onchange="loadFinanceSummary()">
-                        <button onclick="loadFinanceSummary()" style="padding:6px 12px;">刷新</button>
+                <!-- 财务汇总 -->
+                <div id="financeSection-summary" class="finance-section-content" style="display: none;">
+                    <div class="card">
+                        <div class="card-title">报表（按客户/销售）</div>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
+                            <input type="month" id="reportMonth" style="padding:6px;" onchange="loadFinanceSummary()">
+                            <button onclick="loadFinanceSummary()" style="padding:6px 12px;">刷新</button>
+                        </div>
+                        <div id="financeSummary"></div>
                     </div>
-                    <div id="financeSummary"></div>
                 </div>
             </div>
 

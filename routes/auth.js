@@ -2,6 +2,27 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { authenticate } = require('../middleware/auth');
+
+// 密码复杂度校验
+function validatePassword(password) {
+  // 最少 8 位，需包含大写、小写、数字、特殊字符
+  const minLen = 8;
+  if (!password || password.length < minLen) {
+    return '密码长度至少 8 位';
+  }
+  const upper = /[A-Z]/.test(password);
+  const lower = /[a-z]/.test(password);
+  const digit = /\d/.test(password);
+  const special = /[^A-Za-z0-9]/.test(password);
+  if (!upper || !lower || !digit || !special) {
+    return '密码需包含大写字母、小写字母、数字和特殊字符';
+  }
+  if (password.length > 64) {
+    return '密码长度不能超过 64 位';
+  }
+  return null;
+}
 
 // 登录
 router.post('/login', async (req, res) => {
@@ -31,6 +52,12 @@ router.post('/login', async (req, res) => {
       });
     }
 
+    // 兼容历史用户：若未设置标记，则要求修改密码
+    if (user.passwordMustChange === undefined) {
+      user.passwordMustChange = true;
+      await user.save();
+    }
+
     const token = jwt.sign(
       { userId: user._id, username: user.username },
       process.env.JWT_SECRET || 'your-secret-key',
@@ -45,7 +72,8 @@ router.post('/login', async (req, res) => {
         username: user.username,
         name: user.name,
         email: user.email,
-        roles: user.roles
+      roles: user.roles,
+      passwordMustChange: user.passwordMustChange
       }
     });
   } catch (error) {
@@ -73,7 +101,39 @@ router.get('/me', require('../middleware/auth').authenticate, async (req, res) =
   }
 });
 
+// 修改密码
+router.post('/change-password', authenticate, async (req, res) => {
+  try {
+    const { oldPassword, newPassword } = req.body;
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: '旧密码和新密码不能为空' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ success: false, message: '用户不存在' });
+
+    const isOldValid = await user.comparePassword(oldPassword);
+    if (!isOldValid) {
+      return res.status(400).json({ success: false, message: '旧密码不正确' });
+    }
+
+    const pwdError = validatePassword(newPassword);
+    if (pwdError) return res.status(400).json({ success: false, message: pwdError });
+
+    user.password = newPassword;
+    user.passwordMustChange = false;
+    user.passwordUpdatedAt = Date.now();
+    await user.save();
+
+    res.json({ success: true, message: '密码已更新' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;
+
+
 
 
 

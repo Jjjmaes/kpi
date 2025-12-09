@@ -8,6 +8,14 @@ let allUsers = []; // 缓存用户列表
 let allCustomers = []; // 缓存客户列表
 let currentProjectDetail = null; // 缓存当前项目详情
 const isFinanceRole = () => (currentUser?.roles || []).some(r => r === 'admin' || r === 'finance');
+const isSalesRole = () => (currentUser?.roles || []).some(r => r === 'sales' || r === 'part_time_sales');
+let orgInfo = {
+    companyName: 'KPI绩效管理系统',
+    companyAddress: '',
+    companyContact: '',
+    companyPhone: '',
+    companyEmail: ''
+};
 
 // 判断当前用户是否应该看到项目金额和单价信息
 // 翻译、审校、排版角色不应该看到金额信息
@@ -26,6 +34,9 @@ const canViewProjectAmount = () => {
 let allProjectsCache = []; // 缓存项目列表
 let receivablesCache = []; // 缓存应收结果
 let projectPage = 1;
+let projectFilterMonth = ''; // 来自看板的月份筛选（成交/创建月份）
+let projectFilterDeliveryOverdue = false; // 看板跳转：只看交付逾期
+let salesFinanceView = false; // 销售从看板进入财务只读视图
 let receivablePage = 1;
 let paymentRecordsProjectsCache = []; // 缓存回款记录项目列表
 let paymentRecordsProjectsPage = 1;
@@ -34,9 +45,30 @@ let invoiceProjectsCache = []; // 缓存发票项目列表
 let invoiceProjectsPage = 1;
 let expandedInvoiceProjectId = null; // 当前展开显示发票的项目ID
 let languagesCache = [];
+let forcePasswordChangeRequired = false;
+
+// 机构信息（公开读取，用于展示名称）
+async function loadOrgInfo() {
+    try {
+        const res = await fetch(`${API_BASE}/config/public`);
+        const data = await res.json();
+        if (data.success && data.data) {
+            orgInfo = data.data;
+        }
+    } catch (e) {
+        console.warn('加载机构信息失败，使用默认值', e);
+    }
+    const titleText = `${orgInfo.companyName || 'KPI'}绩效管理系统`;
+    document.title = titleText;
+    const loginTitle = document.getElementById('loginTitle');
+    if (loginTitle) loginTitle.textContent = 'KPI SYSTEM';
+    const mainTitle = document.getElementById('mainTitle');
+    if (mainTitle) mainTitle.textContent = titleText;
+}
 
 // 初始化
-    document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadOrgInfo();
         token = localStorage.getItem('token');
         console.log('[Auth] DOMContentLoaded, token exists:', !!token);
         if (token) {
@@ -57,7 +89,15 @@ async function checkAuth() {
         console.log('[Auth] /auth/me result:', data);
         if (data.success) {
             currentUser = data.user;
+            if (currentUser.passwordMustChange) {
+                // 不在未登录状态直接弹窗，要求重新登录后再改密码
+                token = null;
+                localStorage.removeItem('token');
+                showLogin();
+                showAlert('loginAlert', '首次登录需修改密码，请先登录后按提示修改', 'error');
+            } else {
             showMainApp();
+            }
         } else {
             showLogin();
         }
@@ -87,7 +127,11 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
             token = data.token;
             currentUser = data.user;
             localStorage.setItem('token', token);
+            if (currentUser.passwordMustChange) {
+                showForcePasswordChangeModal(false, password);
+            } else {
             showMainApp();
+            }
         } else {
             showAlert('loginAlert', data.message, 'error');
         }
@@ -96,6 +140,82 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
         showAlert('loginAlert', '登录失败: ' + error.message, 'error');
     }
 });
+
+function passwordValidationMessage(pwd) {
+    if (!pwd || pwd.length < 8) return '密码长度至少 8 位';
+    if (pwd.length > 64) return '密码长度不能超过 64 位';
+    if (!/[A-Z]/.test(pwd) || !/[a-z]/.test(pwd) || !/\d/.test(pwd) || !/[^A-Za-z0-9]/.test(pwd)) {
+        return '密码需包含大写字母、小写字母、数字和特殊字符';
+    }
+    return '';
+}
+
+function showForcePasswordChangeModal(fromAuthCheck = false, defaultOldPwd = '') {
+    forcePasswordChangeRequired = true;
+    const content = `
+        <div id="forcePwdAlert"></div>
+        <p style="margin:8px 0;">首次登录需修改密码。密码至少 8 位，需包含大写、小写、数字和特殊字符。</p>
+        <form id="forcePwdForm">
+            <div class="form-group">
+                <label>旧密码</label>
+                <input type="password" id="forceOldPwd" value="${defaultOldPwd || ''}" required>
+            </div>
+            <div class="form-group">
+                <label>新密码</label>
+                <input type="password" id="forceNewPwd" required>
+            </div>
+            <div class="form-group">
+                <label>确认新密码</label>
+                <input type="password" id="forceNewPwdConfirm" required>
+            </div>
+            <div class="action-buttons">
+                <button type="submit">提交</button>
+            </div>
+        </form>
+    `;
+    showModal('修改密码', content);
+    const form = document.getElementById('forcePwdForm');
+    form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const oldPwd = document.getElementById('forceOldPwd').value;
+        const newPwd = document.getElementById('forceNewPwd').value;
+        const newPwdConfirm = document.getElementById('forceNewPwdConfirm').value;
+
+        if (newPwd !== newPwdConfirm) {
+            showAlert('forcePwdAlert', '两次输入的新密码不一致', 'error');
+            return;
+        }
+        const msg = passwordValidationMessage(newPwd);
+        if (msg) {
+            showAlert('forcePwdAlert', msg, 'error');
+            return;
+        }
+        try {
+            const resp = await fetch(`${API_BASE}/auth/change-password`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd })
+            });
+            const result = await resp.json();
+            if (result.success) {
+                showAlert('forcePwdAlert', '密码更新成功，请继续使用系统', 'success');
+                currentUser.passwordMustChange = false;
+                forcePasswordChangeRequired = false;
+                setTimeout(() => {
+                    closeModal();
+                    showMainApp();
+                }, 500);
+            } else {
+                showAlert('forcePwdAlert', result.message || '修改失败', 'error');
+            }
+        } catch (err) {
+            showAlert('forcePwdAlert', '请求失败: ' + err.message, 'error');
+        }
+    });
+}
 
 // 退出
 function logout() {
@@ -192,15 +312,25 @@ function showMainApp() {
 }
 
 // 切换section
-function showSection(sectionId) {
-    if (sectionId === 'finance' && !isFinanceRole()) {
-        showToast('无权限访问财务模块', 'error');
-        return;
+function showSection(sectionId, triggerBtn) {
+    if (sectionId === 'finance') {
+        if (isFinanceRole()) {
+            // 财务或管理员完整访问
+            salesFinanceView = false;
+        } else if (isSalesRole() && salesFinanceView) {
+            // 销售从看板跳转进入，只读视图
+        } else {
+            showToast('无权限访问财务模块', 'error');
+            return;
+        }
+    } else {
+        salesFinanceView = false; // 切换到其他模块时关闭销售财务视图
     }
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
     document.getElementById(sectionId).classList.add('active');
-    event.target.classList.add('active');
+    const btn = triggerBtn || (typeof event !== 'undefined' ? event.target : null) || document.querySelector(`.nav button[onclick*="${sectionId}"]`);
+    if (btn) btn.classList.add('active');
     
     // 切换到财务管理时，确保筛选条件已填充
     if (sectionId === 'finance') {
@@ -217,6 +347,108 @@ function showSection(sectionId) {
             // 如果数据已加载，直接填充
             fillFinanceFilters();
         }
+        // 默认显示第一个section（应收对账）
+        showFinanceSection('receivables');
+    }
+}
+
+// 显示财务管理子section
+function showFinanceSection(sectionName) {
+    // 销售只允许查看回款列表
+    if (salesFinanceView && !isFinanceRole()) {
+        sectionName = 'paymentRecords';
+    }
+    // 隐藏所有section内容
+    document.querySelectorAll('.finance-section-content').forEach(s => {
+        s.style.display = 'none';
+    });
+    
+    // 移除所有卡片的active状态
+    document.querySelectorAll('.finance-nav-card').forEach(card => {
+        card.classList.remove('active');
+    });
+    
+    // 显示选中的section
+    const targetSection = document.getElementById(`financeSection-${sectionName}`);
+    if (targetSection) {
+        targetSection.style.display = 'block';
+    }
+    
+    // 添加选中卡片的active状态
+    const activeCard = document.querySelector(`.finance-nav-card[data-section="${sectionName}"]`);
+    if (activeCard) {
+        activeCard.classList.add('active');
+    }
+    
+    // 如果是销售只读视图，隐藏其他卡片
+    if (salesFinanceView && !isFinanceRole()) {
+        document.querySelectorAll('.finance-nav-card').forEach(card => {
+            const sec = card.getAttribute('data-section');
+            card.style.display = sec === 'paymentRecords' ? 'flex' : 'none';
+        });
+    } else {
+        document.querySelectorAll('.finance-nav-card').forEach(card => card.style.display = 'flex');
+    }
+}
+
+// Dashboard 卡片跳转导航
+function navigateFromDashboardCard(target, overrideStatus) {
+    const dashMonth = document.getElementById('dashboardMonth')?.value || '';
+    const dashStatus = document.getElementById('dashboardStatus')?.value || '';
+    const dashBiz = document.getElementById('dashboardBusinessType')?.value || '';
+    const applyProjectFilters = () => {
+        projectFilterMonth = dashMonth || '';
+        const statusSel = document.getElementById('projectStatusFilter');
+        const bizSel = document.getElementById('projectBizFilter');
+        if (statusSel && (overrideStatus || dashStatus !== undefined)) statusSel.value = overrideStatus || dashStatus;
+        if (bizSel && dashBiz !== undefined) bizSel.value = dashBiz;
+        renderProjects?.();
+    };
+    const applyFinanceMonth = (fieldId) => {
+        if (dashMonth) {
+            const el = document.getElementById(fieldId);
+            if (el) el.value = dashMonth;
+        }
+    };
+
+    switch (target) {
+        case 'projects':
+            showSection('projects');
+            projectFilterDeliveryOverdue = false;
+            applyProjectFilters();
+            break;
+        case 'paymentOverdue':
+            salesFinanceView = true; // 允许销售只读进入
+            showSection('finance');
+            showFinanceSection('paymentRecords');
+            applyFinanceMonth('paymentMonth');
+            loadPaymentRecordsProjects?.();
+            break;
+        case 'paymentDueSoon':
+            salesFinanceView = true;
+            showSection('finance');
+            showFinanceSection('paymentRecords');
+            applyFinanceMonth('paymentMonth');
+            loadPaymentRecordsProjects?.();
+            break;
+        case 'receivables':
+            showSection('finance');
+            showFinanceSection('receivables');
+            applyFinanceMonth('financeMonth');
+            loadReceivables?.();
+            break;
+        case 'deliveryOverdue':
+            showSection('projects');
+            // 交付逾期，倾向于查看进行中/待开始
+            const statusSel = document.getElementById('projectStatusFilter');
+            if (statusSel) {
+                statusSel.value = overrideStatus || dashStatus || 'in_progress';
+            }
+            projectFilterDeliveryOverdue = true;
+            applyProjectFilters();
+            break;
+        default:
+            showSection('dashboard');
     }
 }
 
@@ -248,25 +480,25 @@ function renderLanguages() {
             <td>${lang.isActive ? '<span class="badge badge-success">启用</span>' : '<span class="badge badge-danger">停用</span>'}</td>
             <td>
                 <button class="btn-small" onclick="showEditLanguageModal('${lang._id}')">编辑</button>
-            </td>
-        </tr>
-    `).join('');
+                </td>
+            </tr>
+        `).join('');
     document.getElementById('languagesList').innerHTML = `
-        <table>
-            <thead>
-                <tr>
+            <table>
+                <thead>
+                    <tr>
                     <th>语种名称</th>
                     <th>代码</th>
                     <th>本地名称</th>
-                    <th>状态</th>
-                    <th>操作</th>
-                </tr>
-            </thead>
-            <tbody>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
                 ${rows || '<tr><td colspan="5" style="text-align:center;">暂无语种</td></tr>'}
-            </tbody>
-        </table>
-    `;
+                </tbody>
+            </table>
+        `;
 }
 
 function showCreateLanguageModal() {
@@ -397,6 +629,7 @@ function showModal(title, content) {
 }
 
 function closeModal() {
+    if (forcePasswordChangeRequired) return;
     document.getElementById('modalOverlay').classList.remove('active');
 }
 
@@ -458,9 +691,9 @@ async function loadUsersForSelect() {
             allUsers = data.data;
             const select = document.getElementById('kpiUserSelect');
             if (select) {
-                select.innerHTML = '<option value="">全部用户</option>' +
-                    data.data.map(u => `<option value="${u._id}">${u.name}</option>`).join('');
-            }
+            select.innerHTML = '<option value="">全部用户</option>' +
+                data.data.map(u => `<option value="${u._id}">${u.name}</option>`).join('');
+        }
         }
         return data;
     } catch (error) {
@@ -960,12 +1193,15 @@ function renderProjects() {
     const cust = document.getElementById('projectCustomerFilter')?.value || '';
     const pageSizeSel = document.getElementById('projectPageSize');
     const pageSize = pageSizeSel ? parseInt(pageSizeSel.value, 10) || 10 : 10;
+    const now = new Date();
     const filtered = allProjectsCache.filter(p => {
         const matchesSearch = !search || (p.projectName?.toLowerCase().includes(search)) || (p.projectNumber?.toLowerCase().includes(search)) || ((p.customerId?.name || p.clientName || '').toLowerCase().includes(search));
         const matchesStatus = !status || p.status === status;
         const matchesBiz = !biz || p.businessType === biz;
         const matchesCust = !cust || (p.customerId && p.customerId._id === cust);
-        return matchesSearch && matchesStatus && matchesBiz && matchesCust;
+        const matchesMonth = !projectFilterMonth || (p.createdAt && new Date(p.createdAt).toISOString().slice(0,7) === projectFilterMonth);
+        const matchesDeliveryOverdue = !projectFilterDeliveryOverdue || (p.deadline && new Date(p.deadline) < now && p.status !== 'completed');
+        return matchesSearch && matchesStatus && matchesBiz && matchesCust && matchesMonth && matchesDeliveryOverdue;
     });
     const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
     if (projectPage > totalPages) projectPage = totalPages;
@@ -1015,6 +1251,49 @@ function jumpProjectPage(val, total) {
     projectPage = page;
     renderProjects();
 }
+
+// 通用CSV导出函数，解决Excel中文乱码问题
+// 注意：此函数使用UTF-8 BOM，但Excel可能仍显示乱码
+// 建议使用后端API导出（GBK编码）以获得更好的兼容性
+function exportToCSV(data, filename) {
+    try {
+        // 将数据转换为CSV格式
+        const csv = data.map(row => 
+            row.map(cell => {
+                const str = (cell ?? '').toString();
+                // 转义引号和换行符
+                return `"${str.replace(/"/g, '""').replace(/\n/g, ' ').replace(/\r/g, '')}"`;
+            }).join(',')
+        ).join('\r\n'); // 使用Windows换行符
+        
+        // 使用UTF-8 BOM
+        const BOM = '\uFEFF';
+        const csvWithBOM = BOM + csv;
+        
+        // 使用TextEncoder确保UTF-8编码正确
+        const encoder = new TextEncoder();
+        const csvBytes = encoder.encode(csvWithBOM);
+        
+        // 创建Blob
+        const blob = new Blob([csvBytes], { 
+            type: 'text/csv;charset=utf-8;' 
+        });
+        
+        // 创建下载链接
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    } catch (error) {
+        console.error('CSV导出失败:', error);
+        showToast('导出失败: ' + error.message, 'error');
+    }
+}
+
 function exportProjects() {
     const search = document.getElementById('projectSearch')?.value?.toLowerCase() || '';
     const status = document.getElementById('projectStatusFilter')?.value || '';
@@ -1045,14 +1324,7 @@ function exportProjects() {
         return baseRow;
     });
     const header = showAmount ? ['项目编号','项目名称','客户','业务类型','项目金额','交付时间','状态'] : ['项目编号','项目名称','客户','业务类型','交付时间','状态'];
-    const csv = [header, ...rows].map(r => r.map(v => `"${(v ?? '').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'projects.csv';
-    a.click();
-    URL.revokeObjectURL(url);
+    exportToCSV([header, ...rows], 'projects.csv');
 }
 
 function fillProjectCustomerFilter() {
@@ -1360,6 +1632,10 @@ async function showCreateProjectModal() {
                 <label>交付时间 *</label>
                 <input type="date" name="deadline" required>
             </div>
+            <div class="form-group">
+                <label>合同约定回款日期（协议付款日，未填默认创建日起 3 个月内）</label>
+                <input type="date" name="expectedAt" id="createExpectedAt">
+            </div>
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
                 <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">其他信息（可选）</h4>
                 <div style="display: flex; gap: 15px; flex-wrap: wrap;">
@@ -1483,6 +1759,13 @@ async function showCreateProjectModal() {
     document.getElementById('targetLanguagesContainer').innerHTML = '';
     // 添加第一个目标语种行
     addTargetLanguageRow();
+    // 设置协议付款日默认值：创建日起 3 个月
+    const expectedAtInput = document.getElementById('createExpectedAt');
+    if (expectedAtInput) {
+        const d = new Date();
+        d.setMonth(d.getMonth() + 3);
+        expectedAtInput.value = d.toISOString().slice(0, 10);
+    }
 }
 
 let targetLanguageRowIndex = 0;
@@ -1643,19 +1926,28 @@ async function addMemberRow() {
                 <option value="layout">兼职排版</option>
     `;
     
+    // 过滤用户列表：如果销售有PM角色，且当前选择的是PM角色，则过滤掉自己
+    let filteredUsers = allUsers.filter(u => u.isActive);
+    if (isSales && currentUser) {
+        const hasPMRole = currentUser.roles?.includes('pm');
+        // 如果销售有PM角色，在创建项目时选择PM角色时，过滤掉自己
+        // 注意：这里我们无法知道用户会选择什么角色，所以需要在onchange事件中处理
+        // 但为了安全，我们可以在用户选择PM角色时动态过滤
+    }
+    
     row.innerHTML = `
         <div style="flex: 2;">
             <label style="font-size: 12px;">选择用户</label>
-            <select name="memberUserId" class="member-user-select" required>
+            <select name="memberUserId" class="member-user-select" required onchange="validateMemberSelection(this)">
                 <option value="">请选择</option>
-                ${allUsers.filter(u => u.isActive).map(u => 
+                ${filteredUsers.map(u => 
                     `<option value="${u._id}">${u.name} (${u.username})</option>`
                 ).join('')}
             </select>
         </div>
         <div style="flex: 1.5;">
             <label style="font-size: 12px;">角色</label>
-            <select name="memberRole" class="member-role-select" required onchange="toggleMemberFields(this)">
+            <select name="memberRole" class="member-role-select" required onchange="toggleMemberFields(this); filterMemberUsersByRole(this)">
                 ${roleOptions}
             </select>
         </div>
@@ -1696,6 +1988,101 @@ function toggleMemberFields(selectElement) {
     } else {
         translatorGroup.style.display = 'none';
         wordRatioGroup.style.display = 'none';
+    }
+    
+    // 根据角色过滤用户列表
+    filterMemberUsersByRole(selectElement);
+}
+
+// 根据角色过滤成员用户列表（创建项目时使用）
+function filterMemberUsersByRole(selectElement) {
+    const row = selectElement.closest('.member-row');
+    if (!row) return;
+    
+    const role = selectElement.value;
+    const userSelect = row.querySelector('.member-user-select');
+    
+    if (!userSelect || !role) return;
+    
+    // 过滤出具有该角色的激活用户
+    let filteredUsers = allUsers.filter(u => {
+        if (!u.isActive) return false;
+        return u.roles && Array.isArray(u.roles) && u.roles.includes(role);
+    });
+    
+    // 校验：如果当前用户是销售（或兼职销售），并且同时有PM角色，则不能将PM角色分配给自己
+    if (currentUser && role === 'pm') {
+        const isSales = currentUser.roles?.includes('sales') || currentUser.roles?.includes('part_time_sales');
+        const hasPMRole = currentUser.roles?.includes('pm');
+        
+        if (isSales && hasPMRole) {
+            filteredUsers = filteredUsers.filter(u => u._id !== currentUser._id);
+        }
+    }
+    
+    // 校验：如果当前用户是PM，并且同时有翻译或审校角色，则不能将翻译或审校分配给自己
+    if (currentUser && (role === 'translator' || role === 'reviewer')) {
+        const isPM = currentUser.roles?.includes('pm');
+        const isTranslator = currentUser.roles?.includes('translator');
+        const isReviewer = currentUser.roles?.includes('reviewer');
+        
+        if (isPM) {
+            if (role === 'translator' && isTranslator) {
+                filteredUsers = filteredUsers.filter(u => u._id !== currentUser._id);
+            }
+            if (role === 'reviewer' && isReviewer) {
+                filteredUsers = filteredUsers.filter(u => u._id !== currentUser._id);
+            }
+        }
+    }
+    
+    // 更新下拉列表
+    const currentValue = userSelect.value;
+    userSelect.innerHTML = '<option value="">请选择</option>' + 
+        filteredUsers.map(u => `<option value="${u._id}">${u.name} (${u.username})</option>`).join('');
+    
+    // 如果之前选中的用户还在列表中，恢复选中
+    if (currentValue && filteredUsers.some(u => u._id === currentValue)) {
+        userSelect.value = currentValue;
+    } else {
+        userSelect.value = '';
+    }
+}
+
+// 验证成员选择（创建项目时使用）
+function validateMemberSelection(selectElement) {
+    const row = selectElement.closest('.member-row');
+    if (!row) return;
+    
+    const userId = selectElement.value;
+    const roleSelect = row.querySelector('.member-role-select');
+    const role = roleSelect?.value;
+    
+    if (!userId || !role || !currentUser) return;
+    
+    const isSelfAssignment = userId === currentUser._id;
+    
+    // 校验1：如果当前用户是PM，并且同时有翻译或审校角色，则不能将翻译或审校分配给自己
+    const isPM = currentUser.roles?.includes('pm');
+    const isTranslator = currentUser.roles?.includes('translator');
+    const isReviewer = currentUser.roles?.includes('reviewer');
+    
+    if (isPM && isSelfAssignment) {
+        if ((role === 'translator' && isTranslator) || (role === 'reviewer' && isReviewer)) {
+            showToast('作为项目经理，不能将翻译或审校任务分配给自己', 'error');
+            selectElement.value = '';
+            return;
+        }
+    }
+    
+    // 校验2：如果当前用户是销售（或兼职销售），并且同时有PM角色，则不能将PM角色分配给自己
+    const isSales = currentUser.roles?.includes('sales') || currentUser.roles?.includes('part_time_sales');
+    const hasPMRole = currentUser.roles?.includes('pm');
+    
+    if (isSales && hasPMRole && isSelfAssignment && role === 'pm') {
+        showToast('作为销售，不能将项目经理角色分配给自己', 'error');
+        selectElement.value = '';
+        return;
     }
 }
 
@@ -1979,6 +2366,30 @@ async function createProject(e) {
         const userId = row.querySelector('.member-user-select')?.value;
         const role = row.querySelector('.member-role-select')?.value;
         if (userId && role) {
+            // 校验1：如果当前用户是PM，并且同时有翻译或审校角色，则不能将翻译或审校分配给自己
+            if (currentUser) {
+                const isPM = currentUser.roles?.includes('pm');
+                const isTranslator = currentUser.roles?.includes('translator');
+                const isReviewer = currentUser.roles?.includes('reviewer');
+                const isSelfAssignment = userId === currentUser._id;
+                
+                if (isPM && isSelfAssignment) {
+                    if ((role === 'translator' && isTranslator) || (role === 'reviewer' && isReviewer)) {
+                        showToast('作为项目经理，不能将翻译或审校任务分配给自己', 'error');
+                        return;
+                    }
+                }
+                
+                // 校验2：如果当前用户是销售（或兼职销售），并且同时有PM角色，则不能将PM角色分配给自己
+                const isSales = currentUser.roles?.includes('sales') || currentUser.roles?.includes('part_time_sales');
+                const hasPMRole = currentUser.roles?.includes('pm');
+                
+                if (isSales && hasPMRole && isSelfAssignment && role === 'pm') {
+                    showToast('作为销售，不能将项目经理角色分配给自己', 'error');
+                    return;
+                }
+            }
+            
             const member = {
                 userId,
                 role,
@@ -2041,6 +2452,11 @@ async function createProject(e) {
         layoutAssignedTo: layoutAssignedTo || undefined
     } : undefined;
     
+    // 协议回款日，默认创建日起 3 个月内
+    const expectedAtInput = formData.get('expectedAt');
+    const defaultExpected = new Date();
+    defaultExpected.setMonth(defaultExpected.getMonth() + 3);
+    
     const data = {
         projectNumber: formData.get('projectNumber') || undefined,
         projectName: formData.get('projectName'),
@@ -2053,6 +2469,7 @@ async function createProject(e) {
         unitPrice: formData.get('unitPrice') ? parseFloat(formData.get('unitPrice')) : undefined,
         projectAmount: parseFloat(formData.get('projectAmount')),
         deadline: formData.get('deadline'),
+        expectedAt: expectedAtInput || defaultExpected.toISOString().slice(0,10),
         isTaxIncluded: formData.get('isTaxIncluded') === 'on',
         needInvoice: formData.get('needInvoice') === 'on',
         specialRequirements: Object.keys(specialRequirements).some(k => specialRequirements[k]) ? specialRequirements : undefined,
@@ -2509,11 +2926,39 @@ function filterUsersByRole() {
     }
     
     // 过滤出具有该角色的激活用户
-    const filteredUsers = allUsers.filter(u => {
+    let filteredUsers = allUsers.filter(u => {
         if (!u.isActive) return false;
         // 检查用户是否具有该角色
         return u.roles && Array.isArray(u.roles) && u.roles.includes(role);
     });
+    
+    // 校验：如果当前用户是PM，并且同时有翻译或审校角色，则不能将翻译或审校分配给自己
+    if (currentUser && (role === 'translator' || role === 'reviewer')) {
+        const isPM = currentUser.roles?.includes('pm');
+        const isTranslator = currentUser.roles?.includes('translator');
+        const isReviewer = currentUser.roles?.includes('reviewer');
+        
+        if (isPM) {
+            // 如果是PM且有翻译角色，且当前选择的是翻译角色，则过滤掉自己
+            if (role === 'translator' && isTranslator) {
+                filteredUsers = filteredUsers.filter(u => u._id !== currentUser._id);
+            }
+            // 如果是PM且有审校角色，且当前选择的是审校角色，则过滤掉自己
+            if (role === 'reviewer' && isReviewer) {
+                filteredUsers = filteredUsers.filter(u => u._id !== currentUser._id);
+            }
+        }
+    }
+    
+    // 校验：如果当前用户是销售（或兼职销售），并且同时有PM角色，则不能将PM角色分配给自己
+    if (currentUser && role === 'pm') {
+        const isSales = currentUser.roles?.includes('sales') || currentUser.roles?.includes('part_time_sales');
+        const hasPMRole = currentUser.roles?.includes('pm');
+        
+        if (isSales && hasPMRole) {
+            filteredUsers = filteredUsers.filter(u => u._id !== currentUser._id);
+        }
+    }
     
     if (filteredUsers.length === 0) {
         userIdSelect.innerHTML = '<option value="" disabled>暂无该角色的可用用户</option>';
@@ -2566,7 +3011,32 @@ async function addMember(e, projectId) {
     e.preventDefault();
     const formData = new FormData(e.target);
     const role = formData.get('role');
+    const userId = formData.get('userId');
     const layoutCost = parseFloat(formData.get('layoutCost') || 0);
+    
+    // 校验1：如果当前用户是PM，并且同时有翻译或审校角色，则不能将翻译或审校分配给自己
+    if (currentUser) {
+        const isPM = currentUser.roles?.includes('pm');
+        const isTranslator = currentUser.roles?.includes('translator');
+        const isReviewer = currentUser.roles?.includes('reviewer');
+        const isSelfAssignment = userId === currentUser._id;
+        
+        if (isPM && isSelfAssignment) {
+            if ((role === 'translator' && isTranslator) || (role === 'reviewer' && isReviewer)) {
+                showToast('作为项目经理，不能将翻译或审校任务分配给自己', 'error');
+                return;
+            }
+        }
+        
+        // 校验2：如果当前用户是销售（或兼职销售），并且同时有PM角色，则不能将PM角色分配给自己
+        const isSales = currentUser.roles?.includes('sales') || currentUser.roles?.includes('part_time_sales');
+        const hasPMRole = currentUser.roles?.includes('pm');
+        
+        if (isSales && hasPMRole && isSelfAssignment && role === 'pm') {
+            showToast('作为销售，不能将项目经理角色分配给自己', 'error');
+            return;
+        }
+    }
     
     // 如果是兼职排版且填写了排版费用，验证费用
     if (role === 'layout' && layoutCost > 0) {
@@ -2577,7 +3047,7 @@ async function addMember(e, projectId) {
     }
     
     const data = {
-        userId: formData.get('userId'),
+        userId: userId,
         role: role,
         translatorType: formData.get('translatorType'),
         wordRatio: parseFloat(formData.get('wordRatio') || '1.0'),
@@ -3263,6 +3733,29 @@ async function loadConfig() {
             const config = data.data;
             const html = `
                 <form id="configUpdateForm">
+                    <h3 style="margin-bottom: 10px;">机构信息</h3>
+                    <div class="form-group">
+                        <label>公司名称</label>
+                        <input type="text" name="companyName" value="${config.companyName || ''}" placeholder="请输入公司名称">
+                    </div>
+                    <div class="form-group">
+                        <label>公司地址</label>
+                        <input type="text" name="companyAddress" value="${config.companyAddress || ''}" placeholder="请输入公司地址">
+                    </div>
+                    <div class="form-group">
+                        <label>联系人</label>
+                        <input type="text" name="companyContact" value="${config.companyContact || ''}" placeholder="请输入联系人">
+                    </div>
+                    <div class="form-group">
+                        <label>联系电话</label>
+                        <input type="text" name="companyPhone" value="${config.companyPhone || ''}" placeholder="请输入联系电话">
+                    </div>
+                    <div class="form-group">
+                        <label>联系邮箱</label>
+                        <input type="text" name="companyEmail" value="${config.companyEmail || ''}" placeholder="请输入联系邮箱">
+                    </div>
+
+                    <h3 style="margin: 16px 0 10px;">KPI 系数</h3>
                     <div class="form-group">
                         <label>翻译（MTPE）系数</label>
                         <input type="number" step="0.001" value="${config.translator_ratio_mtpe}" 
@@ -3318,8 +3811,9 @@ async function loadConfig() {
                 e.preventDefault();
                 const formData = new FormData(e.target);
                 const data = Object.fromEntries(formData);
+                const numberFields = ['translator_ratio_mtpe','translator_ratio_deepedit','reviewer_ratio','pm_ratio','sales_bonus_ratio','sales_commission_ratio','admin_ratio','completion_factor'];
                 Object.keys(data).forEach(k => {
-                    if (k !== 'reason' && data[k]) data[k] = parseFloat(data[k]);
+                    if (numberFields.includes(k) && data[k]) data[k] = parseFloat(data[k]);
                 });
 
                 try {
@@ -3335,6 +3829,8 @@ async function loadConfig() {
                     if (result.success) {
                         showAlert('configAlert', '配置更新成功', 'success');
                         loadConfig();
+                        // 重新加载机构信息，更新标题显示
+                        loadOrgInfo();
                     } else {
                         showAlert('configAlert', result.message, 'error');
                     }
@@ -3629,7 +4125,7 @@ function renderDashboardCards(data) {
     
     const cards = `
         <div class="card-grid">
-            <div class="card stat-card stat-primary">
+            <div class="card stat-card stat-primary" onclick="navigateFromDashboardCard('projects')">
                 <div class="stat-icon">📊</div>
                 <div class="stat-content">
                 <div class="card-title">当月项目数</div>
@@ -3649,7 +4145,7 @@ function renderDashboardCards(data) {
             ` : ''}
             ${!showSalesAmount ? `
             ${data.totalProjectAmount !== undefined ? `
-            <div class="card stat-card stat-success">
+            <div class="card stat-card stat-success" onclick="navigateFromDashboardCard('projects')">
                 <div class="stat-icon">💰</div>
                 <div class="stat-content">
                 <div class="card-title">项目金额合计</div>
@@ -3658,7 +4154,7 @@ function renderDashboardCards(data) {
                 </div>
             </div>
             ` : ''}
-            <div class="card stat-card stat-info">
+            <div class="card stat-card stat-info" onclick="navigateFromDashboardCard('projects')">
                 <div class="stat-icon">📈</div>
                 <div class="stat-content">
                 <div class="card-title">KPI合计</div>
@@ -3667,7 +4163,7 @@ function renderDashboardCards(data) {
             </div>
             </div>
             ` : ''}
-            <div class="card stat-card stat-primary">
+            <div class="card stat-card stat-primary" onclick="navigateFromDashboardCard('projects', 'in_progress')">
                 <div class="stat-icon">✅</div>
                 <div class="stat-content">
                 <div class="card-title">完成率</div>
@@ -3675,7 +4171,7 @@ function renderDashboardCards(data) {
                 <div class="subtext">完成/总项目：${completed}/${total}</div>
             </div>
             </div>
-            <div class="card stat-card stat-warning">
+            <div class="card stat-card stat-warning" onclick="navigateFromDashboardCard('projects', 'in_progress')">
                 <div class="stat-icon">🔄</div>
                 <div class="stat-content">
                 <div class="card-title">进行中</div>
@@ -3683,7 +4179,7 @@ function renderDashboardCards(data) {
                 <div class="subtext">当前执行的项目</div>
             </div>
             </div>
-            <div class="card stat-card stat-success">
+            <div class="card stat-card stat-success" onclick="navigateFromDashboardCard('projects', 'completed')">
                 <div class="stat-icon">✓</div>
                 <div class="stat-content">
                 <div class="card-title">已完成</div>
@@ -3691,7 +4187,7 @@ function renderDashboardCards(data) {
                 <div class="subtext">本月完成项目</div>
             </div>
             </div>
-            <div class="card stat-card stat-info">
+            <div class="card stat-card stat-info" onclick="navigateFromDashboardCard('projects', 'pending')">
                 <div class="stat-icon">⏳</div>
                 <div class="stat-content">
                 <div class="card-title">待开始</div>
@@ -3699,7 +4195,7 @@ function renderDashboardCards(data) {
                 <div class="subtext">待排期项目</div>
             </div>
             </div>
-            <div class="card stat-card stat-danger">
+            <div class="card stat-card stat-danger" onclick="navigateFromDashboardCard('paymentOverdue')">
                 <div class="stat-icon">⚠️</div>
                 <div class="stat-content">
                 <div class="card-title">回款预警</div>
@@ -3707,7 +4203,7 @@ function renderDashboardCards(data) {
                 <div class="card-desc">逾期未回款项目</div>
             </div>
             </div>
-            <div class="card stat-card stat-danger">
+            <div class="card stat-card stat-danger" onclick="navigateFromDashboardCard('deliveryOverdue')">
                 <div class="stat-icon">🚨</div>
                 <div class="stat-content">
                 <div class="card-title">交付逾期</div>
@@ -3716,7 +4212,7 @@ function renderDashboardCards(data) {
                 </div>
             </div>
             ${paymentRate !== null ? `
-            <div class="card stat-card stat-success">
+            <div class="card stat-card stat-success" onclick="navigateFromDashboardCard('receivables')">
                 <div class="stat-icon">💵</div>
                 <div class="stat-content">
                 <div class="card-title">回款完成率</div>
@@ -3725,7 +4221,7 @@ function renderDashboardCards(data) {
                 </div>
             </div>
             ` : ''}
-            <div class="card stat-card stat-info">
+            <div class="card stat-card stat-info" onclick="navigateFromDashboardCard('projects')">
                 <div class="stat-icon">📅</div>
                 <div class="stat-content">
                 <div class="card-title">近7天完成</div>
@@ -3733,7 +4229,7 @@ function renderDashboardCards(data) {
                 <div class="subtext">近7天完成项目数</div>
             </div>
             </div>
-            <div class="card stat-card stat-danger">
+            <div class="card stat-card stat-danger" onclick="navigateFromDashboardCard('paymentOverdue')">
                 <div class="stat-icon">⚠️</div>
                 <div class="stat-content">
                 <div class="card-title">近7天回款预警</div>
@@ -3741,7 +4237,7 @@ function renderDashboardCards(data) {
                 <div class="card-desc">近7天逾期回款项目</div>
             </div>
             </div>
-            <div class="card stat-card stat-danger">
+            <div class="card stat-card stat-danger" onclick="navigateFromDashboardCard('deliveryOverdue')">
                 <div class="stat-icon">🚨</div>
                 <div class="stat-content">
                 <div class="card-title">近7天交付预警</div>
@@ -3759,6 +4255,8 @@ function renderDashboardCards(data) {
 // ==================== 财务管理 ====================
 async function loadReceivables() {
     const month = document.getElementById('financeMonth')?.value || '';
+    const startDate = document.getElementById('financeStartDate')?.value || '';
+    const endDate = document.getElementById('financeEndDate')?.value || '';
     const status = document.getElementById('financeStatus')?.value || '';
     const paymentStatus = document.getElementById('financePaymentStatus')?.value || '';
     const hasInvoice = document.getElementById('financeHasInvoice')?.value || '';
@@ -3768,11 +4266,19 @@ async function loadReceivables() {
     if (status) params.append('status', status);
     if (paymentStatus) params.append('paymentStatus', paymentStatus);
     if (hasInvoice) params.append('hasInvoice', hasInvoice);
-    // month 可用于到期过滤
-    if (month) {
+    // 日期范围筛选（优先使用起止日期，如果没有则使用月份）
+    if (startDate) params.append('expectedStartDate', startDate);
+    if (endDate) {
+        // 结束日期设置为当天的23:59:59
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        params.append('expectedEndDate', end.toISOString());
+    } else if (month) {
+        // 如果没有结束日期但有月份，使用月份的最后一天
         const [y, m] = month.split('-');
-        const end = new Date(y, m, 0).toISOString();
-        params.append('dueBefore', end);
+        const end = new Date(y, m, 0);
+        end.setHours(23, 59, 59, 999);
+        params.append('dueBefore', end.toISOString());
     }
     if (customerId) params.append('customerId', customerId);
     if (salesId) params.append('salesId', salesId);
@@ -3796,26 +4302,52 @@ async function loadReceivables() {
 }
 
 function exportReceivables() {
-    const rows = receivablesCache.map(r => [
-        r.projectNumber || '-',
-        r.projectName,
-        r.customerName || '',
-        r.salesName || '',
-        r.projectAmount || 0,
-        r.receivedAmount || 0,
-        r.outstanding || 0,
-        r.expectedAt ? new Date(r.expectedAt).toLocaleDateString() : '',
-        r.isFullyPaid ? '已回款' : (r.overdue ? '逾期' : '未回款')
-    ]);
-    const header = ['项目编号','项目名称','客户','销售','项目金额','已回款','未回款','约定回款日','状态'];
-    const csv = [header, ...rows].map(r => r.map(v => `"${(v ?? '').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    // 使用后端API导出，确保编码正确（GBK编码，Windows Excel默认能识别）
+    const month = document.getElementById('financeMonth')?.value || '';
+    const startDate = document.getElementById('financeStartDate')?.value || '';
+    const endDate = document.getElementById('financeEndDate')?.value || '';
+    const status = document.getElementById('financeStatus')?.value || '';
+    const paymentStatus = document.getElementById('financePaymentStatus')?.value || '';
+    const hasInvoice = document.getElementById('financeHasInvoice')?.value || '';
+    const customerId = document.getElementById('financeCustomer')?.value || '';
+    const salesId = document.getElementById('financeSales')?.value || '';
+    const params = new URLSearchParams();
+    if (status) params.append('status', status);
+    if (paymentStatus) params.append('paymentStatus', paymentStatus);
+    if (hasInvoice) params.append('hasInvoice', hasInvoice);
+    // 日期范围筛选（优先使用起止日期，如果没有则使用月份）
+    if (startDate) params.append('expectedStartDate', startDate);
+    if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        params.append('expectedEndDate', end.toISOString());
+    } else if (month) {
+        const [y, m] = month.split('-');
+        const end = new Date(y, m, 0);
+        end.setHours(23, 59, 59, 999);
+        params.append('dueBefore', end.toISOString());
+    }
+    if (customerId) params.append('customerId', customerId);
+    if (salesId) params.append('salesId', salesId);
+    
+    // 使用fetch下载文件，包含认证token
+    fetch(`${API_BASE}/finance/receivables/export?${params.toString()}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    })
+    .then(res => res.blob())
+    .then(blob => {
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'receivables.csv';
-    a.click();
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = '应收对账.csv';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    })
+    .catch(error => {
+        showToast('导出失败: ' + error.message, 'error');
+    });
 }
 
 function renderReceivables() {
@@ -4033,14 +4565,14 @@ async function addInvoice() {
             }
         }
         
-        const payload = {
-            invoiceNumber,
+    const payload = {
+        invoiceNumber,
             amount: invoiceAmount,
-            issueDate,
+        issueDate,
             status: 'issued',
             type: document.getElementById('invoiceType')?.value || 'vat',
             note: document.getElementById('invoiceNote')?.value || ''
-        };
+    };
         
         const res = await fetch(`${API_BASE}/finance/invoice/${projectId}`, {
             method: 'POST',
@@ -4068,6 +4600,10 @@ async function addInvoice() {
 }
 
 async function addPaymentRecord() {
+    if (!isFinanceRole()) {
+        showToast('无权限新增回款', 'error');
+        return;
+    }
     const projectId = document.getElementById('paymentProjectId')?.value;
     const amount = document.getElementById('paymentAmount')?.value;
     const receivedAt = document.getElementById('paymentDate')?.value;
@@ -4186,6 +4722,7 @@ async function loadPaymentRecords(projectId) {
             return;
         }
         
+        const canManageFinance = isFinanceRole();
         const rows = data.data.map(r => `
             <tr>
                 <td>${new Date(r.receivedAt).toLocaleDateString()}</td>
@@ -4194,7 +4731,7 @@ async function loadPaymentRecords(projectId) {
                 <td>${r.reference || '-'}</td>
                 <td>${r.invoiceNumber || '-'}</td>
                 <td>${r.recordedBy?.name || '-'}</td>
-                <td><button class="btn-small btn-danger" onclick="removePaymentRecord('${r._id}', '${projectId}')">删除</button></td>
+                ${canManageFinance ? `<td><button class="btn-small btn-danger" onclick="removePaymentRecord('${r._id}', '${projectId}')">删除</button></td>` : ''}
             </tr>
         `).join('');
         
@@ -4258,11 +4795,11 @@ async function loadPaymentRecords(projectId) {
                         <th>凭证号</th>
                         <th>关联发票号</th>
                         <th>记录人</th>
-                        <th>操作</th>
+                        ${canManageFinance ? '<th>操作</th>' : ''}
                     </tr>
                 </thead>
                 <tbody>
-                    ${rows || '<tr><td colspan="7" style="text-align:center;">暂无回款记录</td></tr>'}
+                    ${rows || `<tr><td colspan="${canManageFinance ? 7 : 6}" style="text-align:center;">暂无回款记录</td></tr>`}
                 </tbody>
             </table>
         `;
@@ -4272,6 +4809,10 @@ async function loadPaymentRecords(projectId) {
 }
 
 async function removePaymentRecord(recordId, projectId) {
+    if (!isFinanceRole()) {
+        showToast('无权限删除回款记录', 'error');
+        return;
+    }
     if (!confirm('确定删除该回款记录？（不会自动回滚项目回款总额）')) return;
     try {
         const res = await fetch(`${API_BASE}/finance/payment/${recordId}`, {
@@ -4295,6 +4836,8 @@ async function removePaymentRecord(recordId, projectId) {
 // 加载回款记录项目列表（类似应收对账）
 async function loadPaymentRecordsProjects() {
     const month = document.getElementById('paymentMonth')?.value || '';
+    const startDate = document.getElementById('paymentStartDate')?.value || '';
+    const endDate = document.getElementById('paymentEndDate')?.value || '';
     const status = document.getElementById('paymentStatusFilter')?.value || '';
     const paymentStatus = document.getElementById('paymentProjectPaymentStatus')?.value || '';
     const customerId = document.getElementById('paymentCustomer')?.value || '';
@@ -4302,11 +4845,17 @@ async function loadPaymentRecordsProjects() {
     const params = new URLSearchParams();
     if (status) params.append('status', status);
     if (paymentStatus) params.append('paymentStatus', paymentStatus);
-    // month 可用于到期过滤
-    if (month) {
+    // 日期范围筛选（优先使用起止日期，如果没有则使用月份）
+    if (startDate) params.append('paymentStartDate', startDate);
+    if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        params.append('paymentEndDate', end.toISOString());
+    } else if (month) {
         const [y, m] = month.split('-');
-        const end = new Date(y, m, 0).toISOString();
-        params.append('dueBefore', end);
+        const end = new Date(y, m, 0);
+        end.setHours(23, 59, 59, 999);
+        params.append('dueBefore', end.toISOString());
     }
     if (customerId) params.append('customerId', customerId);
     if (salesId) params.append('salesId', salesId);
@@ -4469,7 +5018,19 @@ async function loadPaymentRecordsForProject(projectId) {
     if (!container) return;
     
     try {
-        const res = await fetch(`${API_BASE}/finance/payment/${projectId}`, {
+        const startDate = document.getElementById('paymentStartDate')?.value || '';
+        const endDate = document.getElementById('paymentEndDate')?.value || '';
+        const filterStatus = document.getElementById('paymentRecordStatus')?.value || '';
+        const params = new URLSearchParams();
+        if (filterStatus) params.append('paymentStatus', filterStatus);
+        if (startDate) params.append('startDate', startDate);
+        if (endDate) {
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            params.append('endDate', end.toISOString());
+        }
+        
+        const res = await fetch(`${API_BASE}/finance/payment/${projectId}?${params.toString()}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await res.json();
@@ -4587,6 +5148,8 @@ async function loadPaymentRecordsForProject(projectId) {
 // 清除回款记录筛选条件
 function clearPaymentRecordsFilters() {
     document.getElementById('paymentMonth').value = '';
+    document.getElementById('paymentStartDate').value = '';
+    document.getElementById('paymentEndDate').value = '';
     document.getElementById('paymentStatusFilter').value = '';
     document.getElementById('paymentProjectPaymentStatus').value = '';
     document.getElementById('paymentCustomer').value = '';
@@ -5324,6 +5887,23 @@ function renderDashboardCharts(data) {
         </div>
     `);
 
+    // 回款即将到期（5天内）
+    charts.push(`
+        <div class="card" onclick="navigateFromDashboardCard('paymentDueSoon')" style="cursor:pointer;">
+            <div class="card-title">回款即将到期（5天内）</div>
+            ${data.paymentDueSoon && data.paymentDueSoon.length > 0 ? `
+                <ul class="list">
+                    ${data.paymentDueSoon.map(w => `
+                        <li>
+                            <div style="font-weight:600;">${w.projectName}</div>
+                            <div class="card-desc">应回款：${new Date(w.expectedAt).toLocaleDateString()}，剩余 ${w.daysLeft} 天，已回款 ¥${(w.receivedAmount||0).toLocaleString()}</div>
+                        </li>
+                    `).join('')}
+                </ul>
+            ` : '<div class="card-desc">未来 5 天内暂无到期回款</div>'}
+        </div>
+    `);
+
     // 交付逾期预警
     charts.push(`
         <div class="card">
@@ -5796,7 +6376,7 @@ async function loadReconciliation() {
     }
 }
 
-// 导出对账表
+// 导出对账表（使用后端API，GBK编码）
 function exportReconciliation() {
     const startDate = document.getElementById('reconciliationStartDate')?.value || '';
     const endDate = document.getElementById('reconciliationEndDate')?.value || '';
@@ -5805,42 +6385,31 @@ function exportReconciliation() {
     if (startDate) params.append('startDate', startDate);
     if (endDate) params.append('endDate', endDate);
     
-    fetch(`${API_BASE}/finance/reconciliation?${params.toString()}`, {
+    // 使用后端API导出，确保编码正确（GBK编码，Windows Excel默认能识别）
+    fetch(`${API_BASE}/finance/reconciliation/export?${params.toString()}`, {
         headers: { 'Authorization': `Bearer ${token}` }
     })
-    .then(res => res.json())
-    .then(data => {
-        if (!data.success) {
-            showToast(data.message || '导出失败', 'error');
-            return;
+    .then(res => {
+        if (!res.ok) {
+            return res.json().then(data => {
+                throw new Error(data.message || '导出失败');
+            });
         }
-        
-        const reconciliationData = data.data || [];
-        const header = ['项目编号', '项目名称', '客户', '销售', '项目金额', '已回款', '剩余应收', '回款状态', '回款总额', '发票总额', '对账状态'];
-        const rows = reconciliationData.map(item => [
-            item.projectNumber || '-',
-            item.projectName || '-',
-            item.customerName || '-',
-            item.salesName || '-',
-            item.projectAmount || 0,
-            item.receivedAmount || 0,
-            item.remainingAmount || 0,
-            item.paymentStatus === 'paid' ? '已支付' : item.paymentStatus === 'partially_paid' ? '部分支付' : '未支付',
-            item.totalPaymentAmount || 0,
-            item.totalInvoiceAmount || 0,
-            item.isBalanced ? '已对平' : '未对平'
-        ]);
-        
-        const csv = [header, ...rows].map(r => r.map(v => `"${(v ?? '').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        return res.blob();
+    })
+    .then(blob => {
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `对账表_${startDate || '全部'}_${endDate || '全部'}.csv`;
-        a.click();
+        const link = document.createElement('a');
+        link.href = url;
+        const filename = `对账表_${startDate || '全部'}_${endDate || '全部'}.csv`;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
         URL.revokeObjectURL(url);
     })
     .catch(error => {
+        console.error('导出对账表失败:', error);
         showToast('导出失败: ' + error.message, 'error');
     });
 }

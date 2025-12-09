@@ -144,7 +144,7 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
       }));
     }
 
-    // 回款预警：有expectedAt且未回款完成、已过期
+    // 回款预警：已逾期
     const now = new Date();
     const paymentWarnings = projects
       .filter(p => p.payment?.expectedAt && !p.payment.isFullyPaid && p.payment.expectedAt < now)
@@ -157,6 +157,21 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
       }))
       .sort((a, b) => b.daysOverdue - a.daysOverdue)
       .slice(0, 20); // 截取前20条避免过长
+
+    // 回款即将到期：未来5天内到期且未全额回款
+    const soonEnd = new Date();
+    soonEnd.setDate(soonEnd.getDate() + 5);
+    const paymentDueSoon = projects
+      .filter(p => p.payment?.expectedAt && !p.payment.isFullyPaid && p.payment.expectedAt >= now && p.payment.expectedAt <= soonEnd)
+      .map(p => ({
+        projectId: p._id,
+        projectName: p.projectName,
+        expectedAt: p.payment.expectedAt,
+        receivedAmount: p.payment.receivedAmount || 0,
+        daysLeft: Math.ceil((p.payment.expectedAt - now) / (1000 * 60 * 60 * 24))
+      }))
+      .sort((a, b) => a.daysLeft - b.daysLeft)
+      .slice(0, 20);
 
     // 交付逾期预警：未完成且deadline已过
     const deliveryWarnings = projects
@@ -262,6 +277,7 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
         statusCounts,
         businessTypeCounts,
         paymentWarnings,
+        paymentDueSoon,
         deliveryWarnings,
         paymentCompletionRate,
         kpiTrend,
@@ -620,7 +636,9 @@ router.get('/export/month/:month', authorize('admin', 'finance'), async (req, re
     const buffer = await exportMonthlyKPISheet(month);
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename=KPI工资表-${month}.xlsx`);
+    // 使用encodeURIComponent确保中文文件名正确编码
+    const filename = encodeURIComponent(`KPI工资表-${month}.xlsx`);
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
     res.send(buffer);
   } catch (error) {
     res.status(500).json({ 
@@ -656,7 +674,9 @@ router.get('/export/user/:userId', async (req, res) => {
       : `${user.name}-KPI明细.xlsx`;
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename=${encodeURIComponent(filename)}`);
+    // 使用RFC 5987格式确保中文文件名正确编码
+    const encodedFilename = encodeURIComponent(filename);
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedFilename}`);
     res.send(buffer);
   } catch (error) {
     res.status(500).json({ 

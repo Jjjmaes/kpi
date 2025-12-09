@@ -38,6 +38,13 @@ const userSchema = new mongoose.Schema({
   updatedAt: {
     type: Date,
     default: Date.now
+  },
+  passwordMustChange: {
+    type: Boolean,
+    default: true
+  },
+  passwordUpdatedAt: {
+    type: Date
   }
 });
 

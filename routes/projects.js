@@ -6,6 +6,32 @@ const ProjectMember = require('../models/ProjectMember');
 const KpiConfig = require('../models/KpiConfig');
 const Customer = require('../models/Customer');
 
+// 判断是否为仅交付角色（翻译/审校/排版），无查看客户信息权限
+function isDeliveryOnlyUser(user) {
+  const roles = user?.roles || [];
+  const restricted = ['translator', 'reviewer', 'layout'];
+  const privileged = ['admin', 'finance', 'pm', 'sales', 'part_time_sales', 'admin_staff'];
+  const hasRestricted = roles.some(r => restricted.includes(r));
+  const hasPrivileged = roles.some(r => privileged.includes(r));
+  return hasRestricted && !hasPrivileged;
+}
+
+// 对项目数据脱敏客户信息
+function scrubCustomerInfo(project) {
+  if (!project) return project;
+  const obj = project.toObject ? project.toObject() : { ...project };
+  if (obj.customerId) {
+    const cid = obj.customerId;
+    const id = cid && cid._id ? cid._id : cid;
+    // 保留ID，其他敏感信息置为*****
+    obj.customerId = { _id: id, name: '*****', shortName: '*****' };
+  }
+  // 统一占位显示
+  obj.clientName = '*****';
+  obj.customerName = '*****';
+  return obj;
+}
+
 // 可更新的项目字段白名单
 const editableFields = [
   'projectName',
@@ -18,6 +44,7 @@ const editableFields = [
   'unitPrice',
   'projectAmount',
   'deadline',
+  'payment.expectedAt',
   'isTaxIncluded',
   'needInvoice',
   'specialRequirements',
@@ -63,6 +90,7 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
       unitPrice, 
       projectAmount, 
       deadline,
+      expectedAt,
       projectNumber,
       isTaxIncluded, // 是否含税
       needInvoice, // 是否需要发票
@@ -101,6 +129,15 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
         message: '请提供项目金额或字数和单价'
       });
     }
+
+    // 协议付款日，默认创建日起 3 个月
+    let hasExpectedInput = !!expectedAt;
+    let expectedPaymentDate = hasExpectedInput ? new Date(expectedAt) : null;
+    if (!expectedPaymentDate || isNaN(expectedPaymentDate)) {
+      expectedPaymentDate = new Date();
+      hasExpectedInput = false;
+    }
+    expectedPaymentDate.setMonth(expectedPaymentDate.getMonth() + (hasExpectedInput ? 0 : 3));
 
     // 生成项目编号（如果未提供）
     let projectNum = projectNumber;
@@ -179,6 +216,13 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
         layoutCost: 0,
         layoutAssignedTo: null,
         layoutCostPercentage: 0
+      },
+      payment: {
+        expectedAt: expectedPaymentDate,
+        remainingAmount: finalAmount || 0,
+        receivedAmount: 0,
+        isFullyPaid: false,
+        paymentStatus: 'unpaid'
       }
     });
 
@@ -201,6 +245,27 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
       
       const memberPromises = members.map(async (member) => {
         const { userId, role, translatorType, wordRatio } = member;
+        
+        const isSelfAssignment = userId.toString() === req.user._id.toString();
+        
+        // 校验1：如果当前用户是PM，并且同时有翻译或审校角色，则不能将翻译或审校分配给自己
+        const isPM = req.user.roles.includes('pm');
+        const isTranslator = req.user.roles.includes('translator');
+        const isReviewer = req.user.roles.includes('reviewer');
+        
+        if (isPM && isSelfAssignment) {
+          if ((role === 'translator' && isTranslator) || (role === 'reviewer' && isReviewer)) {
+            throw new Error('作为项目经理，不能将翻译或审校任务分配给自己');
+          }
+        }
+        
+        // 校验2：如果当前用户是销售（或兼职销售），并且同时有PM角色，则不能将PM角色分配给自己
+        const isSales = req.user.roles.includes('sales') || req.user.roles.includes('part_time_sales');
+        const hasPMRole = req.user.roles.includes('pm');
+        
+        if (isSales && hasPMRole && isSelfAssignment && role === 'pm') {
+          throw new Error('作为销售，不能将项目经理角色分配给自己');
+        }
         
         // 确定使用的系数
         let ratio = 0;
@@ -416,9 +481,12 @@ router.get('/', async (req, res) => {
       .populate('customerId', 'name shortName contactPerson phone email')
       .sort({ createdAt: -1 });
 
+    const isDeliveryOnly = isDeliveryOnlyUser(req.user);
+    const data = isDeliveryOnly ? projects.map(scrubCustomerInfo) : projects;
+
     res.json({
       success: true,
-      data: projects
+      data
     });
   } catch (error) {
     res.status(500).json({ 
@@ -464,10 +532,13 @@ router.get('/:id', async (req, res) => {
     const members = await ProjectMember.find({ projectId: project._id })
       .populate('userId', 'name username email roles');
 
+    const isDeliveryOnly = isDeliveryOnlyUser(req.user);
+    const projectData = isDeliveryOnly ? scrubCustomerInfo(project) : project.toObject();
+
     res.json({
       success: true,
       data: {
-        ...project.toObject(),
+        ...projectData,
         members
       }
     });
@@ -509,6 +580,32 @@ router.post('/:id/add-member', async (req, res) => {
       return res.status(403).json({ 
         success: false, 
         message: '无权添加成员' 
+      });
+    }
+
+    // 校验1：如果当前用户是PM，并且同时有翻译或审校角色，则不能将翻译或审校分配给自己
+    const isPM = req.user.roles.includes('pm');
+    const isTranslator = req.user.roles.includes('translator');
+    const isReviewer = req.user.roles.includes('reviewer');
+    const isSelfAssignment = userId.toString() === req.user._id.toString();
+    
+    if (isPM && isSelfAssignment) {
+      if ((role === 'translator' && isTranslator) || (role === 'reviewer' && isReviewer)) {
+        return res.status(400).json({
+          success: false,
+          message: '作为项目经理，不能将翻译或审校任务分配给自己'
+        });
+      }
+    }
+    
+    // 校验2：如果当前用户是销售（或兼职销售），并且同时有PM角色，则不能将PM角色分配给自己
+    const isSales = req.user.roles.includes('sales') || req.user.roles.includes('part_time_sales');
+    const hasPMRole = req.user.roles.includes('pm');
+    
+    if (isSales && hasPMRole && isSelfAssignment && role === 'pm') {
+      return res.status(400).json({
+        success: false,
+        message: '作为销售，不能将项目经理角色分配给自己'
       });
     }
 

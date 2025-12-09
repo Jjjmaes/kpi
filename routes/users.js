@@ -3,6 +3,25 @@ const router = express.Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const User = require('../models/User');
 
+// 密码复杂度校验（与 auth 保持一致）
+function validatePassword(password) {
+  const minLen = 8;
+  if (!password || password.length < minLen) {
+    return '密码长度至少 8 位';
+  }
+  const upper = /[A-Z]/.test(password);
+  const lower = /[a-z]/.test(password);
+  const digit = /\d/.test(password);
+  const special = /[^A-Za-z0-9]/.test(password);
+  if (!upper || !lower || !digit || !special) {
+    return '密码需包含大写字母、小写字母、数字和特殊字符';
+  }
+  if (password.length > 64) {
+    return '密码长度不能超过 64 位';
+  }
+  return null;
+}
+
 // 所有用户路由需要认证
 router.use(authenticate);
 
@@ -47,6 +66,11 @@ router.post('/', authorize('admin'), async (req, res) => {
         success: false, 
         message: '用户名或邮箱已存在' 
       });
+    }
+
+    const pwdError = validatePassword(password);
+    if (pwdError) {
+      return res.status(400).json({ success: false, message: pwdError });
     }
 
     const user = await User.create({

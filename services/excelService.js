@@ -9,7 +9,11 @@ const User = require('../models/User');
  */
 async function exportMonthlyKPISheet(month) {
   const workbook = new ExcelJS.Workbook();
+  // 设置默认字体以支持中文
+  workbook.creator = 'KPI系统';
   const worksheet = workbook.addWorksheet(`KPI工资表-${month}`);
+  // 设置默认字体为支持中文的字体
+  worksheet.properties.defaultRowHeight = 20;
 
   // 获取该月的所有KPI记录
   const records = await KpiRecord.find({ month })
@@ -57,14 +61,19 @@ async function exportMonthlyKPISheet(month) {
     { header: '参与项目数', key: 'projectCount', width: 12 }
   ];
 
-  // 设置标题行样式
-  worksheet.getRow(1).font = { bold: true, size: 12 };
+  // 设置标题行样式（使用支持中文的字体）
+  worksheet.getRow(1).font = { bold: true, size: 12, name: 'Microsoft YaHei' };
   worksheet.getRow(1).fill = {
     type: 'pattern',
     pattern: 'solid',
     fgColor: { argb: 'FFE0E0E0' }
   };
   worksheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
+  
+  // 设置所有列的默认字体以支持中文
+  worksheet.columns.forEach(column => {
+    column.font = { name: 'Microsoft YaHei', size: 11 };
+  });
 
   // 填充数据
   let index = 1;
@@ -121,6 +130,7 @@ async function exportMonthlyKPISheet(month) {
 
   // 添加详细信息工作表
   const detailSheet = workbook.addWorksheet(`明细-${month}`);
+  detailSheet.properties.defaultRowHeight = 20;
   detailSheet.columns = [
     { header: '序号', key: 'index', width: 8 },
     { header: '姓名', key: 'name', width: 15 },
@@ -131,8 +141,13 @@ async function exportMonthlyKPISheet(month) {
     { header: 'KPI数值', key: 'kpiValue', width: 15 },
     { header: '计算月份', key: 'month', width: 12 }
   ];
+  
+  // 设置所有列的默认字体以支持中文
+  detailSheet.columns.forEach(column => {
+    column.font = { name: 'Microsoft YaHei', size: 11 };
+  });
 
-  detailSheet.getRow(1).font = { bold: true };
+  detailSheet.getRow(1).font = { bold: true, name: 'Microsoft YaHei', size: 12 };
   detailSheet.getRow(1).fill = {
     type: 'pattern',
     pattern: 'solid',
@@ -158,6 +173,7 @@ async function exportMonthlyKPISheet(month) {
   });
 
   // 生成Buffer
+  // ExcelJS默认使用UTF-8编码，无需额外配置
   const buffer = await workbook.xlsx.writeBuffer();
   return buffer;
 }
@@ -171,6 +187,8 @@ async function exportMonthlyKPISheet(month) {
  */
 async function exportUserKPIDetail(userId, month = null, canViewAmount = true) {
   const workbook = new ExcelJS.Workbook();
+  // 设置默认字体以支持中文
+  workbook.creator = 'KPI系统';
   const user = await User.findById(userId);
   
   if (!user) {
@@ -211,8 +229,13 @@ async function exportUserKPIDetail(userId, month = null, canViewAmount = true) {
   );
 
   worksheet.columns = columns;
+  
+  // 设置所有列的默认字体以支持中文
+  worksheet.columns.forEach(column => {
+    column.font = { name: 'Microsoft YaHei', size: 11 };
+  });
 
-  worksheet.getRow(1).font = { bold: true };
+  worksheet.getRow(1).font = { bold: true, name: 'Microsoft YaHei', size: 12 };
   worksheet.getRow(1).fill = {
     type: 'pattern',
     pattern: 'solid',
@@ -247,6 +270,7 @@ async function exportUserKPIDetail(userId, month = null, canViewAmount = true) {
     worksheet.getColumn(key).numFmt = '#,##0.00';
   });
 
+  // ExcelJS默认使用UTF-8编码，无需额外配置
   const buffer = await workbook.xlsx.writeBuffer();
   return buffer;
 }
