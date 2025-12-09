@@ -18,11 +18,19 @@ router.get('/receivables', async (req, res) => {
     const query = {};
     if (customerId) query.customerId = customerId;
     if (salesId) query.createdBy = salesId;
-    if (status) query.status = status;
+    if (status) {
+      query.status = status;
+    } else {
+      // 默认排除已取消项目
+      query.status = { $ne: 'cancelled' };
+    }
     if (dueBefore) {
       query['payment.expectedAt'] = { $lte: new Date(dueBefore) };
     }
-    const projects = await Project.find(query).select('projectName projectAmount payment expectedAt customerId createdBy status projectNumber');
+    const projects = await Project.find(query)
+      .populate('customerId', 'name shortName')
+      .populate('createdBy', 'name')
+      .select('projectName projectAmount payment expectedAt customerId createdBy status projectNumber');
     const data = projects.map(p => {
       const received = p.payment?.receivedAmount || 0;
       const outstanding = Math.max((p.projectAmount || 0) - received, 0);
@@ -38,6 +46,8 @@ router.get('/receivables', async (req, res) => {
         outstanding,
         status: p.status,
         customerId: p.customerId,
+        customerName: p.customerId?.name || '',
+        salesName: p.createdBy?.name || '',
         createdBy: p.createdBy,
         overdue
       };
@@ -99,9 +109,18 @@ router.delete('/payment/:recordId', async (req, res) => {
     const { recordId } = req.params;
     const rec = await PaymentRecord.findById(recordId);
     if (!rec) return res.status(404).json({ success: false, message: '记录不存在' });
+    const projectId = rec.projectId;
+    const amount = rec.amount || 0;
     await PaymentRecord.deleteOne({ _id: recordId });
-    // 不自动回滚项目金额，避免误差；如需同步请后续补偿
-    res.json({ success: true, message: '回款记录已删除' });
+    // 回滚项目回款累计
+    const project = await Project.findById(projectId);
+    if (project) {
+      const current = project.payment?.receivedAmount || 0;
+      project.payment.receivedAmount = Math.max(0, current - amount);
+      project.payment.isFullyPaid = project.payment.receivedAmount >= (project.projectAmount || 0);
+      await project.save();
+    }
+    res.json({ success: true, message: '回款记录已删除并已回滚项目回款' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

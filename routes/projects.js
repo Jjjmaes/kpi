@@ -12,7 +12,8 @@ const editableFields = [
   'customerId',
   'businessType',
   'projectType',
-  'languagePair',
+  'sourceLanguage',
+  'targetLanguages',
   'wordCount',
   'unitPrice',
   'projectAmount',
@@ -20,7 +21,9 @@ const editableFields = [
   'isTaxIncluded',
   'needInvoice',
   'specialRequirements',
-  'projectNumber'
+  'projectNumber',
+  'partTimeSales',
+  'partTimeLayout'
 ];
 
 // 所有项目路由需要认证
@@ -46,15 +49,16 @@ async function generateProjectNumber() {
   return `${prefix}${String(sequence).padStart(4, '0')}`;
 }
 
-// 创建项目（销售角色）
-router.post('/create', authorize('sales', 'admin'), async (req, res) => {
+// 创建项目（销售角色和兼职销售）
+router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (req, res) => {
   try {
     const { 
       projectName, 
       customerId, 
       businessType,
       projectType, // MTPE/深度编辑/审校项目
-      languagePair, // 翻译语言对
+      sourceLanguage, // 源语种
+      targetLanguages, // 目标语言列表
       wordCount, 
       unitPrice, 
       projectAmount, 
@@ -63,13 +67,17 @@ router.post('/create', authorize('sales', 'admin'), async (req, res) => {
       isTaxIncluded, // 是否含税
       needInvoice, // 是否需要发票
       specialRequirements, // 特殊要求
-      members  // 项目成员数组
+      members,  // 项目成员数组
+      // 兼职销售相关
+      partTimeSales, // { isPartTime, companyReceivable, taxRate }
+      // 兼职排版相关
+      partTimeLayout // { isPartTime, layoutCost, layoutAssignedTo }
     } = req.body;
 
-    if (!projectName || !customerId || !deadline) {
+    if (!projectName || !customerId || !deadline || !sourceLanguage || !targetLanguages || targetLanguages.length === 0) {
       return res.status(400).json({ 
         success: false, 
-        message: '请填写所有必填字段（项目名称、客户、交付时间）' 
+        message: '请填写所有必填字段（项目名称、客户、源语种、目标语言、交付时间）' 
       });
     }
 
@@ -113,6 +121,18 @@ router.post('/create', authorize('sales', 'admin'), async (req, res) => {
     const config = await KpiConfig.getActiveConfig();
     const lockedRatios = config.getLockedRatios();
 
+    // 处理兼职排版费用校验
+    if (partTimeLayout?.isPartTime && partTimeLayout?.layoutCost) {
+      const tempProject = new Project({ projectAmount: finalAmount });
+      const validation = tempProject.validateLayoutCost(partTimeLayout.layoutCost);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: validation.message
+        });
+      }
+    }
+
     const project = await Project.create({
       projectNumber: projectNum,
       projectName,
@@ -120,7 +140,8 @@ router.post('/create', authorize('sales', 'admin'), async (req, res) => {
       clientName: customer.name,
       businessType: businessType || 'translation',
       projectType: projectType || 'mtpe',
-      languagePair: languagePair || '',
+      sourceLanguage: sourceLanguage,
+      targetLanguages: Array.isArray(targetLanguages) ? targetLanguages : [targetLanguages],
       wordCount: wordCount || 0,
       unitPrice: unitPrice || 0,
       projectAmount: finalAmount,
@@ -133,11 +154,40 @@ router.post('/create', authorize('sales', 'admin'), async (req, res) => {
       status: 'pending',
       completionChecks: {
         hasAmount: true // 创建时已有金额
+      },
+      // 兼职销售字段
+      partTimeSales: partTimeSales || {
+        isPartTime: false,
+        companyReceivable: 0,
+        taxRate: 0,
+        partTimeSalesCommission: 0
+      },
+      // 兼职排版字段
+      partTimeLayout: partTimeLayout || {
+        isPartTime: false,
+        layoutCost: 0,
+        layoutAssignedTo: null,
+        layoutCostPercentage: 0
       }
     });
 
     // 如果提供了成员信息，创建项目成员
     if (members && Array.isArray(members) && members.length > 0) {
+      // 检查：销售创建项目时只能添加项目经理
+      const isSales = req.user.roles.includes('sales') || req.user.roles.includes('part_time_sales');
+      const isAdmin = req.user.roles.includes('admin');
+      
+      if (isSales && !isAdmin) {
+        // 销售只能添加项目经理
+        const invalidRoles = members.filter(m => m.role && m.role !== 'pm');
+        if (invalidRoles.length > 0) {
+          return res.status(400).json({
+            success: false,
+            message: '销售创建项目时只能添加项目经理，其他成员（翻译、审校、排版等）应由项目经理在项目详情中添加'
+          });
+        }
+      }
+      
       const memberPromises = members.map(async (member) => {
         const { userId, role, translatorType, wordRatio } = member;
         
@@ -155,6 +205,12 @@ router.post('/create', authorize('sales', 'admin'), async (req, res) => {
           ratio = lockedRatios.sales_bonus;
         } else if (role === 'admin_staff') {
           ratio = lockedRatios.admin;
+        } else if (role === 'part_time_sales') {
+          // 兼职销售：系数为0，KPI值由佣金计算决定
+          ratio = 0;
+        } else if (role === 'layout') {
+          // 兼职排版：系数为0，KPI值由排版费用决定
+          ratio = 0;
         }
 
         return ProjectMember.create({
@@ -237,6 +293,17 @@ router.put('/:id', authorize('admin', 'pm', 'sales'), async (req, res) => {
       });
     }
 
+    // 校验兼职排版费用
+    if (project.partTimeLayout?.isPartTime && project.partTimeLayout?.layoutCost) {
+      const validation = project.validateLayoutCost(project.partTimeLayout.layoutCost);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: validation.message
+        });
+      }
+    }
+
     await project.save();
 
     res.json({
@@ -288,9 +355,9 @@ router.delete('/:id', authorize('admin', 'pm', 'sales'), async (req, res) => {
       message: '项目已取消'
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
     });
   }
 });
@@ -435,6 +502,12 @@ router.post('/:id/add-member', async (req, res) => {
       ratio = project.locked_ratios.sales_bonus;
     } else if (role === 'admin_staff') {
       ratio = project.locked_ratios.admin;
+    } else if (role === 'part_time_sales') {
+      // 兼职销售：系数为0，KPI值由佣金计算决定
+      ratio = 0;
+    } else if (role === 'layout') {
+      // 兼职排版：系数为0，KPI值由排版费用决定
+      ratio = 0;
     }
 
     const member = await ProjectMember.create({

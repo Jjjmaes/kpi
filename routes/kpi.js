@@ -13,7 +13,8 @@ const { exportMonthlyKPISheet, exportUserKPIDetail } = require('../services/exce
 router.use(authenticate);
 
 // Dashboard 汇总（按权限）
-router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translator', 'reviewer', 'admin_staff'), async (req, res) => {
+// 允许兼职销售/排版查看自己的数据
+router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout'), async (req, res) => {
   try {
     const { month, status, businessType, role, customerId } = req.query;
 
@@ -25,7 +26,9 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
 
     const isAdmin = req.user.roles.includes('admin');
     const isFinance = req.user.roles.includes('finance');
-    const canViewAmount = isAdmin || isFinance;
+    const isSales = req.user.roles.includes('sales') || req.user.roles.includes('part_time_sales');
+    // 管理员、财务、销售和兼职销售可以查看项目金额（成交额）
+    const canViewAmount = isAdmin || isFinance || isSales;
 
     // 项目可见性
     let projectQuery = {};
@@ -37,7 +40,12 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
     }
 
     // 过滤条件
-    if (status) projectQuery.status = status;
+    if (status) {
+      projectQuery.status = status;
+    } else {
+      // 默认排除已取消项目
+      projectQuery.status = { $ne: 'cancelled' };
+    }
     if (businessType) projectQuery.businessType = businessType;
     if (customerId) projectQuery.customerId = customerId;
 
@@ -52,6 +60,10 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
     const totalProjectAmount = canViewAmount
       ? projects.reduce((sum, p) => sum + (p.projectAmount || 0), 0)
       : undefined;
+    const totalReceived = projects.reduce((sum, p) => sum + (p.payment?.receivedAmount || 0), 0);
+    const paymentCompletionRate = totalProjectAmount && totalProjectAmount > 0
+      ? Math.round((totalReceived / totalProjectAmount) * 100)
+      : 0;
 
     // 统计分布
     const statusCounts = projects.reduce((acc, p) => {
@@ -74,6 +86,63 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
       acc[r.role] = (acc[r.role] || 0) + r.kpiValue;
       return acc;
     }, {});
+
+    // KPI 趋势（近3个月）- 销售和兼职销售显示成交额趋势
+    const trendMonths = [];
+    const baseDate = new Date(target.getFullYear(), target.getMonth(), 1);
+    for (let i = 2; i >= 0; i--) {
+      const d = new Date(baseDate);
+      d.setMonth(d.getMonth() - i);
+      trendMonths.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+    
+    let kpiTrend = [];
+    if (isSales && !isAdmin && !isFinance) {
+      // 销售和兼职销售：计算成交额趋势（基于项目金额）
+      for (const month of trendMonths) {
+        const [year, monthNum] = month.split('-');
+        const trendStartDate = new Date(parseInt(year), parseInt(monthNum) - 1, 1);
+        const trendEndDate = new Date(parseInt(year), parseInt(monthNum), 0, 23, 59, 59);
+        
+        // 使用相同的项目查询逻辑，但只针对该月份
+        let trendProjectQuery = {};
+        const trendMemberProjects = await ProjectMember.find({ userId: req.user._id }).distinct('projectId');
+        const trendCreatedProjects = await Project.find({ createdBy: req.user._id }).distinct('_id');
+        const trendAllIds = [...new Set([...trendMemberProjects.map(String), ...trendCreatedProjects.map(String)])];
+        trendProjectQuery._id = trendAllIds.length > 0 ? { $in: trendAllIds } : { $in: [] };
+        
+        // 应用筛选条件
+        if (status) {
+          trendProjectQuery.status = status;
+        } else {
+          trendProjectQuery.status = { $ne: 'cancelled' };
+        }
+        if (businessType) trendProjectQuery.businessType = businessType;
+        if (customerId) trendProjectQuery.customerId = customerId;
+        
+        // 时间范围
+        trendProjectQuery.$or = [
+          { completedAt: { $gte: trendStartDate, $lte: trendEndDate } },
+          { completedAt: { $exists: false }, createdAt: { $gte: trendStartDate, $lte: trendEndDate } }
+        ];
+        
+        const trendProjects = await Project.find(trendProjectQuery);
+        const trendAmount = trendProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0);
+        kpiTrend.push({
+          month: month,
+          total: Math.round(trendAmount * 100) / 100
+        });
+      }
+    } else {
+      // 其他角色：计算KPI趋势
+      const trendQuery = { month: { $in: trendMonths } };
+      if (!isAdmin && !isFinance) trendQuery.userId = req.user._id;
+      const trendRecords = await KpiRecord.find(trendQuery);
+      kpiTrend = trendMonths.map(m => ({
+        month: m,
+        total: trendRecords.filter(r => r.month === m).reduce((s, r) => s + r.kpiValue, 0)
+      }));
+    }
 
     // 回款预警：有expectedAt且未回款完成、已过期
     const now = new Date();
@@ -102,6 +171,13 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
       .sort((a, b) => b.daysOverdue - a.daysOverdue)
       .slice(0, 20);
 
+    // 最近7天指标
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const recentCompleted = projects.filter(p => p.status === 'completed' && p.completedAt && p.completedAt >= sevenDaysAgo).length;
+    const recentPaymentOverdue = paymentWarnings.filter(w => w.expectedAt && w.expectedAt >= sevenDaysAgo).length;
+    const recentDeliveryOverdue = deliveryWarnings.filter(w => w.deadline && w.deadline >= sevenDaysAgo).length;
+
     res.json({
       success: true,
       data: {
@@ -116,7 +192,12 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
         statusCounts,
         businessTypeCounts,
         paymentWarnings,
-        deliveryWarnings
+        deliveryWarnings,
+        paymentCompletionRate,
+        kpiTrend,
+        recentCompleted,
+        recentPaymentOverdue,
+        recentDeliveryOverdue
       }
     });
   } catch (error) {
@@ -391,7 +472,8 @@ router.post('/calculate-project/:projectId', async (req, res) => {
 });
 
 // 实时计算单个项目的每人KPI（不落库，含权限校验）
-router.get('/project/:projectId/realtime', authorize('admin', 'finance', 'pm', 'sales', 'translator', 'reviewer', 'admin_staff'), async (req, res) => {
+// 允许兼职销售/排版查看自己所在项目的实时KPI
+router.get('/project/:projectId/realtime', authorize('admin', 'finance', 'pm', 'sales', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout'), async (req, res) => {
   try {
     const { projectId } = req.params;
 
@@ -421,9 +503,9 @@ router.get('/project/:projectId/realtime', authorize('admin', 'finance', 'pm', '
       data
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
     });
   }
 });

@@ -16,7 +16,7 @@ const kpiRecordSchema = new mongoose.Schema({
   // 角色
   role: {
     type: String,
-    enum: ['translator', 'reviewer', 'pm', 'sales', 'admin_staff'],
+    enum: ['translator', 'reviewer', 'pm', 'sales', 'admin_staff', 'part_time_sales', 'layout'],
     required: true
   },
   // 计算月份（YYYY-MM格式）
@@ -63,6 +63,13 @@ kpiRecordSchema.index({ userId: 1, month: 1, role: 1 });
 kpiRecordSchema.index({ month: 1 });
 
 module.exports = mongoose.model('KpiRecord', kpiRecordSchema);
+
+
+
+
+
+
+
 
 
 

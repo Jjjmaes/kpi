@@ -40,11 +40,18 @@ const projectSchema = new mongoose.Schema({
     enum: ['mtpe', 'deepedit', 'review', 'mixed'],
     default: 'mtpe'
   },
-  // 翻译语言对（如：中英、英中、中日等）
-  languagePair: {
+  // 源语种（源语言）
+  sourceLanguage: {
     type: String,
+    required: true,
     trim: true
   },
+  // 目标语言列表（支持一对多）
+  targetLanguages: [{
+    type: String,
+    required: true,
+    trim: true
+  }],
   // 字数（笔译项目）
   wordCount: {
     type: Number,
@@ -189,6 +196,23 @@ const projectSchema = new mongoose.Schema({
     expectedAt: Date, // 合同约定回款日期
     isFullyPaid: { type: Boolean, default: false }
   },
+  // 兼职销售相关字段
+  partTimeSales: {
+    isPartTime: { type: Boolean, default: false }, // 是否为兼职销售项目
+    companyReceivable: { type: Number, default: 0 }, // 公司应收金额（含税）
+    taxRate: { type: Number, default: 0, min: 0, max: 1 }, // 税率（0-1之间，如0.1表示10%）
+    partTimeSalesCommission: { type: Number, default: 0 } // 兼职销售员佣金（税后部分，自动计算）
+  },
+  // 兼职排版相关字段
+  partTimeLayout: {
+    isPartTime: { type: Boolean, default: false }, // 是否为兼职排版项目
+    layoutCost: { type: Number, default: 0, min: 0 }, // 排版费用
+    layoutAssignedTo: { // 排版员ID
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    layoutCostPercentage: { type: Number, default: 0 } // 排版费占总金额的百分比（自动计算）
+  },
   createdAt: {
     type: Date,
     default: Date.now
@@ -222,9 +246,65 @@ projectSchema.methods.calculateCompletionFactor = function() {
   return Math.max(0, factor);
 };
 
-// 更新完成系数
+// 计算兼职销售佣金
+projectSchema.methods.calculatePartTimeSalesCommission = function() {
+  if (!this.partTimeSales?.isPartTime) {
+    return 0;
+  }
+  
+  const totalAmount = this.projectAmount || 0;
+  const companyReceivable = this.partTimeSales.companyReceivable || 0;
+  const taxRate = this.partTimeSales.taxRate || 0;
+  
+  // 计算应收金额（成交额 - 公司应收）
+  const receivableAmount = totalAmount - companyReceivable;
+  
+  // 计算税后金额（应收金额 - 税费）
+  const taxDeductedAmount = receivableAmount - (receivableAmount * taxRate);
+  
+  // 返还给销售的佣金 = 税后金额
+  return Math.max(0, Math.round(taxDeductedAmount * 100) / 100);
+};
+
+// 校验排版费用
+projectSchema.methods.validateLayoutCost = function(layoutCost) {
+  if (!this.partTimeLayout?.isPartTime) {
+    return { valid: true };
+  }
+  
+  const projectAmount = this.projectAmount || 0;
+  if (projectAmount <= 0) {
+    return { valid: false, message: '项目总金额必须大于0' };
+  }
+  
+  const percentage = (layoutCost / projectAmount) * 100;
+  
+  if (percentage > 5) {
+    return {
+      valid: false,
+      message: `排版费用(${layoutCost})不能超过项目总金额(${projectAmount})的5%，当前占比为${percentage.toFixed(2)}%`
+    };
+  }
+  
+  return { valid: true, percentage: Math.round(percentage * 100) / 100 };
+};
+
+// 更新完成系数和自动计算字段
 projectSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
+  
+  // 自动计算兼职销售佣金
+  if (this.partTimeSales?.isPartTime) {
+    this.partTimeSales.partTimeSalesCommission = this.calculatePartTimeSalesCommission();
+  }
+  
+  // 自动计算排版费用百分比
+  if (this.partTimeLayout?.isPartTime && this.partTimeLayout.layoutCost && this.projectAmount) {
+    this.partTimeLayout.layoutCostPercentage = Math.round(
+      (this.partTimeLayout.layoutCost / this.projectAmount) * 100 * 100
+    ) / 100;
+  }
+  
   next();
 });
 

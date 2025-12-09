@@ -6,11 +6,21 @@ const Customer = require('../models/Customer');
 // 所有客户路由需要认证
 router.use(authenticate);
 
-// 获取所有客户（销售、管理员、财务可见）
-router.get('/', authorize('admin', 'finance', 'sales'), async (req, res) => {
+// 获取所有客户（销售、兼职销售、管理员、财务可见）
+router.get('/', authorize('admin', 'finance', 'sales', 'part_time_sales'), async (req, res) => {
   try {
     const { search, isActive } = req.query;
     let query = {};
+
+    // 权限过滤：销售和兼职销售只能看到自己创建的客户
+    const isAdmin = req.user.roles.includes('admin');
+    const isFinance = req.user.roles.includes('finance');
+    const isSales = req.user.roles.includes('sales') || req.user.roles.includes('part_time_sales');
+    
+    if (isSales && !isAdmin && !isFinance) {
+      // 销售只能看到自己创建的客户
+      query.createdBy = req.user._id;
+    }
 
     // 搜索条件
     if (search) {
@@ -45,7 +55,7 @@ router.get('/', authorize('admin', 'finance', 'sales'), async (req, res) => {
 });
 
 // 获取单个客户详情
-router.get('/:id', authorize('admin', 'finance', 'sales'), async (req, res) => {
+router.get('/:id', authorize('admin', 'finance', 'sales', 'part_time_sales'), async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id)
       .populate('createdBy', 'name username');
@@ -70,7 +80,7 @@ router.get('/:id', authorize('admin', 'finance', 'sales'), async (req, res) => {
 });
 
 // 创建客户（销售、管理员）
-router.post('/', authorize('admin', 'sales'), async (req, res) => {
+router.post('/', authorize('admin', 'sales', 'part_time_sales'), async (req, res) => {
   try {
     const { name, shortName, contactPerson, phone, email, address, notes } = req.body;
 
@@ -115,7 +125,7 @@ router.post('/', authorize('admin', 'sales'), async (req, res) => {
 });
 
 // 更新客户（销售、管理员）
-router.put('/:id', authorize('admin', 'sales'), async (req, res) => {
+router.put('/:id', authorize('admin', 'sales', 'part_time_sales'), async (req, res) => {
   try {
     const { name, shortName, contactPerson, phone, email, address, notes, isActive } = req.body;
     const customer = await Customer.findById(req.params.id);
@@ -125,6 +135,19 @@ router.put('/:id', authorize('admin', 'sales'), async (req, res) => {
         success: false,
         message: '客户不存在'
       });
+    }
+
+    // 权限检查：销售只能编辑自己创建的客户
+    const isAdmin = req.user.roles.includes('admin');
+    const isSales = req.user.roles.includes('sales') || req.user.roles.includes('part_time_sales');
+    
+    if (isSales && !isAdmin) {
+      if (customer.createdBy.toString() !== req.user._id.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: '只能编辑自己创建的客户'
+        });
+      }
     }
 
     // 如果修改名称，检查是否与其他客户重复
@@ -191,6 +214,14 @@ router.delete('/:id', authorize('admin'), async (req, res) => {
 });
 
 module.exports = router;
+
+
+
+
+
+
+
+
 
 
 

@@ -13,7 +13,7 @@ const projectMemberSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['translator', 'reviewer', 'pm', 'sales', 'admin_staff'],
+    enum: ['translator', 'reviewer', 'pm', 'sales', 'admin_staff', 'part_time_sales', 'layout'],
     required: true
   },
   // 翻译类型（仅翻译角色需要）
@@ -44,6 +44,13 @@ const projectMemberSchema = new mongoose.Schema({
 projectMemberSchema.index({ projectId: 1, userId: 1, role: 1 }, { unique: true });
 
 module.exports = mongoose.model('ProjectMember', projectMemberSchema);
+
+
+
+
+
+
+
 
 
 

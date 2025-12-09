@@ -92,15 +92,35 @@ async function generateMonthlyKPIRecords(month) {
 
           let kpiResult;
 
-          if (member.role === 'sales') {
-            // 销售：金额奖励 + 回款奖励（均计入）
-            const salesCompletion = calculateCompletionFactorForSales(project);
-            const salesResult = calculateSalesCombined(project, salesCompletion);
-            effectiveRatio = project.locked_ratios.sales_bonus;
-            kpiResult = {
-              kpiValue: salesResult.kpiValue,
-              formula: salesResult.formula
-            };
+      if (member.role === 'sales') {
+        // 销售：金额奖励 + 回款奖励（均计入）
+        const salesCompletion = calculateCompletionFactorForSales(project);
+        const salesResult = calculateSalesCombined(project, salesCompletion);
+        effectiveRatio = project.locked_ratios.sales_bonus;
+        kpiResult = {
+          kpiValue: salesResult.kpiValue,
+          formula: salesResult.formula
+        };
+      } else if (member.role === 'part_time_sales') {
+        // 兼职销售：成交额 - 公司应收 - 税费 = 返还佣金
+        const commission = project.calculatePartTimeSalesCommission();
+        const totalAmount = project.projectAmount || 0;
+        const companyReceivable = project.partTimeSales?.companyReceivable || 0;
+        const taxRate = project.partTimeSales?.taxRate || 0;
+        const receivableAmount = totalAmount - companyReceivable;
+        const taxAmount = receivableAmount * taxRate;
+        
+        kpiResult = {
+          kpiValue: commission,
+          formula: `成交额(${totalAmount}) - 公司应收(${companyReceivable}) = 应收金额(${receivableAmount})；应收金额(${receivableAmount}) - 税费(${taxAmount.toFixed(2)}) = 返还佣金(${commission})`
+        };
+      } else if (member.role === 'layout') {
+        // 兼职排版：直接使用排版费用作为KPI
+        const layoutCost = project.partTimeLayout?.layoutCost || 0;
+        kpiResult = {
+          kpiValue: layoutCost,
+          formula: `排版费用：${layoutCost}元`
+        };
           } else if (member.role === 'admin_staff') {
             // 综合岗：使用全公司总额
             kpiResult = calculateKPIByRole({
@@ -290,23 +310,27 @@ async function generateProjectKPI(projectId) {
         });
       }
 
-      // 创建KPI记录
-      await KpiRecord.create({
-        userId: member.userId._id,
-        projectId: project._id,
-        role: member.role,
-        month,
-        kpiValue: kpiResult.kpiValue,
-        calculationDetails: {
-          projectAmount: project.projectAmount,
-          ratio: effectiveRatio,
-          wordRatio: member.role === 'translator' ? wordRatio : undefined,
+          // 创建KPI记录
+          await KpiRecord.create({
+            userId: member.userId._id,
+            projectId: project._id,
+            role: member.role,
+            month,
+            kpiValue: kpiResult.kpiValue,
+            calculationDetails: {
+              projectAmount: project.projectAmount,
+              ratio: effectiveRatio,
+              wordRatio: member.role === 'translator' ? wordRatio : undefined,
               completionFactor: member.role === 'sales' ? calculateCompletionFactorForSales(project) : completionFactor,
               formula: member.role === 'sales' ? kpiResult.formula : appendComplaintNote(kpiResult.formula, project),
               complaintPenalty: member.role === 'sales' ? 0 : (project.hasComplaint ? 0.2 : 0),
-              hasComplaint: member.role === 'sales' ? false : !!project.hasComplaint
-        }
-      });
+              hasComplaint: member.role === 'sales' ? false : !!project.hasComplaint,
+              // 兼职销售相关
+              partTimeSalesCommission: member.role === 'part_time_sales' ? kpiResult.kpiValue : undefined,
+              // 兼职排版相关
+              layoutCost: member.role === 'layout' ? kpiResult.kpiValue : undefined
+            }
+          });
 
       recordCount++;
     } catch (memberError) {
@@ -389,15 +413,37 @@ async function calculateProjectRealtime(projectId) {
 
     let kpiResult;
 
-    if (member.role === 'sales') {
-      // 销售：金额奖励 + 回款奖励（均计入），不受客诉扣减，但受返修/延期影响
-      const salesCompletion = calculateCompletionFactorForSales(project);
-      const salesResult = calculateSalesCombined(project, salesCompletion);
-      effectiveRatio = project.locked_ratios.sales_bonus;
-      kpiResult = {
-        kpiValue: salesResult.kpiValue,
-        formula: salesResult.formula
-      };
+      if (member.role === 'sales') {
+        // 销售：金额奖励 + 回款奖励（均计入），不受客诉扣减，但受返修/延期影响
+        const salesCompletion = calculateCompletionFactorForSales(project);
+        const salesResult = calculateSalesCombined(project, salesCompletion);
+        effectiveRatio = project.locked_ratios.sales_bonus;
+        kpiResult = {
+          kpiValue: salesResult.kpiValue,
+          formula: salesResult.formula,
+          bonusPart: salesResult.bonusPart,
+          commissionPart: salesResult.commissionPart
+        };
+      } else if (member.role === 'part_time_sales') {
+        // 兼职销售：成交额 - 公司应收 - 税费 = 返还佣金
+        const commission = project.calculatePartTimeSalesCommission();
+        const totalAmount = project.projectAmount || 0;
+        const companyReceivable = project.partTimeSales?.companyReceivable || 0;
+        const taxRate = project.partTimeSales?.taxRate || 0;
+        const receivableAmount = totalAmount - companyReceivable;
+        const taxAmount = receivableAmount * taxRate;
+        
+        kpiResult = {
+          kpiValue: commission,
+          formula: `成交额(${totalAmount}) - 公司应收(${companyReceivable}) = 应收金额(${receivableAmount})；应收金额(${receivableAmount}) - 税费(${taxAmount.toFixed(2)}) = 返还佣金(${commission})`
+        };
+      } else if (member.role === 'layout') {
+        // 兼职排版：直接使用排版费用作为KPI
+        const layoutCost = project.partTimeLayout?.layoutCost || 0;
+        kpiResult = {
+          kpiValue: layoutCost,
+          formula: `排版费用：${layoutCost}元`
+        };
     } else if (member.role === 'admin_staff') {
       // 综合岗：使用全公司总额
       kpiResult = calculateKPIByRole({
@@ -432,7 +478,9 @@ async function calculateProjectRealtime(projectId) {
         ratio: effectiveRatio,
         wordRatio: member.role === 'translator' ? wordRatio : undefined,
         completionFactor: member.role === 'sales' ? calculateCompletionFactorForSales(project) : completionFactor,
-        translatorType: member.role === 'translator' ? translatorType : undefined
+        translatorType: member.role === 'translator' ? translatorType : undefined,
+        salesBonus: member.role === 'sales' ? kpiResult.bonusPart : undefined,
+        salesCommission: member.role === 'sales' ? kpiResult.commissionPart : undefined
       }
     });
   }

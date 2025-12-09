@@ -6,9 +6,9 @@ const User = require('../models/User');
 // 所有用户路由需要认证
 router.use(authenticate);
 
-// 获取所有用户（管理员、财务、销售可见）
-// 销售只能看到激活的用户，用于项目成员选择
-router.get('/', authorize('admin', 'finance', 'sales'), async (req, res) => {
+// 获取所有用户（管理员、财务、销售、项目经理可见）
+// 用于项目成员选择
+router.get('/', authorize('admin', 'finance', 'sales', 'part_time_sales', 'pm', 'translator', 'reviewer'), async (req, res) => {
   try {
     const users = await User.find({ isActive: true })
       .select('-password')

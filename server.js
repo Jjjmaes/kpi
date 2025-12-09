@@ -20,6 +20,8 @@ const projectRoutes = require('./routes/projects');
 const kpiRoutes = require('./routes/kpi');
 const configRoutes = require('./routes/config');
 const financeRoutes = require('./routes/finance');
+const languagePairRoutes = require('./routes/languagePairs');
+const languageRoutes = require('./routes/languages');
 const customerRoutes = require('./routes/customers');
 
 app.use('/api/auth', authRoutes);
@@ -28,6 +30,8 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/kpi', kpiRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/finance', financeRoutes);
+app.use('/api/language-pairs', languagePairRoutes);
+app.use('/api/languages', languageRoutes);
 app.use('/api/customers', customerRoutes);
 
 // 健康检查

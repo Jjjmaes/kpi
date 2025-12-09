@@ -1,0 +1,13 @@
+/* 专用于语言对管理的下拉样式（可与主样式合并） */
+.lang-select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+
+
+
+
+

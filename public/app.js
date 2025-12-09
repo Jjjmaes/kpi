@@ -8,24 +8,32 @@ let allUsers = []; // 缓存用户列表
 let allCustomers = []; // 缓存客户列表
 let currentProjectDetail = null; // 缓存当前项目详情
 const isFinanceRole = () => (currentUser?.roles || []).some(r => r === 'admin' || r === 'finance');
+let allProjectsCache = []; // 缓存项目列表
+let receivablesCache = []; // 缓存应收结果
+let projectPage = 1;
+let receivablePage = 1;
+let languagesCache = [];
 
 // 初始化
-document.addEventListener('DOMContentLoaded', () => {
-    token = localStorage.getItem('token');
-    if (token) {
-        checkAuth();
-    } else {
-        showLogin();
-    }
-});
+    document.addEventListener('DOMContentLoaded', () => {
+        token = localStorage.getItem('token');
+        console.log('[Auth] DOMContentLoaded, token exists:', !!token);
+        if (token) {
+            checkAuth();
+        } else {
+            showLogin();
+        }
+    });
 
 // 认证检查
 async function checkAuth() {
     try {
+        console.log('[Auth] checkAuth start');
         const response = await fetch(`${API_BASE}/auth/me`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         const data = await response.json();
+        console.log('[Auth] /auth/me result:', data);
         if (data.success) {
             currentUser = data.user;
             showMainApp();
@@ -33,6 +41,7 @@ async function checkAuth() {
             showLogin();
         }
     } catch (error) {
+        console.error('[Auth] checkAuth error:', error);
         showLogin();
     }
 }
@@ -44,12 +53,14 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     const password = document.getElementById('loginPassword').value;
 
     try {
+        console.log('[Auth] login start', { username });
         const response = await fetch(`${API_BASE}/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
         });
         const data = await response.json();
+        console.log('[Auth] login result:', data);
 
         if (data.success) {
             token = data.token;
@@ -60,6 +71,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
             showAlert('loginAlert', data.message, 'error');
         }
     } catch (error) {
+        console.error('[Auth] login error:', error);
         showAlert('loginAlert', '登录失败: ' + error.message, 'error');
     }
 });
@@ -69,17 +81,21 @@ function logout() {
     token = null;
     currentUser = null;
     localStorage.removeItem('token');
-    showLogin();
+    console.log('[Auth] logout -> redirect /');
+    // 强制回到登录页（清除可能残留的 ? 查询）
+    window.location.href = '/';
 }
 
 // 显示登录页
 function showLogin() {
+    console.log('[UI] showLogin');
     document.getElementById('loginSection').style.display = 'block';
     document.getElementById('mainApp').style.display = 'none';
 }
 
 // 显示主应用
 function showMainApp() {
+    console.log('[UI] showMainApp user:', currentUser?.username, 'roles:', currentUser?.roles);
     document.getElementById('loginSection').style.display = 'none';
     document.getElementById('mainApp').style.display = 'block';
     document.getElementById('userName').textContent = currentUser.name;
@@ -88,16 +104,19 @@ function showMainApp() {
     const isAdmin = currentUser.roles.includes('admin');
     const isFinance = currentUser.roles.includes('finance');
     const isSales = currentUser.roles.includes('sales');
+    const isPartTimeSales = currentUser.roles.includes('part_time_sales');
 
     if (isAdmin) {
         document.getElementById('configBtn').style.display = 'inline-block';
         document.getElementById('usersBtn').style.display = 'inline-block';
+        document.getElementById('languagesBtn').style.display = 'inline-block';
+        document.getElementById('createLanguageBtn').style.display = 'inline-block';
     }
     if (isAdmin || isFinance) {
         document.getElementById('financeBtn').style.display = 'inline-block';
     }
 
-    if (isSales || isAdmin) {
+    if (isSales || isPartTimeSales || isAdmin) {
         document.getElementById('createProjectBtn').style.display = 'inline-block';
         document.getElementById('customersBtn').style.display = 'inline-block';
     }
@@ -117,13 +136,18 @@ function showMainApp() {
         loadUsers();
         loadConfig();
     }
-    // 销售也需要加载用户列表（用于创建项目时选择成员）
-    if (isSales) {
+    // 销售和兼职销售也需要加载用户列表（用于创建项目时选择成员）
+    if (isSales || isPartTimeSales) {
         loadUsersForProjectMembers();
     }
-    // 加载客户列表（销售和管理员需要）
-    if (isSales || isAdmin) {
+    // 加载客户列表（销售、兼职销售和管理员需要）
+    if (isSales || isPartTimeSales || isAdmin) {
         loadCustomers();
+    }
+    // 财务筛选下拉需要客户/销售
+    if (isAdmin || isFinance) {
+        loadCustomers().then(() => fillFinanceFilters());
+        loadUsersForSelect().then(() => fillFinanceFilters());
     }
     // Dashboard 默认月份
     const dashboardMonthInput = document.getElementById('dashboardMonth');
@@ -134,20 +158,200 @@ function showMainApp() {
     loadProjects();
     loadKPI();
     if (isAdmin || isFinance) {
+        const financeMonthInput = document.getElementById('financeMonth');
+        if (financeMonthInput && !financeMonthInput.value) {
+            financeMonthInput.value = new Date().toISOString().slice(0, 7);
+        }
         loadReceivables();
         loadInvoices();
         loadPendingKpi();
         loadFinanceSummary();
     }
+    if (isAdmin || isSales || isPartTimeSales || currentUser.roles.includes('pm')) {
+        loadLanguages(true);
+    }
 }
 
 // 切换section
 function showSection(sectionId) {
+    if (sectionId === 'finance' && !isFinanceRole()) {
+        showToast('无权限访问财务模块', 'error');
+        return;
+    }
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
     document.getElementById(sectionId).classList.add('active');
     event.target.classList.add('active');
 }
+
+// ==================== 语种管理 ====================
+async function loadLanguages(refresh) {
+    try {
+        const res = await fetch(`${API_BASE}/languages${refresh ? '' : '?active=true'}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!data.success) {
+            showAlert('languagesList', data.message || '加载失败', 'error');
+            return;
+        }
+        languagesCache = data.data || [];
+        renderLanguages();
+    } catch (error) {
+        showAlert('languagesList', '加载失败: ' + error.message, 'error');
+    }
+}
+
+function renderLanguages() {
+    if (!document.getElementById('languagesList')) return;
+    const rows = (languagesCache || []).map(lang => `
+        <tr>
+            <td>${lang.name}</td>
+            <td>${lang.code}</td>
+            <td>${lang.nativeName || '-'}</td>
+            <td>${lang.isActive ? '<span class="badge badge-success">启用</span>' : '<span class="badge badge-danger">停用</span>'}</td>
+            <td>
+                <button class="btn-small" onclick="showEditLanguageModal('${lang._id}')">编辑</button>
+            </td>
+        </tr>
+    `).join('');
+    document.getElementById('languagesList').innerHTML = `
+        <table>
+            <thead>
+                <tr>
+                    <th>语种名称</th>
+                    <th>代码</th>
+                    <th>本地名称</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${rows || '<tr><td colspan="5" style="text-align:center;">暂无语种</td></tr>'}
+            </tbody>
+        </table>
+    `;
+}
+
+function showCreateLanguageModal() {
+    const content = `
+        <form id="createLangForm" onsubmit="createLanguage(event)">
+            <div class="form-group">
+                <label>语种名称 *</label>
+                <input type="text" name="name" placeholder="如：中文、英文" required>
+            </div>
+            <div class="form-group">
+                <label>语种代码 *</label>
+                <input type="text" name="code" placeholder="如：ZH、EN" required style="text-transform: uppercase;">
+                <small style="color: #666; font-size: 12px;">通常使用ISO 639-1标准代码（大写）</small>
+            </div>
+            <div class="form-group">
+                <label>本地名称（可选）</label>
+                <input type="text" name="nativeName" placeholder="如：中文、English">
+            </div>
+            <div class="action-buttons">
+                <button type="submit">创建</button>
+                <button type="button" onclick="closeModal()">取消</button>
+            </div>
+        </form>
+    `;
+    showModal('新增语种', content);
+}
+
+async function createLanguage(e) {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const payload = {
+        name: formData.get('name'),
+        code: formData.get('code').toUpperCase(),
+        nativeName: formData.get('nativeName') || undefined
+    };
+    try {
+        const res = await fetch(`${API_BASE}/languages`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!data.success) {
+            showToast(data.message || '创建失败', 'error');
+            return;
+        }
+        closeModal();
+        loadLanguages(true);
+        showToast('语种已创建', 'success');
+    } catch (error) {
+        showToast('创建失败: ' + error.message, 'error');
+    }
+}
+
+function showEditLanguageModal(id) {
+    const lang = languagesCache.find(l => l._id === id);
+    if (!lang) return;
+    const content = `
+        <form id="editLangForm" onsubmit="updateLanguage(event, '${id}')">
+            <div class="form-group">
+                <label>语种名称 *</label>
+                <input type="text" name="name" value="${lang.name}" required>
+            </div>
+            <div class="form-group">
+                <label>语种代码 *</label>
+                <input type="text" name="code" value="${lang.code}" required style="text-transform: uppercase;">
+            </div>
+            <div class="form-group">
+                <label>本地名称（可选）</label>
+                <input type="text" name="nativeName" value="${lang.nativeName || ''}">
+            </div>
+            <div class="form-group">
+                <label>状态</label>
+                <select name="isActive">
+                    <option value="true" ${lang.isActive ? 'selected' : ''}>启用</option>
+                    <option value="false" ${!lang.isActive ? 'selected' : ''}>停用</option>
+                </select>
+            </div>
+            <div class="action-buttons">
+                <button type="submit">保存</button>
+                <button type="button" onclick="closeModal()">取消</button>
+            </div>
+        </form>
+    `;
+    showModal('编辑语种', content);
+}
+
+async function updateLanguage(e, id) {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const payload = {
+        name: formData.get('name'),
+        code: formData.get('code').toUpperCase(),
+        nativeName: formData.get('nativeName') || undefined,
+        isActive: formData.get('isActive') === 'true'
+    };
+    try {
+        const res = await fetch(`${API_BASE}/languages/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!data.success) {
+            showToast(data.message || '更新失败', 'error');
+            return;
+        }
+        closeModal();
+        loadLanguages(true);
+        showToast('语种已更新', 'success');
+    } catch (error) {
+        showToast('更新失败: ' + error.message, 'error');
+    }
+}
+
 
 // ==================== 模态框管理 ====================
 function showModal(title, content) {
@@ -260,7 +464,7 @@ function showCreateUserModal() {
             <div class="form-group">
                 <label>角色 *</label>
                 <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px;">
-                    ${['admin', 'finance', 'sales', 'pm', 'translator', 'reviewer', 'admin_staff'].map(role => `
+                    ${['admin', 'finance', 'sales', 'pm', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout'].map(role => `
                         <label style="display: flex; align-items: center; gap: 5px; font-weight: normal;">
                             <input type="checkbox" name="roles" value="${role}">
                             ${getRoleText(role)}
@@ -335,7 +539,7 @@ async function editUser(userId) {
             <div class="form-group">
                 <label>角色 *</label>
                 <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px;">
-                    ${['admin', 'finance', 'sales', 'pm', 'translator', 'reviewer', 'admin_staff'].map(role => `
+                    ${['admin', 'finance', 'sales', 'pm', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout'].map(role => `
                         <label style="display: flex; align-items: center; gap: 5px; font-weight: normal;">
                             <input type="checkbox" name="roles" value="${role}" ${user.roles.includes(role) ? 'checked' : ''}>
                             ${getRoleText(role)}
@@ -431,6 +635,8 @@ async function loadCustomers() {
         if (data.success) {
             allCustomers = data.data;
             renderCustomersList(data.data);
+            fillFinanceFilters();
+            fillProjectCustomerFilter();
         }
     } catch (error) {
         console.error('加载客户失败:', error);
@@ -695,8 +901,36 @@ async function loadProjects() {
         const data = await response.json();
 
         if (data.success) {
-            const html = `
-                <table>
+            allProjectsCache = data.data || [];
+            renderProjects();
+            fillFinanceProjectSelects();
+        }
+    } catch (error) {
+        console.error('加载项目失败:', error);
+        showAlert('projectsList', '加载项目失败: ' + error.message, 'error');
+    }
+}
+
+function renderProjects() {
+    const search = document.getElementById('projectSearch')?.value?.toLowerCase() || '';
+    const status = document.getElementById('projectStatusFilter')?.value || '';
+    const biz = document.getElementById('projectBizFilter')?.value || '';
+    const cust = document.getElementById('projectCustomerFilter')?.value || '';
+    const pageSizeSel = document.getElementById('projectPageSize');
+    const pageSize = pageSizeSel ? parseInt(pageSizeSel.value, 10) || 10 : 10;
+    const filtered = allProjectsCache.filter(p => {
+        const matchesSearch = !search || (p.projectName?.toLowerCase().includes(search)) || (p.projectNumber?.toLowerCase().includes(search)) || ((p.customerId?.name || p.clientName || '').toLowerCase().includes(search));
+        const matchesStatus = !status || p.status === status;
+        const matchesBiz = !biz || p.businessType === biz;
+        const matchesCust = !cust || (p.customerId && p.customerId._id === cust);
+        return matchesSearch && matchesStatus && matchesBiz && matchesCust;
+    });
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    if (projectPage > totalPages) projectPage = totalPages;
+    const start = (projectPage - 1) * pageSize;
+    const pageData = filtered.slice(start, start + pageSize);
+    document.getElementById('projectsList').innerHTML = `
+        <table class="table-sticky">
                     <thead>
                         <tr>
                             <th>项目编号</th>
@@ -710,9 +944,8 @@ async function loadProjects() {
                         </tr>
                     </thead>
                     <tbody>
-                        ${data.data.length === 0 ? '<tr><td colspan="8" style="text-align: center;">暂无项目</td></tr>' : ''}
-                        ${data.data.map(p => `
-                            <tr>
+                ${(pageData.length ? pageData : []).map(p => `
+                    <tr class="row-striped">
                                 <td>${p.projectNumber || '-'}</td>
                                 <td>${p.projectName}</td>
                                 <td>${p.customerId?.name || p.clientName}</td>
@@ -720,20 +953,80 @@ async function loadProjects() {
                                 <td>¥${p.projectAmount.toLocaleString()}</td>
                                 <td>${new Date(p.deadline).toLocaleDateString()}</td>
                                 <td><span class="badge ${getStatusBadgeClass(p.status)}">${getStatusText(p.status)}</span></td>
-                                <td>
-                                    <button class="btn-small" onclick="viewProject('${p._id}')">查看</button>
-                                </td>
+                        <td><button class="btn-small" onclick="viewProject('${p._id}')">查看</button></td>
                             </tr>
-                        `).join('')}
+                `).join('') || '<tr><td colspan="8" style="text-align:center;">暂无项目</td></tr>'}
                     </tbody>
                 </table>
-            `;
-            document.getElementById('projectsList').innerHTML = html;
-        }
-    } catch (error) {
-        console.error('加载项目失败:', error);
-        showAlert('projectsList', '加载项目失败: ' + error.message, 'error');
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
+            <button class="btn-small" ${projectPage<=1?'disabled':''} onclick="projectPage=Math.max(1, projectPage-1);renderProjects();">上一页</button>
+            <span style="align-self:center;">${projectPage} / ${totalPages}</span>
+            <button class="btn-small" ${projectPage>=totalPages?'disabled':''} onclick="projectPage=Math.min(${totalPages}, projectPage+1);renderProjects();">下一页</button>
+            <input type="number" min="1" max="${totalPages}" value="${projectPage}" style="width:70px;padding:6px;" onchange="jumpProjectPage(this.value, ${totalPages})">
+        </div>
+    `;
+}
+
+function jumpProjectPage(val, total) {
+    const page = Math.min(Math.max(parseInt(val || 1, 10), 1), total);
+    projectPage = page;
+    renderProjects();
+}
+function exportProjects() {
+    const search = document.getElementById('projectSearch')?.value?.toLowerCase() || '';
+    const status = document.getElementById('projectStatusFilter')?.value || '';
+    const biz = document.getElementById('projectBizFilter')?.value || '';
+    const cust = document.getElementById('projectCustomerFilter')?.value || '';
+    const rows = allProjectsCache.filter(p => {
+        const matchesSearch = !search || (p.projectName?.toLowerCase().includes(search)) || (p.projectNumber?.toLowerCase().includes(search)) || ((p.customerId?.name || p.clientName || '').toLowerCase().includes(search));
+        const matchesStatus = !status || p.status === status;
+        const matchesBiz = !biz || p.businessType === biz;
+        const matchesCust = !cust || (p.customerId && p.customerId._id === cust);
+        return matchesSearch && matchesStatus && matchesBiz && matchesCust;
+    }).map(p => [
+        p.projectNumber || '-',
+        p.projectName,
+        p.customerId?.name || p.clientName,
+        getBusinessTypeText(p.businessType),
+        p.projectAmount,
+        new Date(p.deadline).toLocaleDateString(),
+        getStatusText(p.status)
+    ]);
+    const header = ['项目编号','项目名称','客户','业务类型','项目金额','交付时间','状态'];
+    const csv = [header, ...rows].map(r => r.map(v => `"${(v ?? '').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'projects.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function fillProjectCustomerFilter() {
+    const sel = document.getElementById('projectCustomerFilter');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">全部客户</option>' + (allCustomers || []).map(c => `<option value="${c._id}">${c.name}</option>`).join('');
+}
+
+function fillFinanceFilters() {
+    const custSel = document.getElementById('financeCustomer');
+    if (custSel) {
+        custSel.innerHTML = '<option value="">全部客户</option>' + (allCustomers || []).map(c => `<option value="${c._id}">${c.name}</option>`).join('');
     }
+    const salesSel = document.getElementById('financeSales');
+    if (salesSel && allUsers?.length) {
+        const sales = allUsers.filter(u => (u.roles || []).includes('sales'));
+        salesSel.innerHTML = '<option value="">全部销售</option>' + sales.map(s => `<option value="${s._id}">${s.name}</option>`).join('');
+    }
+}
+
+function fillFinanceProjectSelects() {
+    const paymentSel = document.getElementById('paymentProjectId');
+    const invoiceSel = document.getElementById('invoiceProjectId');
+    const options = (allProjectsCache || []).map(p => `<option value="${p._id}">${p.projectNumber || p.projectName}</option>`).join('');
+    if (paymentSel) paymentSel.innerHTML = '<option value="">选择项目</option>' + options;
+    if (invoiceSel) invoiceSel.innerHTML = '<option value="">选择项目</option>' + options;
 }
 
 async function showCreateProjectModal() {
@@ -756,6 +1049,16 @@ async function showCreateProjectModal() {
             console.error('加载用户列表失败:', error);
         }
     }
+
+    // 确保语种列表已加载
+    if (languagesCache.length === 0) {
+        await loadLanguages();
+    }
+
+    const languageOptions = languagesCache
+        .filter(lang => lang.isActive)
+        .map(lang => `<option value="${lang.name}">${lang.name}${lang.code ? ' (' + lang.code + ')' : ''}${lang.nativeName ? ' - ' + lang.nativeName : ''}</option>`)
+        .join('');
 
     const content = `
         <form id="createProjectForm" onsubmit="createProject(event)">
@@ -797,8 +1100,24 @@ async function showCreateProjectModal() {
                 </select>
             </div>
             <div class="form-group">
-                <label>翻译语言对</label>
-                <input type="text" name="languagePair" placeholder="如：中英、英中、中日等">
+                <label>源语种 *</label>
+                <select name="sourceLanguage" id="sourceLanguageSelect" required>
+                    <option value="">请选择源语种</option>
+                    ${languageOptions}
+                </select>
+            </div>
+            <div class="form-group">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <label style="margin-bottom: 0;">目标语言 *</label>
+                    <button type="button" class="btn-small" onclick="addTargetLanguageRow()">+ 添加目标语种</button>
+                </div>
+                <div id="targetLanguagesContainer" style="display: flex; flex-direction: column; gap: 8px;">
+                    <!-- 目标语种行将动态添加到这里 -->
+                </div>
+                <small style="color:#666; font-size: 12px; margin-top: 8px; display: block;">至少需要添加一个目标语种，支持一对多翻译</small>
+                <div style="margin-top:8px;font-size:12px;color:#667eea;">
+                    如需新增语种，请在"语种管理"中添加。
+                </div>
             </div>
             <div class="form-group" id="wordCountGroup">
                 <label>字数（笔译项目）</label>
@@ -810,7 +1129,7 @@ async function showCreateProjectModal() {
             </div>
             <div class="form-group">
                 <label>项目总金额 *</label>
-                <input type="number" name="projectAmount" id="projectAmount" step="0.01" min="0" required>
+                <input type="number" name="projectAmount" id="projectAmount" step="0.01" min="0" required onchange="calculatePartTimeSalesCommission(); validateLayoutCost();">
                 <small style="color: #666; font-size: 12px;">笔译项目：字数×单价/1000；其他项目：手动输入</small>
             </div>
             <div class="form-group">
@@ -828,6 +1147,63 @@ async function showCreateProjectModal() {
                         <input type="checkbox" name="needInvoice">
                         需要发票
                     </label>
+                </div>
+            </div>
+            
+            <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
+                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">兼职销售（可选）</h4>
+                <label style="display: flex; align-items: center; gap: 5px; font-weight: normal; margin-bottom: 10px;">
+                    <input type="checkbox" name="partTimeSales.isPartTime" id="partTimeSalesEnabled" onchange="togglePartTimeSalesFields()">
+                    启用兼职销售
+                </label>
+                <div id="partTimeSalesFields" style="display: none; padding-left: 20px; border-left: 2px solid #667eea;">
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label>公司应收金额（元）</label>
+                        <input type="number" name="partTimeSales.companyReceivable" id="companyReceivable" step="0.01" min="0" onchange="calculatePartTimeSalesCommission()" style="width: 100%;">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label>税率（%）</label>
+                        <input type="number" name="partTimeSales.taxRate" id="taxRate" step="0.01" min="0" max="100" value="10" onchange="calculatePartTimeSalesCommission()" style="width: 100%;">
+                        <small style="color: #666; font-size: 12px;">例如：10 表示 10%</small>
+                    </div>
+                    <div class="form-group" style="background: #f0f9ff; padding: 10px; border-radius: 4px; margin-top: 10px;">
+                        <label style="font-weight: 600; color: #0369a1;">返还佣金（自动计算）</label>
+                        <div id="partTimeSalesCommissionDisplay" style="font-size: 18px; color: #0369a1; font-weight: bold; margin-top: 5px;">
+                            ¥0.00
+                        </div>
+                        <small style="color: #666; font-size: 12px; display: block; margin-top: 5px;">公式：成交额 - 公司应收 - 税费</small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
+                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">兼职排版（可选）</h4>
+                <label style="display: flex; align-items: center; gap: 5px; font-weight: normal; margin-bottom: 10px;">
+                    <input type="checkbox" name="partTimeLayout.isPartTime" id="partTimeLayoutEnabled" onchange="togglePartTimeLayoutFields()">
+                    启用兼职排版
+                </label>
+                <div id="partTimeLayoutFields" style="display: none; padding-left: 20px; border-left: 2px solid #667eea;">
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label>选择排版员</label>
+                        <select name="partTimeLayout.layoutAssignedTo" id="layoutAssignedTo" style="width: 100%;">
+                            <option value="">请选择排版员</option>
+                            ${allUsers.filter(u => u.isActive).map(u => 
+                                `<option value="${u._id}">${u.name} (${u.username})</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label>排版费用（元）</label>
+                        <input type="number" name="partTimeLayout.layoutCost" id="layoutCost" step="0.01" min="0" onchange="validateLayoutCost()" style="width: 100%;">
+                        <small style="color: #666; font-size: 12px;">排版费用不能超过项目总金额的5%</small>
+                    </div>
+                    <div class="form-group" style="background: #f0f9ff; padding: 10px; border-radius: 4px; margin-top: 10px;">
+                        <label style="font-weight: 600; color: #0369a1;">费用占比（自动计算）</label>
+                        <div id="layoutCostPercentageDisplay" style="font-size: 18px; color: #0369a1; font-weight: bold; margin-top: 5px;">
+                            0%
+                        </div>
+                        <div id="layoutCostValidation" style="margin-top: 5px;"></div>
+                    </div>
                 </div>
             </div>
             <div class="form-group">
@@ -852,12 +1228,12 @@ async function showCreateProjectModal() {
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <label style="margin-bottom: 0;">项目成员（可选，创建后也可添加）</label>
-                    <button type="button" class="btn-small" onclick="addMemberRow()">+ 添加成员</button>
+                    <button type="button" class="btn-small" onclick="addMemberRow()">+ 添加项目经理</button>
                 </div>
                 <div id="membersContainer" style="max-height: 300px; overflow-y: auto;">
                     <!-- 成员行将动态添加到这里 -->
                 </div>
-                <small style="color: #666; font-size: 12px;">提示：可以创建项目后再添加成员</small>
+                <small style="color: #666; font-size: 12px;">提示：销售创建项目时只能添加项目经理，翻译、审校、排版等成员由项目经理在项目详情中添加</small>
             </div>
             
             <div class="action-buttons">
@@ -867,8 +1243,122 @@ async function showCreateProjectModal() {
         </form>
     `;
     showModal('创建项目', content);
-    // 重置成员容器
+    // 重置成员容器和目标语种容器
     document.getElementById('membersContainer').innerHTML = '';
+    document.getElementById('targetLanguagesContainer').innerHTML = '';
+    // 添加第一个目标语种行
+    addTargetLanguageRow();
+}
+
+let targetLanguageRowIndex = 0;
+
+function addTargetLanguageRow() {
+    // 确保语种列表已加载
+    if (languagesCache.length === 0) {
+        showToast('请先等待语种列表加载完成', 'error');
+        return;
+    }
+    
+    targetLanguageRowIndex++;
+    const container = document.getElementById('targetLanguagesContainer');
+    if (!container) return;
+    
+    const languageOptions = languagesCache
+        .filter(lang => lang.isActive)
+        .map(lang => `<option value="${lang.name}">${lang.name}${lang.code ? ' (' + lang.code + ')' : ''}${lang.nativeName ? ' - ' + lang.nativeName : ''}</option>`)
+        .join('');
+    
+    const row = document.createElement('div');
+    row.className = 'target-language-row';
+    row.id = `targetLanguageRow${targetLanguageRowIndex}`;
+    row.style.cssText = 'display: flex; gap: 10px; align-items: flex-end; padding: 8px; background: #f8f9fa; border-radius: 4px;';
+    
+    row.innerHTML = `
+        <div style="flex: 1;">
+            <label style="font-size: 12px; display: block; margin-bottom: 4px;">目标语种 ${targetLanguageRowIndex}</label>
+            <select class="target-language-select" required style="width: 100%; padding: 6px;">
+                <option value="">请选择目标语种</option>
+                ${languageOptions}
+            </select>
+        </div>
+        <div style="flex: 0 0 auto;">
+            <button type="button" class="btn-small btn-danger" onclick="removeTargetLanguageRow('targetLanguageRow${targetLanguageRowIndex}')" style="margin-bottom: 0;">删除</button>
+        </div>
+    `;
+    container.appendChild(row);
+}
+
+function removeTargetLanguageRow(rowId) {
+    const row = document.getElementById(rowId);
+    if (row) {
+        row.remove();
+        // 重新编号
+        const container = document.getElementById('targetLanguagesContainer');
+        if (container) {
+            const rows = container.querySelectorAll('.target-language-row');
+            rows.forEach((r, index) => {
+                const label = r.querySelector('label');
+                if (label) {
+                    label.textContent = `目标语种 ${index + 1}`;
+                }
+            });
+        }
+    }
+}
+
+function addEditTargetLanguageRow(selectedValue = '') {
+    // 确保语种列表已加载
+    if (languagesCache.length === 0) {
+        showToast('请先等待语种列表加载完成', 'error');
+        return;
+    }
+    
+    targetLanguageRowIndex++;
+    const container = document.getElementById('editTargetLanguagesContainer');
+    if (!container) return;
+    
+    const languageOptions = languagesCache
+        .filter(lang => lang.isActive)
+        .map(lang => `<option value="${lang.name}" ${selectedValue === lang.name ? 'selected' : ''}>${lang.name}${lang.code ? ' (' + lang.code + ')' : ''}${lang.nativeName ? ' - ' + lang.nativeName : ''}</option>`)
+        .join('');
+    
+    const row = document.createElement('div');
+    row.className = 'target-language-row';
+    row.id = `targetLanguageRow${targetLanguageRowIndex}`;
+    row.style.cssText = 'display: flex; gap: 10px; align-items: flex-end; padding: 8px; background: #f8f9fa; border-radius: 4px;';
+    
+    const rowNumber = container.querySelectorAll('.target-language-row').length + 1;
+    row.innerHTML = `
+        <div style="flex: 1;">
+            <label style="font-size: 12px; display: block; margin-bottom: 4px;">目标语种 ${rowNumber}</label>
+            <select class="target-language-select" required style="width: 100%; padding: 6px;">
+                <option value="">请选择目标语种</option>
+                ${languageOptions}
+            </select>
+        </div>
+        <div style="flex: 0 0 auto;">
+            <button type="button" class="btn-small btn-danger" onclick="removeEditTargetLanguageRow('targetLanguageRow${targetLanguageRowIndex}')" style="margin-bottom: 0;">删除</button>
+        </div>
+    `;
+    container.appendChild(row);
+}
+
+function removeEditTargetLanguageRow(rowId) {
+    const row = document.getElementById(rowId);
+    if (row) {
+        row.remove();
+        // 重新编号
+        const container = document.getElementById('editTargetLanguagesContainer');
+        if (container) {
+            const rows = container.querySelectorAll('.target-language-row');
+            rows.forEach((r, index) => {
+                const label = r.querySelector('label');
+                if (label) {
+                    label.textContent = `目标语种 ${index + 1}`;
+                }
+            });
+        }
+    }
 }
 
 let memberRowIndex = 0;
@@ -893,12 +1383,30 @@ async function addMemberRow() {
         }
     }
     
+    // 判断当前用户是否是销售或兼职销售（创建项目时只能添加项目经理）
+    const isSales = currentUser?.roles?.includes('sales') || currentUser?.roles?.includes('part_time_sales');
+    
     memberRowIndex++;
     const container = document.getElementById('membersContainer');
     const row = document.createElement('div');
     row.className = 'member-row';
     row.id = `memberRow${memberRowIndex}`;
     row.style.cssText = 'display: flex; gap: 10px; margin-bottom: 10px; padding: 10px; background: #f8f9fa; border-radius: 4px; align-items: flex-end;';
+    
+    // 如果是销售创建项目，只能选择项目经理
+    const roleOptions = isSales ? `
+                <option value="">请选择</option>
+                <option value="pm">项目经理</option>
+    ` : `
+                <option value="">请选择</option>
+                <option value="translator">翻译</option>
+                <option value="reviewer">审校</option>
+                <option value="pm">项目经理</option>
+                <option value="sales">销售</option>
+                <option value="admin_staff">综合岗</option>
+                <option value="part_time_sales">兼职销售</option>
+                <option value="layout">兼职排版</option>
+    `;
     
     row.innerHTML = `
         <div style="flex: 2;">
@@ -913,12 +1421,7 @@ async function addMemberRow() {
         <div style="flex: 1.5;">
             <label style="font-size: 12px;">角色</label>
             <select name="memberRole" class="member-role-select" required onchange="toggleMemberFields(this)">
-                <option value="">请选择</option>
-                <option value="translator">翻译</option>
-                <option value="reviewer">审校</option>
-                <option value="pm">项目经理</option>
-                <option value="sales">销售</option>
-                <option value="admin_staff">综合岗</option>
+                ${roleOptions}
             </select>
         </div>
         <div class="member-translator-group" style="flex: 1; display: none;">
@@ -992,6 +1495,238 @@ function calculateAmount() {
             amountInput.value = amount.toFixed(2);
         }
     }
+    
+    // 重新计算兼职销售佣金和排版费用校验
+    calculatePartTimeSalesCommission();
+    validateLayoutCost();
+}
+
+// 切换兼职销售字段显示
+function togglePartTimeSalesFields() {
+    const enabled = document.getElementById('partTimeSalesEnabled')?.checked;
+    const fields = document.getElementById('partTimeSalesFields');
+    if (fields) {
+        fields.style.display = enabled ? 'block' : 'none';
+        if (enabled) {
+            calculatePartTimeSalesCommission();
+        }
+    }
+}
+
+// 计算兼职销售佣金
+function calculatePartTimeSalesCommission() {
+    const enabled = document.getElementById('partTimeSalesEnabled')?.checked;
+    if (!enabled) {
+        const display = document.getElementById('partTimeSalesCommissionDisplay');
+        if (display) display.textContent = '¥0.00';
+        return;
+    }
+    
+    const totalAmount = parseFloat(document.getElementById('projectAmount')?.value || 0);
+    const companyReceivable = parseFloat(document.getElementById('companyReceivable')?.value || 0);
+    const taxRatePercent = parseFloat(document.getElementById('taxRate')?.value || 0);
+    const taxRate = taxRatePercent / 100; // 转换为小数
+    
+    if (totalAmount <= 0) {
+        const display = document.getElementById('partTimeSalesCommissionDisplay');
+        if (display) display.textContent = '¥0.00';
+        return;
+    }
+    
+    // 计算应收金额
+    const receivableAmount = totalAmount - companyReceivable;
+    
+    // 计算税费
+    const taxAmount = receivableAmount * taxRate;
+    
+    // 计算税后金额（返还佣金）
+    const commission = receivableAmount - taxAmount;
+    const finalCommission = Math.max(0, Math.round(commission * 100) / 100);
+    
+    const display = document.getElementById('partTimeSalesCommissionDisplay');
+    if (display) {
+        display.textContent = `¥${finalCommission.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+}
+
+// 切换兼职排版字段显示
+function togglePartTimeLayoutFields() {
+    const enabled = document.getElementById('partTimeLayoutEnabled')?.checked;
+    const fields = document.getElementById('partTimeLayoutFields');
+    if (fields) {
+        fields.style.display = enabled ? 'block' : 'none';
+        if (enabled) {
+            validateLayoutCost();
+        }
+    }
+}
+
+// 编辑表单：切换兼职销售字段显示
+function toggleEditPartTimeSalesFields() {
+    const enabled = document.getElementById('editPartTimeSalesEnabled')?.checked;
+    const fields = document.getElementById('editPartTimeSalesFields');
+    if (fields) {
+        fields.style.display = enabled ? 'block' : 'none';
+        if (enabled) {
+            calculateEditPartTimeSalesCommission();
+        }
+    }
+}
+
+// 编辑表单：计算兼职销售佣金
+function calculateEditPartTimeSalesCommission() {
+    const enabled = document.getElementById('editPartTimeSalesEnabled')?.checked;
+    if (!enabled) {
+        const display = document.getElementById('editPartTimeSalesCommissionDisplay');
+        if (display) display.textContent = '¥0.00';
+        return;
+    }
+    
+    const totalAmount = parseFloat(document.querySelector('#editProjectForm [name="projectAmount"]')?.value || 0);
+    const companyReceivable = parseFloat(document.getElementById('editCompanyReceivable')?.value || 0);
+    const taxRatePercent = parseFloat(document.getElementById('editTaxRate')?.value || 0);
+    const taxRate = taxRatePercent / 100;
+    
+    if (totalAmount <= 0) {
+        const display = document.getElementById('editPartTimeSalesCommissionDisplay');
+        if (display) display.textContent = '¥0.00';
+        return;
+    }
+    
+    const receivableAmount = totalAmount - companyReceivable;
+    const taxAmount = receivableAmount * taxRate;
+    const commission = receivableAmount - taxAmount;
+    const finalCommission = Math.max(0, Math.round(commission * 100) / 100);
+    
+    const display = document.getElementById('editPartTimeSalesCommissionDisplay');
+    if (display) {
+        display.textContent = `¥${finalCommission.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+}
+
+// 编辑表单：切换兼职排版字段显示
+function toggleEditPartTimeLayoutFields() {
+    const enabled = document.getElementById('editPartTimeLayoutEnabled')?.checked;
+    const fields = document.getElementById('editPartTimeLayoutFields');
+    if (fields) {
+        fields.style.display = enabled ? 'block' : 'none';
+        if (enabled) {
+            validateEditLayoutCost();
+        }
+    }
+}
+
+// 编辑表单：校验排版费用
+function validateEditLayoutCost() {
+    const enabled = document.getElementById('editPartTimeLayoutEnabled')?.checked;
+    if (!enabled) {
+        const display = document.getElementById('editLayoutCostPercentageDisplay');
+        const validation = document.getElementById('editLayoutCostValidation');
+        if (display) display.textContent = '0%';
+        if (validation) validation.innerHTML = '';
+        return;
+    }
+    
+    const projectAmount = parseFloat(document.querySelector('#editProjectForm [name="projectAmount"]')?.value || 0);
+    const layoutCost = parseFloat(document.getElementById('editLayoutCost')?.value || 0);
+    
+    if (projectAmount <= 0) {
+        const display = document.getElementById('editLayoutCostPercentageDisplay');
+        const validation = document.getElementById('editLayoutCostValidation');
+        if (display) display.textContent = '0%';
+        if (validation) validation.innerHTML = '<small style="color: #999;">请输入项目总金额</small>';
+        return;
+    }
+    
+    if (layoutCost <= 0) {
+        const display = document.getElementById('editLayoutCostPercentageDisplay');
+        const validation = document.getElementById('editLayoutCostValidation');
+        if (display) display.textContent = '0%';
+        if (validation) validation.innerHTML = '';
+        return;
+    }
+    
+    const percentage = (layoutCost / projectAmount) * 100;
+    const roundedPercentage = Math.round(percentage * 100) / 100;
+    
+    const display = document.getElementById('editLayoutCostPercentageDisplay');
+    const validation = document.getElementById('editLayoutCostValidation');
+    
+    if (display) {
+        display.textContent = `${roundedPercentage}%`;
+        if (roundedPercentage > 5) {
+            display.style.color = '#dc2626';
+        } else {
+            display.style.color = '#0369a1';
+        }
+    }
+    
+    if (validation) {
+        if (roundedPercentage > 5) {
+            validation.innerHTML = `<small style="color: #dc2626; font-weight: 600;">⚠️ 排版费用超过项目总金额的5%，请调整费用</small>`;
+        } else if (roundedPercentage > 4.5) {
+            validation.innerHTML = `<small style="color: #f59e0b;">⚠️ 接近5%限制，请注意</small>`;
+        } else {
+            validation.innerHTML = `<small style="color: #059669;">✓ 费用在允许范围内</small>`;
+        }
+    }
+}
+
+// 校验排版费用
+function validateLayoutCost() {
+    const enabled = document.getElementById('partTimeLayoutEnabled')?.checked;
+    if (!enabled) {
+        const display = document.getElementById('layoutCostPercentageDisplay');
+        const validation = document.getElementById('layoutCostValidation');
+        if (display) display.textContent = '0%';
+        if (validation) validation.innerHTML = '';
+        return;
+    }
+    
+    const projectAmount = parseFloat(document.getElementById('projectAmount')?.value || 0);
+    const layoutCost = parseFloat(document.getElementById('layoutCost')?.value || 0);
+    
+    if (projectAmount <= 0) {
+        const display = document.getElementById('layoutCostPercentageDisplay');
+        const validation = document.getElementById('layoutCostValidation');
+        if (display) display.textContent = '0%';
+        if (validation) validation.innerHTML = '<small style="color: #999;">请输入项目总金额</small>';
+        return;
+    }
+    
+    if (layoutCost <= 0) {
+        const display = document.getElementById('layoutCostPercentageDisplay');
+        const validation = document.getElementById('layoutCostValidation');
+        if (display) display.textContent = '0%';
+        if (validation) validation.innerHTML = '';
+        return;
+    }
+    
+    // 计算百分比
+    const percentage = (layoutCost / projectAmount) * 100;
+    const roundedPercentage = Math.round(percentage * 100) / 100;
+    
+    const display = document.getElementById('layoutCostPercentageDisplay');
+    const validation = document.getElementById('layoutCostValidation');
+    
+    if (display) {
+        display.textContent = `${roundedPercentage}%`;
+        if (roundedPercentage > 5) {
+            display.style.color = '#dc2626';
+        } else {
+            display.style.color = '#0369a1';
+        }
+    }
+    
+    if (validation) {
+        if (roundedPercentage > 5) {
+            validation.innerHTML = `<small style="color: #dc2626; font-weight: 600;">⚠️ 排版费用超过项目总金额的5%，请调整费用</small>`;
+        } else if (roundedPercentage > 4.5) {
+            validation.innerHTML = `<small style="color: #f59e0b;">⚠️ 接近5%限制，请注意</small>`;
+        } else {
+            validation.innerHTML = `<small style="color: #059669;">✓ 费用在允许范围内</small>`;
+        }
+    }
 }
 
 function updateCustomerInfo() {
@@ -1027,13 +1762,58 @@ async function createProject(e) {
         notes: formData.get('specialRequirements.notes') || undefined
     };
     
+    // 收集目标语言
+    const targetLanguageRows = document.querySelectorAll('.target-language-select');
+    const targetLanguages = Array.from(targetLanguageRows)
+        .map(select => select.value)
+        .filter(value => value && value.trim() !== '');
+    
+    if (targetLanguages.length === 0) {
+        alert('请至少添加并选择一个目标语种');
+        return;
+    }
+
+    // 收集兼职销售信息
+    const partTimeSalesEnabled = formData.get('partTimeSales.isPartTime') === 'on';
+    const partTimeSales = partTimeSalesEnabled ? {
+        isPartTime: true,
+        companyReceivable: parseFloat(formData.get('partTimeSales.companyReceivable') || 0),
+        taxRate: parseFloat(formData.get('partTimeSales.taxRate') || 0) / 100 // 转换为小数
+    } : undefined;
+    
+    // 收集兼职排版信息
+    const partTimeLayoutEnabled = formData.get('partTimeLayout.isPartTime') === 'on';
+    const layoutCost = parseFloat(formData.get('partTimeLayout.layoutCost') || 0);
+    const layoutAssignedTo = formData.get('partTimeLayout.layoutAssignedTo');
+    
+    // 校验排版费用
+    if (partTimeLayoutEnabled && layoutCost > 0) {
+        const projectAmount = parseFloat(formData.get('projectAmount'));
+        const percentage = (layoutCost / projectAmount) * 100;
+        if (percentage > 5) {
+            alert(`排版费用(${layoutCost})不能超过项目总金额(${projectAmount})的5%，当前占比为${percentage.toFixed(2)}%`);
+            return;
+        }
+        if (!layoutAssignedTo) {
+            alert('请选择排版员');
+            return;
+        }
+    }
+    
+    const partTimeLayout = partTimeLayoutEnabled ? {
+        isPartTime: true,
+        layoutCost: layoutCost,
+        layoutAssignedTo: layoutAssignedTo || undefined
+    } : undefined;
+
     const data = {
         projectNumber: formData.get('projectNumber') || undefined,
         projectName: formData.get('projectName'),
         customerId: formData.get('customerId'),
         businessType: formData.get('businessType'),
         projectType: formData.get('projectType') || undefined,
-        languagePair: formData.get('languagePair') || undefined,
+        sourceLanguage: formData.get('sourceLanguage'),
+        targetLanguages: targetLanguages,
         wordCount: formData.get('wordCount') ? parseFloat(formData.get('wordCount')) : undefined,
         unitPrice: formData.get('unitPrice') ? parseFloat(formData.get('unitPrice')) : undefined,
         projectAmount: parseFloat(formData.get('projectAmount')),
@@ -1041,7 +1821,9 @@ async function createProject(e) {
         isTaxIncluded: formData.get('isTaxIncluded') === 'on',
         needInvoice: formData.get('needInvoice') === 'on',
         specialRequirements: Object.keys(specialRequirements).some(k => specialRequirements[k]) ? specialRequirements : undefined,
-        members: members.length > 0 ? members : undefined
+        members: members.length > 0 ? members : undefined,
+        partTimeSales: partTimeSales,
+        partTimeLayout: partTimeLayout
     };
 
     try {
@@ -1084,7 +1866,7 @@ async function viewProject(projectId) {
 
             const canManagePayment = currentUser.roles.includes('admin') || 
                                     currentUser.roles.includes('finance') ||
-                                    project.createdBy._id === currentUser._id;
+                            project.createdBy._id === currentUser._id;
 
             const content = `
                 <div class="project-detail">
@@ -1126,10 +1908,16 @@ async function viewProject(projectId) {
                                 <div class="detail-value">${getProjectTypeText(project.projectType)}</div>
                             </div>
                         ` : ''}
-                        ${project.languagePair ? `
+                        ${project.sourceLanguage ? `
                             <div class="detail-row">
-                                <div class="detail-label">语言对:</div>
-                                <div class="detail-value">${project.languagePair}</div>
+                                <div class="detail-label">源语种:</div>
+                                <div class="detail-value">${project.sourceLanguage}</div>
+                            </div>
+                        ` : ''}
+                        ${project.targetLanguages && project.targetLanguages.length > 0 ? `
+                            <div class="detail-row">
+                                <div class="detail-label">目标语言:</div>
+                                <div class="detail-value">${project.targetLanguages.join(', ')}</div>
                             </div>
                         ` : ''}
                         ${project.businessType === 'translation' && project.wordCount > 0 ? `
@@ -1150,6 +1938,26 @@ async function viewProject(projectId) {
                             <div class="detail-row">
                                 <div class="detail-label">发票:</div>
                                 <div class="detail-value"><span class="badge badge-info">需要发票</span></div>
+                            </div>
+                        ` : ''}
+                        ${project.partTimeSales?.isPartTime ? `
+                            <div class="detail-row" style="background: #f0f9ff; padding: 10px; border-radius: 4px; margin-top: 10px;">
+                                <div class="detail-label" style="font-weight: 600; color: #0369a1;">兼职销售信息:</div>
+                                <div class="detail-value" style="color: #0369a1;">
+                                    <div>公司应收金额: ¥${(project.partTimeSales.companyReceivable || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                    <div>税率: ${((project.partTimeSales.taxRate || 0) * 100).toFixed(2)}%</div>
+                                    <div style="font-weight: bold; margin-top: 5px;">返还佣金: ¥${(project.partTimeSales.partTimeSalesCommission || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                </div>
+                            </div>
+                        ` : ''}
+                        ${project.partTimeLayout?.isPartTime ? `
+                            <div class="detail-row" style="background: #f0f9ff; padding: 10px; border-radius: 4px; margin-top: 10px;">
+                                <div class="detail-label" style="font-weight: 600; color: #0369a1;">兼职排版信息:</div>
+                                <div class="detail-value" style="color: #0369a1;">
+                                    <div>排版员: ${project.partTimeLayout.layoutAssignedTo?.name || project.partTimeLayout.layoutAssignedTo || '-'}</div>
+                                    <div>排版费用: ¥${(project.partTimeLayout.layoutCost || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                    <div>费用占比: ${(project.partTimeLayout.layoutCostPercentage || 0).toFixed(2)}%</div>
+                                </div>
                             </div>
                         ` : ''}
                         ${project.specialRequirements && (project.specialRequirements.terminology || project.specialRequirements.nda || project.specialRequirements.referenceFiles) ? `
@@ -1319,11 +2127,18 @@ async function showAddMemberModal(projectId) {
             const data = await response.json();
             if (data.success) {
                 allUsers = data.data;
+            } else {
+                alert('加载用户列表失败: ' + (data.message || '未知错误'));
+                return;
             }
         } catch (error) {
-            console.error('加载用户列表失败:', error);
+            alert('加载用户列表失败: ' + error.message);
+            return;
         }
     }
+
+    // 过滤出激活的用户
+    const activeUsers = allUsers.filter(u => u.isActive);
 
     const content = `
         <form id="addMemberForm" onsubmit="addMember(event, '${projectId}')">
@@ -1331,7 +2146,8 @@ async function showAddMemberModal(projectId) {
                 <label>选择用户 *</label>
                 <select name="userId" required>
                     <option value="">请选择</option>
-                    ${allUsers.map(u => `<option value="${u._id}">${u.name} (${u.username})</option>`).join('')}
+                    ${activeUsers.length === 0 ? '<option value="" disabled>暂无可用用户</option>' : ''}
+                    ${activeUsers.map(u => `<option value="${u._id}">${u.name} (${u.username})</option>`).join('')}
                 </select>
             </div>
             <div class="form-group">
@@ -1343,6 +2159,8 @@ async function showAddMemberModal(projectId) {
                     <option value="pm">项目经理</option>
                     <option value="sales">销售</option>
                     <option value="admin_staff">综合岗</option>
+                    <option value="part_time_sales">兼职销售</option>
+                    <option value="layout">兼职排版</option>
                 </select>
             </div>
             <div class="form-group" id="translatorTypeGroup" style="display: none;">
@@ -1408,12 +2226,12 @@ async function addMember(e, projectId) {
             if (document.getElementById('modalOverlay').classList.contains('active')) {
                 viewProject(projectId);
             }
-            showAlert('projectsList', '成员添加成功', 'success');
+            showToast('成员添加成功', 'success');
         } else {
-            alert(result.message);
+            showToast(result.message, 'error');
         }
     } catch (error) {
-        alert('添加失败: ' + error.message);
+        showToast('添加失败: ' + error.message, 'error');
     }
 }
 
@@ -1434,12 +2252,12 @@ async function deleteMember(projectId, memberId) {
             if (document.getElementById('modalOverlay').classList.contains('active')) {
                 viewProject(projectId);
             }
-            showAlert('projectsList', '成员已删除', 'success');
+            showToast('成员已删除', 'success');
         } else {
-            alert(result.message);
+            showToast(result.message, 'error');
         }
     } catch (error) {
-        alert('删除失败: ' + error.message);
+        showToast('删除失败: ' + error.message, 'error');
     }
 }
 
@@ -1465,10 +2283,10 @@ async function setRevision(projectId, currentCount) {
                 viewProject(projectId);
             }
         } else {
-            alert(result.message);
+            showToast(result.message, 'error');
         }
     } catch (error) {
-        alert('操作失败: ' + error.message);
+        showToast('操作失败: ' + error.message, 'error');
     }
 }
 
@@ -1489,10 +2307,10 @@ async function setDelay(projectId) {
                 viewProject(projectId);
             }
         } else {
-            alert(result.message);
+            showToast(result.message, 'error');
         }
     } catch (error) {
-        alert('操作失败: ' + error.message);
+        showToast('操作失败: ' + error.message, 'error');
     }
 }
 
@@ -1513,10 +2331,10 @@ async function setComplaint(projectId) {
                 viewProject(projectId);
             }
         } else {
-            alert(result.message);
+            showToast(result.message, 'error');
         }
     } catch (error) {
-        alert('操作失败: ' + error.message);
+        showToast('操作失败: ' + error.message, 'error');
     }
 }
 
@@ -1533,18 +2351,36 @@ async function finishProject(projectId) {
         if (result.success) {
             closeModal();
             loadProjects();
-            showAlert('projectsList', '项目已完成', 'success');
+            showToast('项目已完成', 'success');
         } else {
-            alert(result.message);
+            showToast(result.message, 'error');
         }
     } catch (error) {
-        alert('操作失败: ' + error.message);
+        showToast('操作失败: ' + error.message, 'error');
     }
 }
 
-function showEditProjectModal() {
+async function showEditProjectModal() {
     const p = currentProjectDetail;
     if (!p) return;
+    
+    // 确保语种列表已加载
+    if (languagesCache.length === 0) {
+        await loadLanguages();
+    }
+    
+    const targetLanguagesArray = Array.isArray(p.targetLanguages) ? p.targetLanguages : (p.targetLanguages ? [p.targetLanguages] : []);
+    
+    const languageOptions = languagesCache
+        .filter(lang => lang.isActive)
+        .map(lang => `<option value="${lang.name}">${lang.name}${lang.code ? ' (' + lang.code + ')' : ''}${lang.nativeName ? ' - ' + lang.nativeName : ''}</option>`)
+        .join('');
+    
+    const sourceLanguageOptions = languagesCache
+        .filter(lang => lang.isActive)
+        .map(lang => `<option value="${lang.name}" ${p.sourceLanguage === lang.name ? 'selected' : ''}>${lang.name}${lang.code ? ' (' + lang.code + ')' : ''}${lang.nativeName ? ' - ' + lang.nativeName : ''}</option>`)
+        .join('');
+    
     const content = `
         <form id="editProjectForm" onsubmit="updateProject(event, '${p._id}')">
             <div class="form-group">
@@ -1571,8 +2407,21 @@ function showEditProjectModal() {
                 </select>
             </div>
             <div class="form-group">
-                <label>语言对</label>
-                <input type="text" name="languagePair" value="${p.languagePair || ''}">
+                <label>源语种 *</label>
+                <select name="sourceLanguage" id="editSourceLanguageSelect" required>
+                    <option value="">请选择源语种</option>
+                    ${sourceLanguageOptions}
+                </select>
+            </div>
+            <div class="form-group">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <label style="margin-bottom: 0;">目标语言 *</label>
+                    <button type="button" class="btn-small" onclick="addEditTargetLanguageRow()">+ 添加目标语种</button>
+                </div>
+                <div id="editTargetLanguagesContainer" style="display: flex; flex-direction: column; gap: 8px;">
+                    <!-- 目标语种行将动态添加到这里 -->
+                </div>
+                <small style="color:#666; font-size: 12px; margin-top: 8px; display: block;">至少需要添加一个目标语种，支持一对多翻译</small>
             </div>
             <div class="form-group">
                 <label>字数（笔译）</label>
@@ -1584,7 +2433,7 @@ function showEditProjectModal() {
             </div>
             <div class="form-group">
                 <label>项目金额 *</label>
-                <input type="number" name="projectAmount" value="${p.projectAmount || ''}" min="0" step="0.01" required>
+                <input type="number" name="projectAmount" value="${p.projectAmount || ''}" min="0" step="0.01" required onchange="calculateEditPartTimeSalesCommission(); validateEditLayoutCost();">
             </div>
             <div class="form-group">
                 <label>交付时间 *</label>
@@ -1602,6 +2451,64 @@ function showEditProjectModal() {
                 <label>特殊要求备注</label>
                 <textarea name="specialRequirements.notes" rows="3">${p.specialRequirements?.notes || ''}</textarea>
             </div>
+            
+            <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
+                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">兼职销售（可选）</h4>
+                <label style="display: flex; align-items: center; gap: 5px; font-weight: normal; margin-bottom: 10px;">
+                    <input type="checkbox" name="partTimeSales.isPartTime" id="editPartTimeSalesEnabled" ${p.partTimeSales?.isPartTime ? 'checked' : ''} onchange="toggleEditPartTimeSalesFields()">
+                    启用兼职销售
+                </label>
+                <div id="editPartTimeSalesFields" style="display: ${p.partTimeSales?.isPartTime ? 'block' : 'none'}; padding-left: 20px; border-left: 2px solid #667eea;">
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label>公司应收金额（元）</label>
+                        <input type="number" name="partTimeSales.companyReceivable" id="editCompanyReceivable" step="0.01" min="0" value="${p.partTimeSales?.companyReceivable || 0}" onchange="calculateEditPartTimeSalesCommission()" style="width: 100%;">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label>税率（%）</label>
+                        <input type="number" name="partTimeSales.taxRate" id="editTaxRate" step="0.01" min="0" max="100" value="${(p.partTimeSales?.taxRate || 0) * 100}" onchange="calculateEditPartTimeSalesCommission()" style="width: 100%;">
+                        <small style="color: #666; font-size: 12px;">例如：10 表示 10%</small>
+                    </div>
+                    <div class="form-group" style="background: #f0f9ff; padding: 10px; border-radius: 4px; margin-top: 10px;">
+                        <label style="font-weight: 600; color: #0369a1;">返还佣金（自动计算）</label>
+                        <div id="editPartTimeSalesCommissionDisplay" style="font-size: 18px; color: #0369a1; font-weight: bold; margin-top: 5px;">
+                            ¥${(p.partTimeSales?.partTimeSalesCommission || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <small style="color: #666; font-size: 12px; display: block; margin-top: 5px;">公式：成交额 - 公司应收 - 税费</small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
+                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">兼职排版（可选）</h4>
+                <label style="display: flex; align-items: center; gap: 5px; font-weight: normal; margin-bottom: 10px;">
+                    <input type="checkbox" name="partTimeLayout.isPartTime" id="editPartTimeLayoutEnabled" ${p.partTimeLayout?.isPartTime ? 'checked' : ''} onchange="toggleEditPartTimeLayoutFields()">
+                    启用兼职排版
+                </label>
+                <div id="editPartTimeLayoutFields" style="display: ${p.partTimeLayout?.isPartTime ? 'block' : 'none'}; padding-left: 20px; border-left: 2px solid #667eea;">
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label>选择排版员</label>
+                        <select name="partTimeLayout.layoutAssignedTo" id="editLayoutAssignedTo" style="width: 100%;">
+                            <option value="">请选择排版员</option>
+                            ${allUsers.filter(u => u.isActive).map(u => 
+                                `<option value="${u._id}" ${p.partTimeLayout?.layoutAssignedTo?._id === u._id || p.partTimeLayout?.layoutAssignedTo === u._id ? 'selected' : ''}>${u.name} (${u.username})</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <label>排版费用（元）</label>
+                        <input type="number" name="partTimeLayout.layoutCost" id="editLayoutCost" step="0.01" min="0" value="${p.partTimeLayout?.layoutCost || 0}" onchange="validateEditLayoutCost()" style="width: 100%;">
+                        <small style="color: #666; font-size: 12px;">排版费用不能超过项目总金额的5%</small>
+                    </div>
+                    <div class="form-group" style="background: #f0f9ff; padding: 10px; border-radius: 4px; margin-top: 10px;">
+                        <label style="font-weight: 600; color: #0369a1;">费用占比（自动计算）</label>
+                        <div id="editLayoutCostPercentageDisplay" style="font-size: 18px; color: #0369a1; font-weight: bold; margin-top: 5px;">
+                            ${(p.partTimeLayout?.layoutCostPercentage || 0).toFixed(2)}%
+                        </div>
+                        <div id="editLayoutCostValidation" style="margin-top: 5px;"></div>
+                    </div>
+                </div>
+            </div>
+            
             <div class="action-buttons">
                 <button type="submit">保存</button>
                 <button type="button" onclick="closeModal()">取消</button>
@@ -1609,16 +2516,83 @@ function showEditProjectModal() {
         </form>
     `;
     showModal('编辑项目', content);
+    
+    // 初始化计算
+    setTimeout(() => {
+        calculateEditPartTimeSalesCommission();
+        validateEditLayoutCost();
+    }, 100);
+    
+    // 初始化已有的目标语种
+    const container = document.getElementById('editTargetLanguagesContainer');
+    if (container) {
+        container.innerHTML = '';
+        const targetLanguagesArray = Array.isArray(p.targetLanguages) ? p.targetLanguages : (p.targetLanguages ? [p.targetLanguages] : []);
+        if (targetLanguagesArray.length > 0) {
+            targetLanguagesArray.forEach(lang => {
+                addEditTargetLanguageRow(lang);
+            });
+        } else {
+            // 如果没有目标语种，至少添加一个空行
+            addEditTargetLanguageRow();
+        }
+    }
 }
 
 async function updateProject(e, projectId) {
     e.preventDefault();
     const formData = new FormData(e.target);
+    
+    // 收集目标语言
+    const targetLanguageRows = document.querySelectorAll('#editTargetLanguagesContainer .target-language-select');
+    const targetLanguages = Array.from(targetLanguageRows)
+        .map(select => select.value)
+        .filter(value => value && value.trim() !== '');
+    
+    if (targetLanguages.length === 0) {
+        alert('请至少添加并选择一个目标语种');
+        return;
+    }
+    
+    // 收集兼职销售信息
+    const editPartTimeSalesEnabled = formData.get('partTimeSales.isPartTime') === 'on';
+    const editPartTimeSales = editPartTimeSalesEnabled ? {
+        isPartTime: true,
+        companyReceivable: parseFloat(formData.get('partTimeSales.companyReceivable') || 0),
+        taxRate: parseFloat(formData.get('partTimeSales.taxRate') || 0) / 100 // 转换为小数
+    } : { isPartTime: false, companyReceivable: 0, taxRate: 0 };
+    
+    // 收集兼职排版信息
+    const editPartTimeLayoutEnabled = formData.get('partTimeLayout.isPartTime') === 'on';
+    const editLayoutCost = parseFloat(formData.get('partTimeLayout.layoutCost') || 0);
+    const editLayoutAssignedTo = formData.get('partTimeLayout.layoutAssignedTo');
+    
+    // 校验排版费用
+    if (editPartTimeLayoutEnabled && editLayoutCost > 0) {
+        const projectAmount = parseFloat(formData.get('projectAmount'));
+        const percentage = (editLayoutCost / projectAmount) * 100;
+        if (percentage > 5) {
+            alert(`排版费用(${editLayoutCost})不能超过项目总金额(${projectAmount})的5%，当前占比为${percentage.toFixed(2)}%`);
+            return;
+        }
+        if (!editLayoutAssignedTo) {
+            alert('请选择排版员');
+            return;
+        }
+    }
+    
+    const editPartTimeLayout = editPartTimeLayoutEnabled ? {
+        isPartTime: true,
+        layoutCost: editLayoutCost,
+        layoutAssignedTo: editLayoutAssignedTo || undefined
+    } : { isPartTime: false, layoutCost: 0, layoutAssignedTo: null };
+    
     const payload = {
         projectName: formData.get('projectName'),
         businessType: formData.get('businessType'),
         projectType: formData.get('projectType'),
-        languagePair: formData.get('languagePair') || undefined,
+        sourceLanguage: formData.get('sourceLanguage'),
+        targetLanguages: targetLanguages,
         wordCount: formData.get('wordCount') ? parseFloat(formData.get('wordCount')) : undefined,
         unitPrice: formData.get('unitPrice') ? parseFloat(formData.get('unitPrice')) : undefined,
         projectAmount: formData.get('projectAmount') ? parseFloat(formData.get('projectAmount')) : undefined,
@@ -1627,7 +2601,9 @@ async function updateProject(e, projectId) {
         needInvoice: formData.get('needInvoice') === 'on',
         specialRequirements: {
             notes: formData.get('specialRequirements.notes') || undefined
-        }
+        },
+        partTimeSales: editPartTimeSales,
+        partTimeLayout: editPartTimeLayout
     };
 
     try {
@@ -1644,12 +2620,12 @@ async function updateProject(e, projectId) {
             closeModal();
             loadProjects();
             viewProject(projectId);
-            showAlert('projectsList', '项目已更新', 'success');
+            showToast('项目已更新', 'success');
         } else {
-            alert(result.message);
+            showToast(result.message, 'error');
         }
     } catch (error) {
-        alert('更新失败: ' + error.message);
+        showToast('更新失败: ' + error.message, 'error');
     }
 }
 
@@ -1664,12 +2640,12 @@ async function deleteProject(projectId) {
         if (result.success) {
             closeModal();
             loadProjects();
-            showAlert('projectsList', '项目已取消', 'success');
+            showToast('项目已取消', 'success');
         } else {
-            alert(result.message);
+            showToast(result.message, 'error');
         }
     } catch (error) {
-        alert('删除失败: ' + error.message);
+        showToast('删除失败: ' + error.message, 'error');
     }
 }
 
@@ -2010,6 +2986,20 @@ function showAlert(elementId, message, type) {
     setTimeout(() => alertDiv.remove(), 3000);
 }
 
+function showToast(message, type = 'info', duration = 3000) {
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    // 强制回流以启用过渡
+    void toast.offsetWidth;
+    toast.classList.add('show');
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 200);
+    }, duration);
+}
+
 function getStatusText(status) {
     const statusMap = {
         'pending': '待开始',
@@ -2038,7 +3028,9 @@ function getRoleText(role) {
         'pm': '项目经理',
         'translator': '翻译',
         'reviewer': '审校',
-        'admin_staff': '综合岗'
+        'admin_staff': '综合岗',
+        'part_time_sales': '兼职销售',
+        'layout': '兼职排版'
     };
     return roleMap[role] || role;
 }
@@ -2097,47 +3089,110 @@ async function loadDashboard() {
 }
 
 function renderDashboardCards(data) {
-    const cards = [];
-    cards.push(`
-        <div class="card">
-            <div class="card-title">当月项目数</div>
-            <div class="card-value">${data.projectCount || 0}</div>
-            <div class="card-desc">月份：${data.month}</div>
-        </div>
-    `);
-    if (data.totalProjectAmount !== undefined) {
-        cards.push(`
+    const statusCounts = data.statusCounts || {};
+    const inProgress = statusCounts['in_progress'] || 0;
+    const pending = statusCounts['pending'] || 0;
+    const completed = statusCounts['completed'] || 0;
+    const total = data.projectCount || 0;
+    const completionRate = total ? Math.round((completed / total) * 100) : 0;
+    const paymentRate = data.paymentCompletionRate !== undefined ? data.paymentCompletionRate : null;
+    const recentCompleted = data.recentCompleted || 0;
+    const recentPaymentOverdue = data.recentPaymentOverdue || 0;
+    const recentDeliveryOverdue = data.recentDeliveryOverdue || 0;
+    
+    // 判断是否是销售或兼职销售
+    const isSales = currentUser?.roles?.includes('sales') || currentUser?.roles?.includes('part_time_sales');
+    const isAdmin = currentUser?.roles?.includes('admin');
+    const isFinance = currentUser?.roles?.includes('finance');
+    
+    // 销售和兼职销售显示成交额，其他角色显示KPI
+    const showSalesAmount = isSales && !isAdmin && !isFinance;
+    
+    const cards = `
+        <div class="card-grid">
+            <div class="card">
+                <div class="card-title">当月项目数</div>
+                <div class="card-value">${data.projectCount || 0}</div>
+                <div class="card-desc">月份：${data.month}</div>
+            </div>
+            ${showSalesAmount && data.totalProjectAmount !== undefined ? `
+            <div class="card">
+                <div class="card-title">成交额合计</div>
+                <div class="card-value">¥${(data.totalProjectAmount || 0).toLocaleString()}</div>
+                <div class="card-desc">根据筛选条件汇总</div>
+            </div>
+            ` : ''}
+            ${!showSalesAmount ? `
+            ${data.totalProjectAmount !== undefined ? `
             <div class="card">
                 <div class="card-title">项目金额合计</div>
                 <div class="card-value">¥${(data.totalProjectAmount || 0).toLocaleString()}</div>
-                <div class="card-desc">可见范围内的项目金额</div>
+                <div class="card-desc">可见范围内金额</div>
             </div>
-        `);
-    }
-    cards.push(`
-        <div class="card">
-            <div class="card-title">KPI合计</div>
-            <div class="card-value">¥${(data.kpiTotal || 0).toLocaleString()}</div>
-            <div class="card-desc">根据角色权限汇总</div>
+            ` : ''}
+            <div class="card">
+                <div class="card-title">KPI合计</div>
+                <div class="card-value">¥${(data.kpiTotal || 0).toLocaleString()}</div>
+                <div class="card-desc">根据角色权限汇总</div>
+            </div>
+            ` : ''}
+            <div class="card">
+                <div class="card-title">完成率</div>
+                <div class="card-value">${completionRate}%</div>
+                <div class="subtext">完成/总项目：${completed}/${total}</div>
+            </div>
+            <div class="card">
+                <div class="card-title">进行中</div>
+                <div class="card-value">${inProgress}</div>
+                <div class="subtext">当前执行的项目</div>
+            </div>
+            <div class="card">
+                <div class="card-title">已完成</div>
+                <div class="card-value">${completed}</div>
+                <div class="subtext">本月完成项目</div>
+            </div>
+            <div class="card">
+                <div class="card-title">待开始</div>
+                <div class="card-value">${pending}</div>
+                <div class="subtext">待排期项目</div>
+            </div>
+            <div class="card warning">
+                <div class="card-title">回款预警</div>
+                <div class="card-value">${(data.paymentWarnings?.length || 0)}</div>
+                <div class="card-desc">逾期未回款项目</div>
+            </div>
+            <div class="card warning">
+                <div class="card-title">交付逾期</div>
+                <div class="card-value">${(data.deliveryWarnings?.length || 0)}</div>
+                <div class="card-desc">截止已过未完成</div>
+            </div>
+            ${paymentRate !== null ? `
+            <div class="card">
+                <div class="card-title">回款完成率</div>
+                <div class="card-value">${paymentRate}%</div>
+                <div class="subtext">已回款/项目金额</div>
+            </div>
+            ` : ''}
+            <div class="card">
+                <div class="card-title">近7天完成</div>
+                <div class="card-value">${recentCompleted}</div>
+                <div class="subtext">近7天完成项目数</div>
+            </div>
+            <div class="card warning">
+                <div class="card-title">近7天回款预警</div>
+                <div class="card-value">${recentPaymentOverdue}</div>
+                <div class="card-desc">近7天逾期回款项目</div>
+            </div>
+            <div class="card warning">
+                <div class="card-title">近7天交付预警</div>
+                <div class="card-value">${recentDeliveryOverdue}</div>
+                <div class="card-desc">近7天交付逾期项目</div>
+            </div>
         </div>
-    `);
-    cards.push(`
-        <div class="card warning">
-            <div class="card-title">回款预警</div>
-            <div class="card-value">${(data.paymentWarnings?.length || 0)}</div>
-            <div class="card-desc">逾期未回款项目数量</div>
-        </div>
-    `);
-    cards.push(`
-        <div class="card warning">
-            <div class="card-title">交付逾期</div>
-            <div class="card-value">${(data.deliveryWarnings?.length || 0)}</div>
-            <div class="card-desc">截止已过但未完成项目数量</div>
-        </div>
-    `);
+    `;
 
     const el = document.getElementById('dashboardCards');
-    if (el) el.innerHTML = cards.join('');
+    if (el) el.innerHTML = cards;
 }
 
 // ==================== 财务管理 ====================
@@ -2164,10 +3219,47 @@ async function loadReceivables() {
         showAlert('receivablesList', data.message || '加载失败', 'error');
         return;
     }
-    const rows = data.data.map(r => `
-        <tr>
+    receivablesCache = data.data || [];
+    receivablePage = 1;
+    renderReceivables();
+}
+
+function exportReceivables() {
+    const rows = receivablesCache.map(r => [
+        r.projectNumber || '-',
+        r.projectName,
+        r.customerName || '',
+        r.salesName || '',
+        r.projectAmount || 0,
+        r.receivedAmount || 0,
+        r.outstanding || 0,
+        r.expectedAt ? new Date(r.expectedAt).toLocaleDateString() : '',
+        r.isFullyPaid ? '已回款' : (r.overdue ? '逾期' : '未回款')
+    ]);
+    const header = ['项目编号','项目名称','客户','销售','项目金额','已回款','未回款','约定回款日','状态'];
+    const csv = [header, ...rows].map(r => r.map(v => `"${(v ?? '').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'receivables.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function renderReceivables() {
+    const pageSizeSel = document.getElementById('financePageSize');
+    const pageSize = pageSizeSel ? parseInt(pageSizeSel.value || '10', 10) : 10;
+    const totalPages = Math.max(1, Math.ceil(receivablesCache.length / pageSize));
+    if (receivablePage > totalPages) receivablePage = totalPages;
+    const start = (receivablePage - 1) * pageSize;
+    const pageData = receivablesCache.slice(start, start + pageSize);
+    const rows = pageData.map(r => `
+        <tr class="${r.overdue ? 'row-overdue' : ''}">
             <td>${r.projectNumber || '-'}</td>
             <td>${r.projectName}</td>
+            <td>${r.customerName || ''}</td>
+            <td>${r.salesName || ''}</td>
             <td>¥${(r.projectAmount || 0).toLocaleString()}</td>
             <td>¥${(r.receivedAmount || 0).toLocaleString()}</td>
             <td>¥${(r.outstanding || 0).toLocaleString()}</td>
@@ -2176,11 +3268,13 @@ async function loadReceivables() {
         </tr>
     `).join('');
     document.getElementById('receivablesList').innerHTML = `
-        <table>
+        <table class="table-sticky">
             <thead>
                 <tr>
                     <th>项目编号</th>
                     <th>项目名称</th>
+                    <th>客户</th>
+                    <th>销售</th>
                     <th>项目金额</th>
                     <th>已回款</th>
                     <th>未回款</th>
@@ -2192,7 +3286,19 @@ async function loadReceivables() {
                 ${rows || '<tr><td colspan="7" style="text-align:center;">暂无数据</td></tr>'}
             </tbody>
         </table>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
+            <button class="btn-small" ${receivablePage<=1?'disabled':''} onclick="receivablePage=Math.max(1, receivablePage-1);renderReceivables();">上一页</button>
+            <span style="align-self:center;">${receivablePage} / ${totalPages}</span>
+            <button class="btn-small" ${receivablePage>=totalPages?'disabled':''} onclick="receivablePage=Math.min(${totalPages}, receivablePage+1);renderReceivables();">下一页</button>
+            <input type="number" min="1" max="${totalPages}" value="${receivablePage}" style="width:70px;padding:6px;" onchange="jumpReceivablePage(this.value, ${totalPages})">
+        </div>
     `;
+}
+
+function jumpReceivablePage(val, total) {
+    const page = Math.min(Math.max(parseInt(val || 1, 10), 1), total);
+    receivablePage = page;
+    renderReceivables();
 }
 
 async function loadInvoices() {
@@ -2206,7 +3312,7 @@ async function loadInvoices() {
     });
     const data = await res.json();
     if (!data.success) {
-        showAlert('invoiceList', data.message || '加载失败', 'error');
+            showAlert('invoiceList', data.message || '加载失败', 'error');
         return;
     }
     const rows = data.data.map(i => `
@@ -2266,13 +3372,13 @@ async function addInvoice() {
         });
         const data = await res.json();
         if (!data.success) {
-            alert(data.message || '新增失败');
+            showToast(data.message || '新增失败', 'error');
             return;
         }
         loadInvoices();
-        showAlert('invoiceList', '发票已新增', 'success');
+        showToast('发票已新增', 'success');
     } catch (error) {
-        alert('新增失败: ' + error.message);
+        showToast('新增失败: ' + error.message, 'error');
     }
 }
 
@@ -2299,15 +3405,15 @@ async function addPaymentRecord() {
         });
         const data = await res.json();
         if (!data.success) {
-            alert(data.message || '新增失败');
+            showToast(data.message || '新增失败', 'error');
             return;
         }
-        showAlert('paymentRecords', '回款已记录', 'success');
+        showToast('回款已记录', 'success');
         // 重新加载应收与回款列表
         loadReceivables();
         loadPaymentRecords(projectId);
     } catch (error) {
-        alert('新增失败: ' + error.message);
+        showToast('新增失败: ' + error.message, 'error');
     }
 }
 
@@ -2333,6 +3439,7 @@ async function loadPaymentRecords(projectId) {
                 <td>${r.reference || ''}</td>
                 <td>${r.note || ''}</td>
                 <td>${r.recordedBy || ''}</td>
+                <td><button class="btn-small btn-danger" onclick="removePaymentRecord('${r._id}', '${projectId}')">删除</button></td>
             </tr>
         `).join('');
         document.getElementById('paymentRecords').innerHTML = `
@@ -2345,15 +3452,36 @@ async function loadPaymentRecords(projectId) {
                         <th>凭证</th>
                         <th>备注</th>
                         <th>记录人</th>
+                        <th>操作</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${rows || '<tr><td colspan="6" style="text-align:center;">暂无回款记录</td></tr>'}
+                    ${rows || '<tr><td colspan="7" style="text-align:center;">暂无回款记录</td></tr>'}
                 </tbody>
             </table>
         `;
     } catch (error) {
         showAlert('paymentRecords', '加载失败: ' + error.message, 'error');
+    }
+}
+
+async function removePaymentRecord(recordId, projectId) {
+    if (!confirm('确定删除该回款记录？（不会自动回滚项目回款总额）')) return;
+    try {
+        const res = await fetch(`${API_BASE}/finance/payment/${recordId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!data.success) {
+            alert(data.message || '删除失败');
+            return;
+        }
+        showToast('已删除回款记录', 'success');
+        loadPaymentRecords(projectId);
+        loadReceivables();
+    } catch (error) {
+        alert('删除失败: ' + error.message);
     }
 }
 
@@ -2506,13 +3634,13 @@ async function addProjectInvoice(projectId) {
         });
         const data = await res.json();
         if (!data.success) {
-            alert(data.message || '新增失败');
+            showToast(data.message || '新增失败', 'error');
             return;
         }
         loadProjectInvoices(projectId);
-        showAlert('projectInvoiceList', '发票已新增', 'success');
+        showToast('发票已新增', 'success');
     } catch (error) {
-        alert('新增失败: ' + error.message);
+        showToast('新增失败: ' + error.message, 'error');
     }
 }
 
@@ -2593,6 +3721,12 @@ async function loadFinanceSummary() {
     `;
 }
 function renderDashboardCharts(data) {
+    // 判断是否是销售或兼职销售
+    const isSales = currentUser?.roles?.includes('sales') || currentUser?.roles?.includes('part_time_sales');
+    const isAdmin = currentUser?.roles?.includes('admin');
+    const isFinance = currentUser?.roles?.includes('finance');
+    const showSalesAmount = isSales && !isAdmin && !isFinance;
+    
     const charts = [];
 
     const renderBarList = (entries, labelMapper = (k) => k, formatValue = (v) => v) => {
@@ -2613,14 +3747,16 @@ function renderDashboardCharts(data) {
         `;
     };
 
-    // KPI按角色
-    const kpiEntries = Object.entries(data.kpiByRole || {});
-    charts.push(`
-        <div class="card">
-            <div class="card-title">KPI按角色</div>
-            ${renderBarList(kpiEntries, getRoleText, (v) => `¥${(v || 0).toLocaleString()}`)}
-        </div>
-    `);
+    // KPI按角色（销售和兼职销售不显示）
+    if (!showSalesAmount) {
+        const kpiEntries = Object.entries(data.kpiByRole || {});
+        charts.push(`
+            <div class="card">
+                <div class="card-title">KPI按角色</div>
+                ${renderBarList(kpiEntries, getRoleText, (v) => `¥${(v || 0).toLocaleString()}`)}
+            </div>
+        `);
+    }
 
     // 项目状态分布
     const statusEntries = Object.entries(data.statusCounts || {});
@@ -2674,8 +3810,30 @@ function renderDashboardCharts(data) {
         </div>
     `);
 
+    // KPI/成交额趋势
+    const trend = data.kpiTrend || [];
+    const trendTitle = showSalesAmount ? '成交额趋势（近3个月）' : 'KPI趋势（近3个月）';
+    charts.push(`
+        <div class="card">
+            <div class="card-title">${trendTitle}</div>
+            ${trend.length === 0 ? '<div class="card-desc">暂无数据</div>' : `
+                <div class="bar-list">
+                    ${trend.map(t => `
+                        <div class="bar-row">
+                            <span class="bar-label">${t.month}</span>
+                            <div class="bar-track">
+                                <div class="bar-fill" style="width:${Math.min((t.total || 0) / Math.max(...trend.map(x => x.total || 1)) * 100, 100)}%"></div>
+                            </div>
+                            <span class="bar-value">¥${(t.total || 0).toLocaleString()}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `}
+        </div>
+    `);
+
     const el = document.getElementById('dashboardCharts');
-    if (el) el.innerHTML = charts.join('');
+    if (el) el.innerHTML = `<div class="chart-grid">${charts.join('')}</div>`;
 }
 
 // 实时KPI
@@ -2703,6 +3861,8 @@ async function loadRealtimeKPI(projectId) {
                         <tr>
                             <th>成员</th>
                             <th>角色</th>
+                            <th>金额奖励</th>
+                            <th>回款奖励</th>
                             <th>金额</th>
                             <th>公式</th>
                         </tr>
@@ -2712,6 +3872,8 @@ async function loadRealtimeKPI(projectId) {
                             <tr>
                                 <td>${r.userName}</td>
                                 <td>${getRoleText(r.role)}</td>
+                                <td>${r.details?.salesBonus !== undefined ? '¥' + (r.details.salesBonus || 0).toLocaleString() : '-'}</td>
+                                <td>${r.details?.salesCommission !== undefined ? '¥' + (r.details.salesCommission || 0).toLocaleString() : '-'}</td>
                                 <td>¥${(r.kpiValue || 0).toLocaleString()}</td>
                                 <td style="font-size:12px;">${r.formula || ''}</td>
                             </tr>
