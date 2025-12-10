@@ -1,5 +1,20 @@
-// API基础URL
-const API_BASE = 'http://localhost:3000/api';
+// API基础URL - 动态获取，支持局域网和域名访问
+// 优先使用URL参数中的api地址，否则使用当前页面的origin
+(function initAPIBase() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const customApi = urlParams.get('api');
+    if (customApi) {
+        window.API_BASE = customApi.endsWith('/api') ? customApi : `${customApi}/api`;
+        console.log('使用自定义API地址:', window.API_BASE);
+    } else {
+        // 使用当前页面的origin（自动适配域名、IP、localhost）
+        window.API_BASE = `${window.location.origin}/api`;
+        console.log('使用当前页面API地址:', window.API_BASE);
+    }
+})();
+
+// 使用全局变量，确保在所有地方都能访问
+const API_BASE = window.API_BASE || `${window.location.origin}/api`;
 
 // 全局状态
 let currentUser = null;
@@ -294,6 +309,12 @@ async function loadOrgInfo() {
 
 // 初始化
 document.addEventListener('DOMContentLoaded', async () => {
+    // 显示服务器访问信息（开发调试用）
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        console.log('🌐 当前访问地址:', window.location.origin);
+        console.log('🔗 API地址:', API_BASE);
+    }
+    
     await loadOrgInfo();
         token = localStorage.getItem('token');
         console.log('[Auth] DOMContentLoaded, token exists:', !!token);
