@@ -33,9 +33,27 @@
             <header>
                 <h1 id="mainTitle">KPI绩效管理系统</h1>
                 <div class="user-info">
-                    <span id="userName"></span>
-                    <span id="roleSwitcherContainer" style="display: none;"></span>
-                    <button class="logout-btn" onclick="logout()">退出</button>
+                    <div class="user-meta">
+                        <span id="userName"></span>
+                        <span id="currentRoleTag" class="role-tag" style="display:none;"></span>
+                    </div>
+                    <div class="user-actions">
+                        <span id="roleSwitcherContainer" style="display: none;"></span>
+                        <div id="notificationArea" class="notification-area" style="display:none;">
+                            <button id="notificationBtn" class="notification-btn" onclick="toggleNotificationPanel()">
+                                通知
+                                <span id="notificationBadge" class="notification-badge" style="display:none;"></span>
+                            </button>
+                            <div id="notificationPanel" class="notification-panel" style="display:none;">
+                                <div class="notification-panel-header">
+                                    <span>通知</span>
+                                    <button class="btn-small" onclick="markAllNotificationsRead()">全部已读</button>
+                                </div>
+                                <div id="notificationList" class="notification-list"></div>
+                            </div>
+                        </div>
+                        <button class="logout-btn" onclick="logout()">退出</button>
+                    </div>
                 </div>
             </header>
 

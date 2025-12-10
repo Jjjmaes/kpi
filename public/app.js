@@ -22,6 +22,10 @@ let token = null;
 let allUsers = []; // 缓存用户列表
 let allCustomers = []; // 缓存客户列表
 let currentProjectDetail = null; // 缓存当前项目详情
+let notifications = [];
+let unreadNotificationCount = 0;
+let notificationPoller = null;
+const NOTIFICATION_POLL_INTERVAL = 60000;
 
 // 角色管理
 let currentRole = null; // 当前选择的角色（localStorage持久化）
@@ -188,6 +192,7 @@ function initCurrentRole() {
             localStorage.setItem('currentRole', currentRole);
         }
     }
+    updateCurrentRoleTag();
 }
 
 // 切换角色
@@ -199,6 +204,7 @@ function switchRole(newRole) {
     
     currentRole = newRole;
     localStorage.setItem('currentRole', newRole);
+    updateCurrentRoleTag();
     
     // 刷新界面
     refreshMenu();
@@ -214,6 +220,8 @@ function switchRole(newRole) {
             loadInvoiceProjects();
         }
     }
+    // 切换角色时刷新通知角标（不同角色可能有不同通知策略，先简单刷新未读数）
+    fetchUnreadNotificationsCount();
 }
 
 // API请求包装函数，自动添加Authorization和X-Role header
@@ -237,6 +245,135 @@ async function apiFetch(url, options = {}) {
     });
     
     return response;
+}
+
+function formatNotificationTime(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleString();
+}
+
+function updateNotificationBadge() {
+    const area = document.getElementById('notificationArea');
+    const badge = document.getElementById('notificationBadge');
+    if (!area || !badge) return;
+    area.style.display = 'inline-block';
+    if (unreadNotificationCount > 0) {
+        badge.style.display = 'inline-block';
+        badge.textContent = unreadNotificationCount > 99 ? '99+' : unreadNotificationCount;
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+async function fetchUnreadNotificationsCount() {
+    if (!token) return;
+    try {
+        const res = await apiFetch(`${API_BASE}/notifications/unread-count`);
+        if (!res.ok) return;
+        const data = await res.json();
+        unreadNotificationCount = data?.data?.count || 0;
+        updateNotificationBadge();
+    } catch (err) {
+        console.error('[Notifications] unread count error', err);
+    }
+}
+
+async function loadNotifications(limit = 50) {
+    if (!token) return;
+    try {
+        const res = await apiFetch(`${API_BASE}/notifications?limit=${limit}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        notifications = data?.data || [];
+        unreadNotificationCount = notifications.filter(n => !n.read).length;
+        updateNotificationBadge();
+        renderNotifications();
+    } catch (err) {
+        console.error('[Notifications] load error', err);
+    }
+}
+
+function renderNotifications() {
+    const listEl = document.getElementById('notificationList');
+    if (!listEl) return;
+    if (!notifications || notifications.length === 0) {
+        listEl.innerHTML = '<div class="notification-empty">暂无通知</div>';
+        return;
+    }
+    listEl.innerHTML = '';
+    notifications.forEach(n => {
+        const item = document.createElement('div');
+        item.className = `notification-item ${n.read ? '' : 'unread'}`;
+        item.addEventListener('click', () => markNotificationRead(n._id, n.link));
+
+        const msg = document.createElement('div');
+        msg.className = 'notification-message';
+        msg.textContent = n.message || '';
+        item.appendChild(msg);
+
+        const time = document.createElement('div');
+        time.className = 'notification-time';
+        time.textContent = formatNotificationTime(n.createdAt);
+        item.appendChild(time);
+
+        listEl.appendChild(item);
+    });
+}
+
+function toggleNotificationPanel() {
+    const panel = document.getElementById('notificationPanel');
+    if (!panel) return;
+    const isOpen = panel.style.display === 'block';
+    if (isOpen) {
+        panel.style.display = 'none';
+    } else {
+        panel.style.display = 'block';
+        loadNotifications();
+    }
+}
+
+async function markNotificationRead(id, link) {
+    try {
+        const res = await apiFetch(`${API_BASE}/notifications/${id}/read`, { method: 'POST' });
+        if (!res.ok) return;
+        notifications = notifications.map(n => n._id === id ? { ...n, read: true } : n);
+        unreadNotificationCount = notifications.filter(n => !n.read).length;
+        updateNotificationBadge();
+        renderNotifications();
+        if (link) {
+            window.location.href = link;
+        }
+    } catch (err) {
+        console.error('[Notifications] mark read error', err);
+    }
+}
+
+async function markAllNotificationsRead() {
+    try {
+        const res = await apiFetch(`${API_BASE}/notifications/read-all`, { method: 'POST' });
+        if (!res.ok) return;
+        notifications = notifications.map(n => ({ ...n, read: true }));
+        unreadNotificationCount = 0;
+        updateNotificationBadge();
+        renderNotifications();
+    } catch (err) {
+        console.error('[Notifications] mark all read error', err);
+    }
+}
+
+function startNotificationPolling() {
+    stopNotificationPolling();
+    fetchUnreadNotificationsCount();
+    notificationPoller = setInterval(fetchUnreadNotificationsCount, NOTIFICATION_POLL_INTERVAL);
+}
+
+function stopNotificationPolling() {
+    if (notificationPoller) {
+        clearInterval(notificationPoller);
+        notificationPoller = null;
+    }
 }
 
 // 权限判断函数
@@ -468,10 +605,22 @@ function showForcePasswordChangeModal(fromAuthCheck = false, defaultOldPwd = '')
 function logout() {
     token = null;
     currentUser = null;
+    stopNotificationPolling();
     localStorage.removeItem('token');
     console.log('[Auth] logout -> redirect /');
     // 强制回到登录页（清除可能残留的 ? 查询）
     window.location.href = '/';
+}
+
+function updateCurrentRoleTag() {
+    const el = document.getElementById('currentRoleTag');
+    if (!el) return;
+    if (!currentRole) {
+        el.style.display = 'none';
+        return;
+    }
+    el.textContent = roleNames[currentRole] || currentRole;
+    el.style.display = 'inline-flex';
 }
 
 // 显示登录页
@@ -495,12 +644,12 @@ function initRoleSwitcher() {
         return;
     }
     
-    roleSwitcherContainer.style.display = 'inline-block';
+    roleSwitcherContainer.style.display = 'inline-flex';
     
     // 创建角色选择下拉框
     const select = document.createElement('select');
     select.id = 'roleSwitcher';
-    select.style.cssText = 'padding: 4px 8px; margin-left: 10px; border: 1px solid #ddd; border-radius: 4px;';
+    select.style.cssText = 'padding: 6px 10px; border: 1px solid #dfe3f0; border-radius: 8px; background: rgba(255,255,255,0.96); color: #333;';
     select.onchange = (e) => {
         switchRole(e.target.value);
     };
@@ -564,6 +713,8 @@ function refreshMenu() {
     if (kpiUserSelect) kpiUserSelect.style.display = getPermission('kpi.view') === 'all' ? 'block' : 'none';
     if (exportKpiBtn) exportKpiBtn.style.display = getPermission('kpi.view') === 'all' ? 'inline-block' : 'none';
     if (generateKpiBtn) generateKpiBtn.style.display = getPermission('kpi.view') === 'all' ? 'inline-block' : 'none';
+
+    updateCurrentRoleTag();
 }
 
 // 显示主应用
@@ -572,6 +723,9 @@ function showMainApp() {
     document.getElementById('loginSection').style.display = 'none';
     document.getElementById('mainApp').style.display = 'block';
     document.getElementById('userName').textContent = currentUser.name;
+    updateCurrentRoleTag();
+    const notificationArea = document.getElementById('notificationArea');
+    if (notificationArea) notificationArea.style.display = 'inline-block';
 
     // 初始化角色切换器
     initRoleSwitcher();
@@ -632,6 +786,8 @@ function showMainApp() {
     if (canCreateProject || isAdmin || hasPermission('system.config')) {
         loadLanguages(true);
     }
+
+    startNotificationPolling();
 }
 
 // 切换section
