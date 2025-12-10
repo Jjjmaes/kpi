@@ -419,12 +419,8 @@ function showForcePasswordChangeModal(fromAuthCheck = false, defaultOldPwd = '')
             return;
         }
         try {
-            const resp = await fetch(`${API_BASE}/auth/change-password`, {
+            const resp = await apiFetch(`${API_BASE}/auth/change-password`, {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
                 body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd })
             });
             const result = await resp.json();
@@ -785,9 +781,7 @@ function navigateFromDashboardCard(target, overrideStatus) {
 // ==================== 语种管理 ====================
 async function loadLanguages(refresh) {
     try {
-        const res = await fetch(`${API_BASE}/languages${refresh ? '' : '?active=true'}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await apiFetch(`${API_BASE}/languages${refresh ? '' : '?active=true'}`);
         const data = await res.json();
         if (!data.success) {
             showAlert('languagesList', data.message || '加载失败', 'error');
@@ -865,12 +859,8 @@ async function createLanguage(e) {
         nativeName: formData.get('nativeName') || undefined
     };
     try {
-        const res = await fetch(`${API_BASE}/languages`, {
+        const res = await apiFetch(`${API_BASE}/languages`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify(payload)
         });
         const data = await res.json();
@@ -929,12 +919,8 @@ async function updateLanguage(e, id) {
         isActive: formData.get('isActive') === 'true'
     };
     try {
-        const res = await fetch(`${API_BASE}/languages/${id}`, {
+        const res = await apiFetch(`${API_BASE}/languages/${id}`, {
             method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify(payload)
         });
         const data = await res.json();
@@ -1099,12 +1085,8 @@ async function createUser(e) {
     };
 
     try {
-        const response = await fetch(`${API_BASE}/users`, {
+        const response = await apiFetch(`${API_BASE}/users`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify(data)
         });
         const result = await response.json();
@@ -1180,12 +1162,8 @@ async function updateUser(e, userId) {
     };
 
     try {
-        const response = await fetch(`${API_BASE}/users/${userId}`, {
+        const response = await apiFetch(`${API_BASE}/users/${userId}`, {
             method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify(data)
         });
         const result = await response.json();
@@ -1279,9 +1257,7 @@ function renderCustomersList(customers) {
 async function searchCustomers() {
     const search = document.getElementById('customerSearch').value;
     try {
-        const response = await fetch(`${API_BASE}/customers?search=${encodeURIComponent(search)}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await apiFetch(`${API_BASE}/customers?search=${encodeURIComponent(search)}`);
         const data = await response.json();
         if (data.success) {
             renderCustomersList(data.data);
@@ -1345,12 +1321,8 @@ async function createCustomer(e) {
     };
 
     try {
-        const response = await fetch(`${API_BASE}/customers`, {
+        const response = await apiFetch(`${API_BASE}/customers`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify(data)
         });
         const result = await response.json();
@@ -1445,12 +1417,8 @@ async function updateCustomer(e, customerId) {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/customers/${customerId}`, {
+        const response = await apiFetch(`${API_BASE}/customers/${customerId}`, {
             method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify(data)
         });
         const result = await response.json();
@@ -1715,9 +1683,7 @@ async function showProjectSelector(type) {
     // 确保项目列表已加载
     if (allProjectsCache.length === 0) {
         try {
-            const response = await fetch(`${API_BASE}/projects`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const response = await apiFetch(`${API_BASE}/projects`);
             const data = await response.json();
             if (data.success) {
                 allProjectsCache = data.data;
@@ -1852,9 +1818,7 @@ async function showCreateProjectModal() {
     // 确保用户列表已加载（用于成员选择）
     if (allUsers.length === 0) {
         try {
-            const response = await fetch(`${API_BASE}/users`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const response = await apiFetch(`${API_BASE}/users`);
             const data = await response.json();
             if (data.success) {
                 allUsers = data.data;
@@ -2066,6 +2030,7 @@ async function showCreateProjectModal() {
             </div>
             
             <div class="action-buttons">
+                <button type="button" onclick="exportQuotationPreview()" style="background: #10b981; margin-right: 10px;">📄 导出报价单</button>
                 <button type="submit">创建</button>
                 <button type="button" onclick="closeModal()">取消</button>
             </div>
@@ -2203,9 +2168,7 @@ async function addMemberRow() {
     // 确保用户列表已加载
     if (allUsers.length === 0) {
         try {
-            const response = await fetch(`${API_BASE}/users`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const response = await apiFetch(`${API_BASE}/users`);
             const data = await response.json();
             if (data.success) {
                 allUsers = data.data;
@@ -2673,6 +2636,180 @@ function updateCustomerInfo() {
     // 可以在这里显示客户信息，但不需要修改表单
 }
 
+// 导出项目报价单（已创建的项目）
+async function exportProjectQuotation(projectId) {
+    try {
+        const response = await apiFetch(`${API_BASE}/projects/${projectId}/quotation`);
+        
+        // 检查Content-Type，如果是Excel文件则直接下载
+        const contentType = response.headers.get('Content-Type');
+        if (contentType && contentType.includes('spreadsheetml')) {
+            // 获取文件名
+            const contentDisposition = response.headers.get('Content-Disposition');
+            let filename = '报价单.xlsx';
+            if (contentDisposition) {
+                // 优先解析 filename*=UTF-8'' 格式
+                const utf8Match = contentDisposition.match(/filename\*=UTF-8''(.+)/);
+                if (utf8Match && utf8Match[1]) {
+                    try {
+                        filename = decodeURIComponent(utf8Match[1]);
+                    } catch (e) {
+                        filename = utf8Match[1];
+                    }
+                } else {
+                    // 回退到标准格式
+                    const matches = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                    if (matches && matches[1]) {
+                        filename = matches[1].replace(/['"]/g, '');
+                        try {
+                            filename = decodeURIComponent(filename);
+                        } catch (e) {
+                            // 如果解码失败，使用原始文件名
+                        }
+                    }
+                }
+            }
+            
+            // 下载文件
+            const blob = await response.blob();
+            
+            // 验证blob是否有效
+            if (!blob || blob.size === 0) {
+                alert('导出的文件为空，请重试');
+                return;
+            }
+            
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            
+            showToast('报价单导出成功', 'success');
+            return;
+        }
+        
+        // 如果不是Excel文件，尝试解析为JSON错误信息
+        if (!response.ok) {
+            const text = await response.text();
+            let error;
+            try {
+                error = JSON.parse(text);
+            } catch (e) {
+                error = { message: text || '导出失败' };
+            }
+            alert('导出失败: ' + (error.message || '未知错误'));
+            return;
+        }
+    } catch (error) {
+        console.error('导出报价单失败:', error);
+        alert('导出失败: ' + error.message);
+    }
+}
+
+// 导出报价单预览（基于表单数据）
+async function exportQuotationPreview() {
+    try {
+        const form = document.getElementById('createProjectForm');
+        if (!form) {
+            alert('请先填写项目信息');
+            return;
+        }
+        
+        const formData = new FormData(form);
+        
+        // 收集目标语种
+        const targetLanguages = [];
+        const targetLangInputs = document.querySelectorAll('#targetLanguagesContainer input[type="text"]');
+        targetLangInputs.forEach(input => {
+            if (input.value.trim()) {
+                targetLanguages.push(input.value.trim());
+            }
+        });
+        
+        if (targetLanguages.length === 0) {
+            alert('请至少添加一个目标语种');
+            return;
+        }
+        
+        // 收集特殊要求
+        const specialRequirements = {
+            terminology: formData.get('specialRequirements.terminology') === 'on',
+            nda: formData.get('specialRequirements.nda') === 'on',
+            referenceFiles: formData.get('specialRequirements.referenceFiles') === 'on',
+            notes: formData.get('specialRequirements.notes') || undefined
+        };
+        
+        // 验证必填字段
+        if (!formData.get('projectName') || !formData.get('customerId') || !formData.get('deadline')) {
+            alert('请填写项目名称、客户和交付时间');
+            return;
+        }
+        
+        // 构建项目数据
+        const projectData = {
+            projectNumber: formData.get('projectNumber') || undefined,
+            projectName: formData.get('projectName'),
+            customerId: formData.get('customerId'),
+            businessType: formData.get('businessType'),
+            projectType: formData.get('projectType') || undefined,
+            sourceLanguage: formData.get('sourceLanguage'),
+            targetLanguages: targetLanguages,
+            wordCount: formData.get('wordCount') ? parseFloat(formData.get('wordCount')) : undefined,
+            unitPrice: formData.get('unitPrice') ? parseFloat(formData.get('unitPrice')) : undefined,
+            projectAmount: parseFloat(formData.get('projectAmount')) || 0,
+            deadline: formData.get('deadline'),
+            expectedAt: formData.get('expectedAt') || undefined,
+            isTaxIncluded: formData.get('isTaxIncluded') === 'on',
+            needInvoice: formData.get('needInvoice') === 'on',
+            specialRequirements: Object.keys(specialRequirements).some(k => specialRequirements[k] || specialRequirements[k] === '') ? specialRequirements : undefined
+        };
+        
+        // 调用导出API
+        const response = await apiFetch(`${API_BASE}/projects/quotation/preview`, {
+            method: 'POST',
+            body: JSON.stringify(projectData)
+        });
+        
+        // 检查Content-Type，如果是Excel文件则直接下载
+        const contentType = response.headers.get('Content-Type');
+        if (contentType && contentType.includes('spreadsheetml')) {
+            // 下载文件
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `报价单-${projectData.projectName}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            
+            showToast('报价单导出成功', 'success');
+            return;
+        }
+        
+        // 如果不是Excel文件，尝试解析为JSON错误信息
+        if (!response.ok) {
+            const text = await response.text();
+            let error;
+            try {
+                error = JSON.parse(text);
+            } catch (e) {
+                error = { message: text || '导出失败' };
+            }
+            alert('导出失败: ' + (error.message || '未知错误'));
+            return;
+        }
+    } catch (error) {
+        console.error('导出报价单失败:', error);
+        alert('导出失败: ' + error.message);
+    }
+}
+
 async function createProject(e) {
     e.preventDefault();
     const formData = new FormData(e.target);
@@ -3093,6 +3230,7 @@ async function viewProject(projectId) {
                                     <button class="btn-small" onclick="setComplaint('${projectId}')">标记客诉</button>
                                     <button class="btn-small btn-success" onclick="finishProject('${projectId}')">完成项目</button>
                                 ` : ''}
+                                <button class="btn-small" onclick="exportProjectQuotation('${projectId}')" style="background: #10b981;">📄 导出报价单</button>
                                 <button class="btn-small" onclick="showEditProjectModal()">编辑项目</button>
                                 <button class="btn-small btn-danger" onclick="deleteProject('${projectId}')">删除项目</button>
                             </div>
@@ -3116,9 +3254,7 @@ async function showAddMemberModal(projectId) {
     // 确保用户列表已加载
     if (allUsers.length === 0) {
         try {
-            const response = await fetch(`${API_BASE}/users`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const response = await apiFetch(`${API_BASE}/users`);
             const data = await response.json();
             if (data.success) {
                 allUsers = data.data;
@@ -3135,9 +3271,7 @@ async function showAddMemberModal(projectId) {
     // 加载项目信息（用于验证排版费用）
     let projectAmount = null;
     try {
-        const projectResponse = await fetch(`${API_BASE}/projects/${projectId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const projectResponse = await apiFetch(`${API_BASE}/projects/${projectId}`);
         const projectData = await projectResponse.json();
         if (projectData.success && projectData.data.projectAmount) {
             projectAmount = projectData.data.projectAmount;
@@ -3367,12 +3501,8 @@ async function addMember(e, projectId) {
     };
 
     try {
-        const response = await fetch(`${API_BASE}/projects/${projectId}/add-member`, {
+        const response = await apiFetch(`${API_BASE}/projects/${projectId}/add-member`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify(data)
         });
         const result = await response.json();
@@ -3791,12 +3921,8 @@ async function updateProject(e, projectId) {
     };
 
     try {
-        const res = await fetch(`${API_BASE}/projects/${projectId}`, {
+        const res = await apiFetch(`${API_BASE}/projects/${projectId}`, {
             method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify(payload)
         });
         const result = await res.json();
@@ -3816,9 +3942,8 @@ async function updateProject(e, projectId) {
 async function deleteProject(projectId) {
     if (!confirm('确定要删除/取消此项目吗？已完成项目不可删除。')) return;
     try {
-        const res = await fetch(`${API_BASE}/projects/${projectId}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
+        const res = await apiFetch(`${API_BASE}/projects/${projectId}`, {
+            method: 'DELETE'
         });
         const result = await res.json();
         if (result.success) {
@@ -3885,12 +4010,8 @@ async function updatePayment(e, projectId) {
     };
 
     try {
-        const response = await fetch(`${API_BASE}/projects/${projectId}/payment`, {
+        const response = await apiFetch(`${API_BASE}/projects/${projectId}/payment`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify(payload)
         });
         const result = await response.json();
@@ -3914,9 +4035,7 @@ async function loadKPI() {
     const userId = document.getElementById('kpiUserSelect').value || currentUser._id;
 
     try {
-        const response = await fetch(`${API_BASE}/kpi/user/${userId}?month=${month}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await apiFetch(`${API_BASE}/kpi/user/${userId}?month=${month}`);
         const data = await response.json();
 
         if (data.success) {
@@ -3988,12 +4107,8 @@ async function generateMonthlyKPI() {
     if (!confirm(`确定要生成 ${month} 的月度KPI吗？`)) return;
 
     try {
-        const response = await fetch(`${API_BASE}/kpi/generate-monthly`, {
+        const response = await apiFetch(`${API_BASE}/kpi/generate-monthly`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify({ month })
         });
         const result = await response.json();
@@ -4026,9 +4141,7 @@ async function exportKPI() {
 // ==================== 配置管理 ====================
 async function loadConfig() {
     try {
-        const response = await fetch(`${API_BASE}/config`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await apiFetch(`${API_BASE}/config`);
         const data = await response.json();
 
         if (data.success) {
@@ -4119,12 +4232,8 @@ async function loadConfig() {
                 });
 
                 try {
-                    const response = await fetch(`${API_BASE}/config/update`, {
+                    const response = await apiFetch(`${API_BASE}/config/update`, {
                         method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        },
                         body: JSON.stringify(data)
                     });
                     const result = await response.json();
@@ -4148,9 +4257,7 @@ async function loadConfig() {
 
 async function loadConfigHistory() {
     try {
-        const response = await fetch(`${API_BASE}/config/history`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await apiFetch(`${API_BASE}/config/history`);
         const data = await response.json();
 
         if (data.success) {
@@ -4281,9 +4388,7 @@ async function loadDashboard() {
         if (businessType) params.append('businessType', businessType);
         if (role) params.append('role', role);
 
-        const response = await fetch(`${API_BASE}/kpi/dashboard?${params.toString()}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await apiFetch(`${API_BASE}/kpi/dashboard?${params.toString()}`);
         const result = await response.json();
 
         if (!result.success) {
@@ -4584,9 +4689,7 @@ async function loadReceivables() {
     }
     if (customerId) params.append('customerId', customerId);
     if (salesId) params.append('salesId', salesId);
-    const res = await fetch(`${API_BASE}/finance/receivables?${params.toString()}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const res = await apiFetch(`${API_BASE}/finance/receivables?${params.toString()}`);
     const data = await res.json();
     if (!data.success) {
         showAlert('receivablesList', data.message || '加载失败', 'error');
@@ -4747,9 +4850,7 @@ async function loadInvoices() {
     if (status) params.append('status', status);
     if (type) params.append('type', type);
     if (projectId) params.append('projectId', projectId);
-    const res = await fetch(`${API_BASE}/finance/invoice?${params.toString()}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const res = await apiFetch(`${API_BASE}/finance/invoice?${params.toString()}`);
     const data = await res.json();
     if (!data.success) {
             showAlert('invoiceList', data.message || '加载失败', 'error');
@@ -4831,9 +4932,7 @@ async function addInvoice() {
     
     try {
         // 先获取项目信息
-        const projectRes = await fetch(`${API_BASE}/projects/${projectId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const projectRes = await apiFetch(`${API_BASE}/projects/${projectId}`);
         const projectData = await projectRes.json();
         if (!projectData.success) {
             showToast('获取项目信息失败', 'error');
@@ -4843,9 +4942,7 @@ async function addInvoice() {
         const projectAmount = project.projectAmount || 0;
         
         // 获取该项目的所有历史发票（排除作废的）
-        const invoiceRes = await fetch(`${API_BASE}/finance/invoice?projectId=${projectId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const invoiceRes = await apiFetch(`${API_BASE}/finance/invoice?projectId=${projectId}`);
         const invoiceData = await invoiceRes.json();
         
         if (invoiceData.success) {
@@ -4876,12 +4973,8 @@ async function addInvoice() {
             note: document.getElementById('invoiceNote')?.value || ''
     };
         
-        const res = await fetch(`${API_BASE}/finance/invoice/${projectId}`, {
+        const res = await apiFetch(`${API_BASE}/finance/invoice/${projectId}`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify(payload)
         });
         const data = await res.json();
@@ -4925,12 +5018,8 @@ async function addPaymentRecord() {
         invoiceNumber
     };
     try {
-        const res = await fetch(`${API_BASE}/finance/payment/${projectId}`, {
+        const res = await apiFetch(`${API_BASE}/finance/payment/${projectId}`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify(payload)
         });
         const data = await res.json();
@@ -4962,18 +5051,14 @@ async function loadPaymentRecords(projectId) {
         const params = new URLSearchParams();
         if (paymentStatus) params.append('paymentStatus', paymentStatus);
         
-        const res = await fetch(`${API_BASE}/finance/payment/${projectId}?${params.toString()}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await apiFetch(`${API_BASE}/finance/payment/${projectId}?${params.toString()}`);
         const data = await res.json();
         if (!data.success) {
             showAlert('paymentRecords', data.message || '加载失败', 'error');
             return;
         }
         // 获取项目信息以显示回款状态
-        const projectRes = await fetch(`${API_BASE}/projects/${projectId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const projectRes = await apiFetch(`${API_BASE}/projects/${projectId}`);
         const projectData = await projectRes.json();
         const project = projectData.success ? projectData.data : null;
         
@@ -5117,9 +5202,8 @@ async function removePaymentRecord(recordId, projectId) {
     }
     if (!confirm('确定删除该回款记录？（不会自动回滚项目回款总额）')) return;
     try {
-        const res = await fetch(`${API_BASE}/finance/payment/${recordId}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
+        const res = await apiFetch(`${API_BASE}/finance/payment/${recordId}`, {
+            method: 'DELETE'
         });
         const data = await res.json();
         if (!data.success) {
@@ -5161,9 +5245,7 @@ async function loadPaymentRecordsProjects() {
     }
     if (customerId) params.append('customerId', customerId);
     if (salesId) params.append('salesId', salesId);
-    const res = await fetch(`${API_BASE}/finance/receivables?${params.toString()}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const res = await apiFetch(`${API_BASE}/finance/receivables?${params.toString()}`);
     const data = await res.json();
     if (!data.success) {
         showAlert('paymentProjectsList', data.message || '加载失败', 'error');
@@ -5332,9 +5414,7 @@ async function loadPaymentRecordsForProject(projectId) {
             params.append('endDate', end.toISOString());
         }
         
-        const res = await fetch(`${API_BASE}/finance/payment/${projectId}?${params.toString()}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await apiFetch(`${API_BASE}/finance/payment/${projectId}?${params.toString()}`);
         const data = await res.json();
         if (!data.success) {
             container.innerHTML = `<div style="text-align: center; color: #ef4444;">加载失败: ${data.message || '未知错误'}</div>`;
@@ -5342,9 +5422,7 @@ async function loadPaymentRecordsForProject(projectId) {
         }
         
         // 获取项目信息
-        const projectRes = await fetch(`${API_BASE}/projects/${projectId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const projectRes = await apiFetch(`${API_BASE}/projects/${projectId}`);
         const projectData = await projectRes.json();
         const project = projectData.success ? projectData.data : null;
         
@@ -5485,9 +5563,7 @@ async function loadInvoiceProjects() {
     if (salesId) params.append('salesId', salesId);
     
     // 先获取项目列表
-    const res = await fetch(`${API_BASE}/finance/receivables?${params.toString()}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const res = await apiFetch(`${API_BASE}/finance/receivables?${params.toString()}`);
     const data = await res.json();
     if (!data.success) {
         showAlert('invoiceProjectsList', data.message || '加载失败', 'error');
@@ -5503,9 +5579,7 @@ async function loadInvoiceProjects() {
         if (status) invoiceParams.append('status', status);
         if (type) invoiceParams.append('type', type);
         
-        const invoiceRes = await fetch(`${API_BASE}/finance/invoice?${invoiceParams.toString()}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const invoiceRes = await apiFetch(`${API_BASE}/finance/invoice?${invoiceParams.toString()}`);
         const invoiceData = await invoiceRes.json();
         
         if (invoiceData.success && invoiceData.data) {
@@ -5682,9 +5756,7 @@ async function loadInvoicesForProject(projectId) {
         if (type) params.append('type', type);
         params.append('projectId', projectId);
         
-        const res = await fetch(`${API_BASE}/finance/invoice?${params.toString()}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await apiFetch(`${API_BASE}/finance/invoice?${params.toString()}`);
         const data = await res.json();
         if (!data.success) {
             container.innerHTML = `<div style="text-align: center; color: #ef4444;">加载失败: ${data.message || '未知错误'}</div>`;
@@ -5763,9 +5835,7 @@ async function loadProjectPayments(projectId) {
     const container = document.getElementById('projectPaymentList');
     if (!container) return;
     try {
-        const res = await fetch(`${API_BASE}/finance/payment/${projectId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await apiFetch(`${API_BASE}/finance/payment/${projectId}`);
         const data = await res.json();
         if (!data.success) {
             container.innerHTML = `<div class="alert alert-error">${data.message || '加载失败'}</div>`;
@@ -5815,12 +5885,8 @@ async function addProjectPayment(projectId) {
         reference
     };
     try {
-        const res = await fetch(`${API_BASE}/finance/payment/${projectId}`, {
+        const res = await apiFetch(`${API_BASE}/finance/payment/${projectId}`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify(payload)
         });
         const data = await res.json();
@@ -5841,9 +5907,7 @@ async function loadProjectInvoices(projectId) {
     const container = document.getElementById('projectInvoiceList');
     if (!container) return;
     try {
-        const res = await fetch(`${API_BASE}/finance/invoice?projectId=${projectId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await apiFetch(`${API_BASE}/finance/invoice?projectId=${projectId}`);
         const data = await res.json();
         if (!data.success) {
             container.innerHTML = `<div class="alert alert-error">${data.message || '加载失败'}</div>`;
@@ -5897,12 +5961,8 @@ async function addProjectInvoice(projectId) {
         type
     };
     try {
-        const res = await fetch(`${API_BASE}/finance/invoice/${projectId}`, {
+        const res = await apiFetch(`${API_BASE}/finance/invoice/${projectId}`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify(payload)
         });
         const data = await res.json();
@@ -5921,9 +5981,7 @@ async function loadPendingKpi() {
     const month = document.getElementById('kpiPendingMonth')?.value || '';
     const params = new URLSearchParams();
     if (month) params.append('month', month);
-    const res = await fetch(`${API_BASE}/finance/kpi/pending?${params.toString()}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const res = await apiFetch(`${API_BASE}/finance/kpi/pending?${params.toString()}`);
     const data = await res.json();
     if (!data.success) {
         showAlert('pendingKpiList', data.message || '加载失败', 'error');
@@ -5960,9 +6018,7 @@ async function loadFinanceSummary() {
     const month = document.getElementById('reportMonth')?.value || '';
     const params = new URLSearchParams();
     if (month) params.append('month', month);
-    const res = await fetch(`${API_BASE}/finance/reports/summary?${params.toString()}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const res = await apiFetch(`${API_BASE}/finance/reports/summary?${params.toString()}`);
     const data = await res.json();
     if (!data.success) {
         showAlert('financeSummary', data.message || '加载失败', 'error');
@@ -6309,9 +6365,7 @@ async function loadRealtimeKPI(projectId) {
     const container = document.getElementById('realtimeKpiContent');
     if (container) container.innerHTML = '<div class="card-desc">加载中...</div>';
     try {
-        const res = await fetch(`${API_BASE}/kpi/project/${projectId}/realtime`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await apiFetch(`${API_BASE}/kpi/project/${projectId}/realtime`);
         const data = await res.json();
         if (!data.success) {
             if (container) container.innerHTML = `<div class="alert alert-error">${data.message || '获取失败'}</div>`;
@@ -6359,9 +6413,8 @@ async function startProject(projectId) {
     if (!confirm('确定要开始执行此项目吗？开始后项目状态将变为"进行中"。')) return;
 
     try {
-        const response = await fetch(`${API_BASE}/projects/${projectId}/start`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
+        const response = await apiFetch(`${API_BASE}/projects/${projectId}/start`, {
+            method: 'POST'
         });
         const result = await response.json();
         
@@ -6475,12 +6528,8 @@ async function setLayoutCost(e, projectId) {
     
     try {
         // 更新项目的兼职排版信息
-        const response = await fetch(`${API_BASE}/projects/${projectId}`, {
+        const response = await apiFetch(`${API_BASE}/projects/${projectId}`, {
             method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify({
                 partTimeLayout: {
                     isPartTime: true,
@@ -6516,9 +6565,7 @@ async function loadReconciliation() {
     if (endDate) params.append('endDate', endDate);
     
     try {
-        const res = await fetch(`${API_BASE}/finance/reconciliation?${params.toString()}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await apiFetch(`${API_BASE}/finance/reconciliation?${params.toString()}`);
         const data = await res.json();
         if (!data.success) {
             showAlert('reconciliationList', data.message || '加载失败', 'error');

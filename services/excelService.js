@@ -1,6 +1,9 @@
 const ExcelJS = require('exceljs');
 const KpiRecord = require('../models/KpiRecord');
 const User = require('../models/User');
+const Project = require('../models/Project');
+const Customer = require('../models/Customer');
+const KpiConfig = require('../models/KpiConfig');
 
 /**
  * 导出月度KPI工资表
@@ -275,8 +278,284 @@ async function exportUserKPIDetail(userId, month = null, canViewAmount = true) {
   return buffer;
 }
 
+/**
+ * 导出项目报价单
+ * @param {String} projectId - 项目ID（可选，如果提供则从数据库获取）
+ * @param {Object} projectData - 项目数据对象（可选，如果提供则直接使用）
+ * @returns {Promise<Buffer>} Excel文件Buffer
+ */
+async function exportProjectQuotation(projectId = null, projectData = null) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'KPI系统';
+  
+  let project, customer, creator;
+  
+  if (projectId) {
+    // 从数据库获取项目数据
+    project = await Project.findById(projectId)
+      .populate('customerId', 'name shortName contactPerson phone email address')
+      .populate('createdBy', 'name username email');
+    
+    if (!project) {
+      throw new Error('项目不存在');
+    }
+    customer = project.customerId;
+    // 获取项目创建者信息（作为乙方联系人）
+    creator = project.createdBy;
+  } else if (projectData) {
+    // 使用提供的项目数据（创建项目时使用）
+    project = projectData;
+    if (projectData.customerId && typeof projectData.customerId === 'object') {
+      customer = projectData.customerId;
+    } else if (projectData.customerId) {
+      customer = await Customer.findById(projectData.customerId);
+    }
+    
+    // 获取项目创建者信息（作为乙方联系人）
+    if (projectData.createdBy) {
+      if (typeof projectData.createdBy === 'object') {
+        creator = projectData.createdBy;
+      } else {
+        creator = await User.findById(projectData.createdBy).select('name username email');
+      }
+    }
+  } else {
+    throw new Error('必须提供项目ID或项目数据');
+  }
+  
+  if (!customer) {
+    throw new Error('客户信息不存在');
+  }
+  
+  // 获取公司信息
+  const companyInfo = await KpiConfig.getActiveConfig();
+  
+  const worksheet = workbook.addWorksheet('报价单');
+  worksheet.properties.defaultRowHeight = 20;
+  
+  // 设置列宽
+  worksheet.columns = [
+    { width: 15 },
+    { width: 40 }
+  ];
+  
+  // 设置所有列的默认字体
+  worksheet.columns.forEach(column => {
+    column.font = { name: 'Microsoft YaHei', size: 11 };
+  });
+  
+  let rowIndex = 1;
+  
+  // 标题
+  const titleRow = worksheet.addRow(['项目报价单', '']);
+  titleRow.getCell(1).font = { bold: true, size: 16, name: 'Microsoft YaHei' };
+  titleRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.mergeCells(1, 1, 1, 2);
+  titleRow.height = 30;
+  rowIndex++;
+  
+  worksheet.addRow([]);
+  rowIndex++;
+  
+  // 乙方（公司）信息
+  const companyRow = worksheet.addRow(['乙方信息', '']);
+  companyRow.getCell(1).font = { bold: true, size: 12, name: 'Microsoft YaHei' };
+  companyRow.getCell(1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFE0E0E0' }
+  };
+  worksheet.mergeCells(rowIndex, 1, rowIndex, 2);
+  rowIndex++;
+  
+  // 乙方联系人使用项目创建者的信息
+  const contactPerson = creator ? creator.name : (companyInfo.companyContact || '');
+  // 用户模型中没有phone字段，使用email作为联系电话，如果没有则使用公司配置的电话
+  const contactPhone = creator ? (creator.email || companyInfo.companyPhone || '') : (companyInfo.companyPhone || '');
+  const contactEmail = creator ? creator.email : (companyInfo.companyEmail || '');
+  
+  const companyInfoRows = [
+    ['公司名称', companyInfo.companyName || ''],
+    ['联系人', contactPerson],
+    ['联系电话', contactPhone],
+    ['联系邮箱', contactEmail],
+    ['公司地址', companyInfo.companyAddress || '']
+  ];
+  
+  companyInfoRows.forEach(([label, value]) => {
+    const row = worksheet.addRow([label, value]);
+    row.getCell(1).font = { bold: true, name: 'Microsoft YaHei', size: 11 };
+    row.getCell(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFF0F0F0' }
+    };
+    row.getCell(2).font = { name: 'Microsoft YaHei', size: 11 };
+    rowIndex++;
+  });
+  
+  worksheet.addRow([]);
+  rowIndex++;
+  
+  // 甲方（客户）基本信息
+  const customerInfoRows = [
+    ['客户名称', customer.name],
+    ['客户简称', customer.shortName || ''],
+    ['联系人', customer.contactPerson || ''],
+    ['联系电话', customer.phone || ''],
+    ['邮箱', customer.email || ''],
+    ['客户地址', customer.address || '']
+  ];
+  
+  customerInfoRows.forEach(([label, value]) => {
+    const row = worksheet.addRow([label, value]);
+    row.getCell(1).font = { bold: true, name: 'Microsoft YaHei', size: 11 };
+    row.getCell(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFF0F0F0' }
+    };
+    row.getCell(2).font = { name: 'Microsoft YaHei', size: 11 };
+    rowIndex++;
+  });
+  
+  worksheet.addRow([]);
+  rowIndex++;
+  
+  // 项目基本信息
+  const projectInfoRow = worksheet.addRow(['项目信息', '']);
+  projectInfoRow.getCell(1).font = { bold: true, size: 12, name: 'Microsoft YaHei' };
+  projectInfoRow.getCell(1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFE0E0E0' }
+  };
+  worksheet.mergeCells(rowIndex, 1, rowIndex, 2);
+  rowIndex++;
+  
+  const infoRows = [
+    ['项目编号', project.projectNumber || '待生成'],
+    ['项目名称', project.projectName],
+    ['业务类型', getBusinessTypeText(project.businessType)],
+    ['项目类型', project.projectType ? getProjectTypeText(project.projectType) : ''],
+    ['源语种', project.sourceLanguage],
+    ['目标语种', Array.isArray(project.targetLanguages) ? project.targetLanguages.join('、') : project.targetLanguages],
+    ['字数', project.wordCount ? project.wordCount.toLocaleString() + ' 字' : ''],
+    ['单价', project.unitPrice ? '¥' + project.unitPrice.toLocaleString() + ' /千字' : ''],
+    ['项目金额', '¥' + (project.projectAmount || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })],
+    ['是否含税', project.isTaxIncluded ? '是' : '否'],
+    ['需要发票', project.needInvoice ? '是' : '否'],
+    ['交付时间', project.deadline ? new Date(project.deadline).toLocaleDateString('zh-CN') : ''],
+    ['协议付款日', project.payment?.expectedAt ? new Date(project.payment.expectedAt).toLocaleDateString('zh-CN') : '']
+  ];
+  
+  infoRows.forEach(([label, value]) => {
+    const row = worksheet.addRow([label, value]);
+    row.getCell(1).font = { bold: true, name: 'Microsoft YaHei', size: 11 };
+    row.getCell(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFF0F0F0' }
+    };
+    row.getCell(2).font = { name: 'Microsoft YaHei', size: 11 };
+    rowIndex++;
+  });
+  
+  // 特殊要求
+  if (project.specialRequirements) {
+    worksheet.addRow([]);
+    rowIndex++;
+    
+    const reqRow = worksheet.addRow(['特殊要求', '']);
+    reqRow.getCell(1).font = { bold: true, name: 'Microsoft YaHei', size: 11 };
+    reqRow.getCell(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFF0F0F0' }
+    };
+    worksheet.mergeCells(rowIndex, 1, rowIndex, 2);
+    rowIndex++;
+    
+    const requirements = [];
+    if (project.specialRequirements.terminology) requirements.push('术语表');
+    if (project.specialRequirements.nda) requirements.push('保密协议');
+    if (project.specialRequirements.referenceFiles) requirements.push('参考文件');
+    if (project.specialRequirements.notes) requirements.push(project.specialRequirements.notes);
+    
+    if (requirements.length > 0) {
+      const reqValueRow = worksheet.addRow(['', requirements.join('；')]);
+      reqValueRow.getCell(2).font = { name: 'Microsoft YaHei', size: 11 };
+      worksheet.mergeCells(rowIndex, 1, rowIndex, 2);
+      rowIndex++;
+    }
+  }
+  
+  // 备注
+  worksheet.addRow([]);
+  rowIndex++;
+  
+  const noteRow = worksheet.addRow(['备注', '']);
+  noteRow.getCell(1).font = { bold: true, name: 'Microsoft YaHei', size: 11 };
+  noteRow.getCell(1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFF0F0F0' }
+  };
+  worksheet.mergeCells(rowIndex, 1, rowIndex, 2);
+  rowIndex++;
+  
+  const noteValueRow = worksheet.addRow(['', '此报价单由系统自动生成，如有疑问请联系销售人员。']);
+  noteValueRow.getCell(2).font = { name: 'Microsoft YaHei', size: 11 };
+  worksheet.mergeCells(rowIndex, 1, rowIndex, 2);
+  
+  // 生成Buffer
+  const buffer = await workbook.xlsx.writeBuffer();
+  
+  // 验证buffer是否有效
+  if (!buffer || buffer.length === 0) {
+    throw new Error('生成的Excel文件为空');
+  }
+  
+  // 确保返回的是Node.js Buffer对象
+  // ExcelJS的writeBuffer()可能返回ArrayBuffer，需要转换为Buffer
+  if (buffer instanceof ArrayBuffer) {
+    return Buffer.from(buffer);
+  } else if (buffer instanceof Uint8Array) {
+    return Buffer.from(buffer);
+  } else if (Buffer.isBuffer(buffer)) {
+    return buffer;
+  } else {
+    // 尝试转换为Buffer
+    return Buffer.from(buffer);
+  }
+}
+
+// 业务类型文本映射
+function getBusinessTypeText(type) {
+  const map = {
+    'translation': '笔译',
+    'interpretation': '口译',
+    'transcription': '转录',
+    'localization': '本地化',
+    'other': '其他'
+  };
+  return map[type] || type;
+}
+
+// 项目类型文本映射
+function getProjectTypeText(type) {
+  const map = {
+    'mtpe': 'MTPE',
+    'deepedit': '深度编辑',
+    'review': '审校项目',
+    'mixed': '混合类型'
+  };
+  return map[type] || type;
+}
+
 module.exports = {
   exportMonthlyKPISheet,
-  exportUserKPIDetail
+  exportUserKPIDetail,
+  exportProjectQuotation
 };
 

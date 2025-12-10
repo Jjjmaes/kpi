@@ -5,6 +5,7 @@ const Project = require('../models/Project');
 const ProjectMember = require('../models/ProjectMember');
 const KpiConfig = require('../models/KpiConfig');
 const Customer = require('../models/Customer');
+const { exportProjectQuotation } = require('../services/excelService');
 
 // 判断是否为仅交付角色（翻译/审校/排版），无查看客户信息权限
 function isDeliveryOnlyUser(user, currentRole) {
@@ -1058,6 +1059,124 @@ router.post('/:id/payment', authorize('finance', 'admin', 'sales'), async (req, 
     res.status(500).json({ 
       success: false, 
       message: error.message 
+    });
+  }
+});
+
+// 导出项目报价单
+router.get('/:id/quotation', authenticate, async (req, res) => {
+  try {
+    const project = await Project.findById(req.params.id)
+      .populate('customerId', 'name shortName contactPerson phone email address')
+      .populate('createdBy', 'name username email');
+    
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: '项目不存在'
+      });
+    }
+    
+    // 检查权限：创建者、管理员、PM可以导出
+    const isCreator = project.createdBy._id.toString() === req.user._id.toString();
+    const canView = req.user.roles.includes('admin') || 
+                    req.user.roles.includes('pm') ||
+                    req.user.roles.includes('finance') ||
+                    isCreator;
+    
+    if (!canView) {
+      return res.status(403).json({
+        success: false,
+        message: '无权导出此项目的报价单'
+      });
+    }
+    
+    const buffer = await exportProjectQuotation(req.params.id);
+    
+    if (!buffer || !Buffer.isBuffer(buffer)) {
+      throw new Error('生成的文件数据无效');
+    }
+    
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    // 使用encodeURIComponent确保中文文件名正确编码
+    const filename = encodeURIComponent(`报价单-${project.projectNumber || project.projectName}.xlsx`);
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+    res.send(buffer);
+  } catch (error) {
+    console.error('导出报价单失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '导出报价单失败: ' + error.message
+    });
+  }
+});
+
+// 导出项目报价单（基于表单数据，用于创建项目时）
+router.post('/quotation/preview', authenticate, async (req, res) => {
+  try {
+    const projectData = req.body;
+    
+    // 验证必填字段
+    if (!projectData.projectName || !projectData.customerId) {
+      return res.status(400).json({
+        success: false,
+        message: '项目名称和客户不能为空'
+      });
+    }
+    
+    // 获取客户信息
+    const customer = await Customer.findById(projectData.customerId);
+    if (!customer) {
+      return res.status(400).json({
+        success: false,
+        message: '客户不存在'
+      });
+    }
+    
+    // 获取当前用户信息（项目创建者）
+    const User = require('../models/User');
+    const creator = await User.findById(req.user._id).select('name username email');
+    
+    // 构建项目数据对象
+    const projectObj = {
+      projectNumber: projectData.projectNumber || '待生成',
+      projectName: projectData.projectName,
+      customerId: customer,
+      createdBy: creator, // 添加创建者信息
+      businessType: projectData.businessType || 'translation',
+      projectType: projectData.projectType,
+      sourceLanguage: projectData.sourceLanguage,
+      targetLanguages: Array.isArray(projectData.targetLanguages) 
+        ? projectData.targetLanguages 
+        : [projectData.targetLanguages],
+      wordCount: projectData.wordCount || 0,
+      unitPrice: projectData.unitPrice || 0,
+      projectAmount: projectData.projectAmount || 0,
+      isTaxIncluded: projectData.isTaxIncluded || false,
+      needInvoice: projectData.needInvoice || false,
+      deadline: projectData.deadline ? new Date(projectData.deadline) : new Date(),
+      specialRequirements: projectData.specialRequirements || {},
+      payment: {
+        expectedAt: projectData.expectedAt ? new Date(projectData.expectedAt) : null
+      }
+    };
+    
+    const buffer = await exportProjectQuotation(null, projectObj);
+    
+    if (!buffer || !Buffer.isBuffer(buffer)) {
+      throw new Error('生成的文件数据无效');
+    }
+    
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    // 使用encodeURIComponent确保中文文件名正确编码
+    const filename = encodeURIComponent(`报价单-${projectObj.projectName}.xlsx`);
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+    res.send(buffer);
+  } catch (error) {
+    console.error('导出报价单失败:', error);
+    res.status(500).json({
+      success: false,
+      message: '导出报价单失败: ' + error.message
     });
   }
 });
