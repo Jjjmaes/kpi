@@ -48,7 +48,7 @@ router.get('/', authorize('admin', 'finance', 'sales', 'part_time_sales', 'pm', 
 // 创建用户（仅管理员）
 router.post('/', authorize('admin'), async (req, res) => {
   try {
-    const { username, password, name, email, roles } = req.body;
+    const { username, password, name, email, phone, roles } = req.body;
 
     if (!username || !password || !name || !email || !roles || roles.length === 0) {
       return res.status(400).json({ 
@@ -78,6 +78,7 @@ router.post('/', authorize('admin'), async (req, res) => {
       password,
       name,
       email,
+      phone: phone || '',
       roles
     });
 
@@ -88,6 +89,7 @@ router.post('/', authorize('admin'), async (req, res) => {
         username: user.username,
         name: user.name,
         email: user.email,
+        phone: user.phone,
         roles: user.roles
       }
     });
@@ -102,7 +104,7 @@ router.post('/', authorize('admin'), async (req, res) => {
 // 更新用户（仅管理员）
 router.put('/:id', authorize('admin'), async (req, res) => {
   try {
-    const { name, email, roles, isActive } = req.body;
+    const { name, email, phone, roles, isActive } = req.body;
     const user = await User.findById(req.params.id);
 
     if (!user) {
@@ -114,6 +116,7 @@ router.put('/:id', authorize('admin'), async (req, res) => {
 
     if (name) user.name = name;
     if (email) user.email = email;
+    if (phone !== undefined) user.phone = phone || '';
     if (roles) user.roles = roles;
     if (typeof isActive === 'boolean') user.isActive = isActive;
     user.updatedAt = Date.now();
@@ -127,6 +130,7 @@ router.put('/:id', authorize('admin'), async (req, res) => {
         username: user.username,
         name: user.name,
         email: user.email,
+        phone: user.phone,
         roles: user.roles,
         isActive: user.isActive
       }

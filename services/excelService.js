@@ -294,7 +294,7 @@ async function exportProjectQuotation(projectId = null, projectData = null) {
     // 从数据库获取项目数据
     project = await Project.findById(projectId)
       .populate('customerId', 'name shortName contactPerson phone email address')
-      .populate('createdBy', 'name username email');
+      .populate('createdBy', 'name username email phone');
     
     if (!project) {
       throw new Error('项目不存在');
@@ -316,7 +316,7 @@ async function exportProjectQuotation(projectId = null, projectData = null) {
       if (typeof projectData.createdBy === 'object') {
         creator = projectData.createdBy;
       } else {
-        creator = await User.findById(projectData.createdBy).select('name username email');
+        creator = await User.findById(projectData.createdBy).select('name username email phone');
       }
     }
   } else {
@@ -357,10 +357,10 @@ async function exportProjectQuotation(projectId = null, projectData = null) {
   worksheet.addRow([]);
   rowIndex++;
   
-  // 乙方（公司）信息
-  const companyRow = worksheet.addRow(['乙方信息', '']);
-  companyRow.getCell(1).font = { bold: true, size: 12, name: 'Microsoft YaHei' };
-  companyRow.getCell(1).fill = {
+  // 甲方（客户）基本信息
+  const customerTitleRow = worksheet.addRow(['甲方信息', '']);
+  customerTitleRow.getCell(1).font = { bold: true, size: 12, name: 'Microsoft YaHei' };
+  customerTitleRow.getCell(1).fill = {
     type: 'pattern',
     pattern: 'solid',
     fgColor: { argb: 'FFE0E0E0' }
@@ -368,21 +368,16 @@ async function exportProjectQuotation(projectId = null, projectData = null) {
   worksheet.mergeCells(rowIndex, 1, rowIndex, 2);
   rowIndex++;
   
-  // 乙方联系人使用项目创建者的信息
-  const contactPerson = creator ? creator.name : (companyInfo.companyContact || '');
-  // 用户模型中没有phone字段，使用email作为联系电话，如果没有则使用公司配置的电话
-  const contactPhone = creator ? (creator.email || companyInfo.companyPhone || '') : (companyInfo.companyPhone || '');
-  const contactEmail = creator ? creator.email : (companyInfo.companyEmail || '');
-  
-  const companyInfoRows = [
-    ['公司名称', companyInfo.companyName || ''],
-    ['联系人', contactPerson],
-    ['联系电话', contactPhone],
-    ['联系邮箱', contactEmail],
-    ['公司地址', companyInfo.companyAddress || '']
+  const customerInfoRows = [
+    ['客户名称', customer.name],
+    ['客户简称', customer.shortName || ''],
+    ['联系人', customer.contactPerson || ''],
+    ['联系电话', customer.phone || ''],
+    ['邮箱', customer.email || ''],
+    ['客户地址', customer.address || '']
   ];
   
-  companyInfoRows.forEach(([label, value]) => {
+  customerInfoRows.forEach(([label, value]) => {
     const row = worksheet.addRow([label, value]);
     row.getCell(1).font = { bold: true, name: 'Microsoft YaHei', size: 11 };
     row.getCell(1).fill = {
@@ -397,17 +392,33 @@ async function exportProjectQuotation(projectId = null, projectData = null) {
   worksheet.addRow([]);
   rowIndex++;
   
-  // 甲方（客户）基本信息
-  const customerInfoRows = [
-    ['客户名称', customer.name],
-    ['客户简称', customer.shortName || ''],
-    ['联系人', customer.contactPerson || ''],
-    ['联系电话', customer.phone || ''],
-    ['邮箱', customer.email || ''],
-    ['客户地址', customer.address || '']
+  // 乙方（公司）信息
+  const companyRow = worksheet.addRow(['乙方信息', '']);
+  companyRow.getCell(1).font = { bold: true, size: 12, name: 'Microsoft YaHei' };
+  companyRow.getCell(1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFE0E0E0' }
+  };
+  worksheet.mergeCells(rowIndex, 1, rowIndex, 2);
+  rowIndex++;
+  
+  // 乙方联系人使用项目创建者的信息
+  // 如果没有创建者信息，使用公司配置中的默认联系人信息
+  const contactPerson = creator ? creator.name : (companyInfo.companyContact || '');
+  // 优先使用创建者的phone字段，如果没有则使用email，最后使用公司配置的电话
+  const contactPhone = creator ? (creator.phone || creator.email || companyInfo.companyPhone || '') : (companyInfo.companyPhone || '');
+  const contactEmail = creator ? creator.email : (companyInfo.companyEmail || '');
+  
+  const companyInfoRows = [
+    ['公司名称', companyInfo.companyName || ''],
+    ['联系人', contactPerson],
+    ['联系电话', contactPhone],
+    ['联系邮箱', contactEmail],
+    ['公司地址', companyInfo.companyAddress || '']
   ];
   
-  customerInfoRows.forEach(([label, value]) => {
+  companyInfoRows.forEach(([label, value]) => {
     const row = worksheet.addRow([label, value]);
     row.getCell(1).font = { bold: true, name: 'Microsoft YaHei', size: 11 };
     row.getCell(1).fill = {

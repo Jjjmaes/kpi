@@ -964,6 +964,7 @@ async function loadUsers() {
                             <th>姓名</th>
                             <th>用户名</th>
                             <th>邮箱</th>
+                            <th>电话</th>
                             <th>角色</th>
                             <th>状态</th>
                             <th>操作</th>
@@ -975,6 +976,7 @@ async function loadUsers() {
                                 <td>${u.name}</td>
                                 <td>${u.username}</td>
                                 <td>${u.email}</td>
+                                <td>${u.phone || '-'}</td>
                                 <td>${u.roles.map(r => getRoleText(r)).join(', ')}</td>
                                 <td><span class="badge ${u.isActive ? 'badge-success' : 'badge-danger'}">${u.isActive ? '激活' : '禁用'}</span></td>
                                 <td>
@@ -1047,6 +1049,10 @@ function showCreateUserModal() {
                 <input type="email" name="email" required>
             </div>
             <div class="form-group">
+                <label>电话</label>
+                <input type="tel" name="phone" placeholder="请输入联系电话">
+            </div>
+            <div class="form-group">
                 <label>角色 *</label>
                 <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px;">
                     ${['admin', 'finance', 'sales', 'pm', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout'].map(role => `
@@ -1081,6 +1087,7 @@ async function createUser(e) {
         password: formData.get('password'),
         name: formData.get('name'),
         email: formData.get('email'),
+        phone: formData.get('phone') || '',
         roles
     };
 
@@ -1116,6 +1123,10 @@ async function editUser(userId) {
             <div class="form-group">
                 <label>邮箱 *</label>
                 <input type="email" name="email" value="${user.email}" required>
+            </div>
+            <div class="form-group">
+                <label>电话</label>
+                <input type="tel" name="phone" value="${user.phone || ''}" placeholder="请输入联系电话">
             </div>
             <div class="form-group">
                 <label>角色 *</label>
@@ -1157,6 +1168,7 @@ async function updateUser(e, userId) {
     const data = {
         name: formData.get('name'),
         email: formData.get('email'),
+        phone: formData.get('phone') || '',
         roles,
         isActive: formData.get('isActive') === 'true'
     };

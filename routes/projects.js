@@ -1135,7 +1135,7 @@ router.post('/quotation/preview', authenticate, async (req, res) => {
     
     // 获取当前用户信息（项目创建者）
     const User = require('../models/User');
-    const creator = await User.findById(req.user._id).select('name username email');
+    const creator = await User.findById(req.user._id).select('name username email phone');
     
     // 构建项目数据对象
     const projectObj = {

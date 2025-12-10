@@ -22,6 +22,10 @@ const userSchema = new mongoose.Schema({
     unique: true,
     lowercase: true
   },
+  phone: {
+    type: String,
+    trim: true
+  },
   roles: [{
     type: String,
     enum: ['admin', 'finance', 'sales', 'pm', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout'],
