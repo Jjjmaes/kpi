@@ -7,8 +7,241 @@ let token = null;
 let allUsers = []; // 缓存用户列表
 let allCustomers = []; // 缓存客户列表
 let currentProjectDetail = null; // 缓存当前项目详情
-const isFinanceRole = () => (currentUser?.roles || []).some(r => r === 'admin' || r === 'finance');
-const isSalesRole = () => (currentUser?.roles || []).some(r => r === 'sales' || r === 'part_time_sales');
+
+// 角色管理
+let currentRole = null; // 当前选择的角色（localStorage持久化）
+
+// 角色显示名称映射
+const roleNames = {
+    'admin': '管理员',
+    'finance': '财务',
+    'pm': '项目经理',
+    'sales': '销售',
+    'part_time_sales': '兼职销售',
+    'translator': '翻译',
+    'reviewer': '审校',
+    'layout': '排版',
+    'admin_staff': '综合岗'
+};
+
+// 角色优先级（用于默认角色选择）
+const rolePriority = {
+    'admin': 100,
+    'finance': 90,
+    'pm': 80,
+    'admin_staff': 75,
+    'sales': 70,
+    'part_time_sales': 65,
+    'reviewer': 50,
+    'translator': 40,
+    'layout': 30
+};
+
+// 权限表（与后端保持一致）
+const PERMISSIONS = {
+    admin: {
+        'project.view': 'all',
+        'project.edit': true,
+        'project.create': true,
+        'kpi.view': 'all',
+        'finance.view': true,
+        'customer.view': true,
+        'customer.edit': true,
+        'user.manage': true,
+        'system.config': true
+    },
+    finance: {
+        'project.view': 'all',
+        'project.edit': false,
+        'project.create': false,
+        'kpi.view': 'all',
+        'finance.view': true,
+        'customer.view': true,
+        'customer.edit': true,
+        'user.manage': false,
+        'system.config': false
+    },
+    pm: {
+        'project.view': 'all',
+        'project.edit': true,
+        'project.create': true,
+        'kpi.view': 'all',
+        'finance.view': false,
+        'customer.view': true,
+        'customer.edit': true,
+        'user.manage': false,
+        'system.config': false
+    },
+    sales: {
+        'project.view': 'sales',
+        'project.edit': 'sales',
+        'project.create': true,
+        'kpi.view': 'self',
+        'finance.view': 'sales',
+        'customer.view': true,
+        'customer.edit': true,
+        'user.manage': false,
+        'system.config': false
+    },
+    part_time_sales: {
+        'project.view': 'sales',
+        'project.edit': 'sales',
+        'project.create': true,
+        'kpi.view': 'self',
+        'finance.view': 'sales',
+        'customer.view': true,
+        'customer.edit': false,
+        'user.manage': false,
+        'system.config': false
+    },
+    translator: {
+        'project.view': 'assigned',
+        'project.edit': false,
+        'project.create': false,
+        'kpi.view': 'self',
+        'finance.view': false,
+        'customer.view': false,
+        'customer.edit': false,
+        'user.manage': false,
+        'system.config': false
+    },
+    reviewer: {
+        'project.view': 'assigned',
+        'project.edit': false,
+        'project.create': false,
+        'kpi.view': 'self',
+        'finance.view': false,
+        'customer.view': false,
+        'customer.edit': false,
+        'user.manage': false,
+        'system.config': false
+    },
+    layout: {
+        'project.view': 'assigned',
+        'project.edit': false,
+        'project.create': false,
+        'kpi.view': 'self',
+        'finance.view': false,
+        'customer.view': false,
+        'customer.edit': false,
+        'user.manage': false,
+        'system.config': false
+    },
+    admin_staff: {
+        'project.view': 'all',
+        'project.edit': true,
+        'project.create': true,
+        'kpi.view': 'all',
+        'finance.view': false,
+        'customer.view': true,
+        'customer.edit': true,
+        'user.manage': false,
+        'system.config': false
+    }
+};
+
+// 根据优先级选择默认角色
+function getDefaultRole(userRoles) {
+    if (!userRoles || userRoles.length === 0) {
+        return null;
+    }
+    const sortedRoles = userRoles.sort((a, b) => {
+        const priorityA = rolePriority[a] || 0;
+        const priorityB = rolePriority[b] || 0;
+        return priorityB - priorityA;
+    });
+    return sortedRoles[0];
+}
+
+// 初始化当前角色
+function initCurrentRole() {
+    if (!currentUser || !currentUser.roles || currentUser.roles.length === 0) {
+        currentRole = null;
+        return;
+    }
+    
+    // 从localStorage恢复上次选择的角色
+    const savedRole = localStorage.getItem('currentRole');
+    if (savedRole && currentUser.roles.includes(savedRole)) {
+        currentRole = savedRole;
+    } else {
+        // 使用默认角色（优先级最高的）
+        currentRole = getDefaultRole(currentUser.roles);
+        if (currentRole) {
+            localStorage.setItem('currentRole', currentRole);
+        }
+    }
+}
+
+// 切换角色
+function switchRole(newRole) {
+    if (!currentUser || !currentUser.roles.includes(newRole)) {
+        console.error('用户不拥有该角色:', newRole);
+        return;
+    }
+    
+    currentRole = newRole;
+    localStorage.setItem('currentRole', newRole);
+    
+    // 刷新界面
+    refreshMenu();
+    
+    // 重新加载数据
+    if (document.getElementById('mainApp').style.display !== 'none') {
+        loadDashboard();
+        loadProjects();
+        loadKPI();
+        if (hasPermission('finance.view')) {
+            loadReceivables();
+            loadPaymentRecordsProjects();
+            loadInvoiceProjects();
+        }
+    }
+}
+
+// API请求包装函数，自动添加Authorization和X-Role header
+async function apiFetch(url, options = {}) {
+    const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers
+    };
+    
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    
+    if (currentRole) {
+        headers['X-Role'] = currentRole;
+    }
+    
+    const response = await fetch(url, {
+        ...options,
+        headers
+    });
+    
+    return response;
+}
+
+// 权限判断函数
+function hasPermission(permission) {
+    if (!currentRole || !PERMISSIONS[currentRole]) {
+        return false;
+    }
+    const permValue = PERMISSIONS[currentRole][permission];
+    return permValue !== undefined && permValue !== false;
+}
+
+// 获取权限值
+function getPermission(permission) {
+    if (!currentRole || !PERMISSIONS[currentRole]) {
+        return false;
+    }
+    return PERMISSIONS[currentRole][permission] || false;
+}
+
+// 基于当前角色的判断函数
+const isFinanceRole = () => currentRole === 'admin' || currentRole === 'finance';
+const isSalesRole = () => currentRole === 'sales' || currentRole === 'part_time_sales';
 let orgInfo = {
     companyName: 'KPI绩效管理系统',
     companyAddress: '',
@@ -20,16 +253,9 @@ let orgInfo = {
 // 判断当前用户是否应该看到项目金额和单价信息
 // 翻译、审校、排版角色不应该看到金额信息
 const canViewProjectAmount = () => {
-    if (!currentUser || !currentUser.roles) return true;
-    const userRoles = currentUser.roles;
-    // 如果用户只有翻译、审校或排版角色，且没有其他管理角色，则不能查看金额
+    if (!currentRole) return true;
     const restrictedRoles = ['translator', 'reviewer', 'layout'];
-    const hasRestrictedRole = userRoles.some(r => restrictedRoles.includes(r));
-    const hasAdminRole = userRoles.includes('admin') || userRoles.includes('finance') || 
-                         userRoles.includes('pm') || userRoles.includes('sales') || 
-                         userRoles.includes('part_time_sales') || userRoles.includes('admin_staff');
-    // 如果只有受限角色，没有管理角色，则不能查看金额
-    return !hasRestrictedRole || hasAdminRole;
+    return !restrictedRoles.includes(currentRole);
 };
 let allProjectsCache = []; // 缓存项目列表
 let receivablesCache = []; // 缓存应收结果
@@ -82,13 +308,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function checkAuth() {
     try {
         console.log('[Auth] checkAuth start');
-        const response = await fetch(`${API_BASE}/auth/me`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await apiFetch(`${API_BASE}/auth/me`);
         const data = await response.json();
         console.log('[Auth] /auth/me result:', data);
         if (data.success) {
             currentUser = data.user;
+            // 初始化当前角色
+            initCurrentRole();
             if (currentUser.passwordMustChange) {
                 // 不在未登录状态直接弹窗，要求重新登录后再改密码
                 token = null;
@@ -127,6 +353,8 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
             token = data.token;
             currentUser = data.user;
             localStorage.setItem('token', token);
+            // 初始化当前角色
+            initCurrentRole();
             if (currentUser.passwordMustChange) {
                 showForcePasswordChangeModal(false, password);
             } else {
@@ -234,6 +462,91 @@ function showLogin() {
     document.getElementById('mainApp').style.display = 'none';
 }
 
+// 初始化角色切换器
+function initRoleSwitcher() {
+    const roleSwitcherContainer = document.getElementById('roleSwitcherContainer');
+    if (!roleSwitcherContainer) return;
+    
+    // 初始化当前角色
+    initCurrentRole();
+    
+    // 如果用户只有一个角色，不显示切换器
+    if (!currentUser || !currentUser.roles || currentUser.roles.length <= 1) {
+        roleSwitcherContainer.style.display = 'none';
+        return;
+    }
+    
+    roleSwitcherContainer.style.display = 'inline-block';
+    
+    // 创建角色选择下拉框
+    const select = document.createElement('select');
+    select.id = 'roleSwitcher';
+    select.style.cssText = 'padding: 4px 8px; margin-left: 10px; border: 1px solid #ddd; border-radius: 4px;';
+    select.onchange = (e) => {
+        switchRole(e.target.value);
+    };
+    
+    // 添加选项
+    currentUser.roles.forEach(role => {
+        const option = document.createElement('option');
+        option.value = role;
+        option.textContent = roleNames[role] || role;
+        if (role === currentRole) {
+            option.selected = true;
+        }
+        select.appendChild(option);
+    });
+    
+    // 清空容器并添加新元素
+    roleSwitcherContainer.innerHTML = '';
+    const label = document.createElement('span');
+    label.textContent = '当前角色: ';
+    label.style.marginRight = '5px';
+    roleSwitcherContainer.appendChild(label);
+    roleSwitcherContainer.appendChild(select);
+}
+
+// 刷新菜单显示（基于当前角色）
+function refreshMenu() {
+    if (!currentRole) return;
+    
+    // 显示/隐藏菜单项
+    const configBtn = document.getElementById('configBtn');
+    const usersBtn = document.getElementById('usersBtn');
+    const languagesBtn = document.getElementById('languagesBtn');
+    const financeBtn = document.getElementById('financeBtn');
+    const customersBtn = document.getElementById('customersBtn');
+    const createProjectBtn = document.getElementById('createProjectBtn');
+    const createLanguageBtn = document.getElementById('createLanguageBtn');
+    const kpiUserSelect = document.getElementById('kpiUserSelect');
+    const exportKpiBtn = document.getElementById('exportKpiBtn');
+    const generateKpiBtn = document.getElementById('generateKpiBtn');
+    
+    // 系统配置
+    if (configBtn) configBtn.style.display = hasPermission('system.config') ? 'inline-block' : 'none';
+    
+    // 用户管理
+    if (usersBtn) usersBtn.style.display = hasPermission('user.manage') ? 'inline-block' : 'none';
+    
+    // 语种管理
+    if (languagesBtn) languagesBtn.style.display = hasPermission('system.config') ? 'inline-block' : 'none';
+    if (createLanguageBtn) createLanguageBtn.style.display = hasPermission('system.config') ? 'inline-block' : 'none';
+    
+    // 财务管理
+    if (financeBtn) financeBtn.style.display = hasPermission('finance.view') ? 'inline-block' : 'none';
+    
+    // 客户管理
+    if (customersBtn) customersBtn.style.display = hasPermission('customer.view') ? 'inline-block' : 'none';
+    
+    // 创建项目
+    if (createProjectBtn) createProjectBtn.style.display = hasPermission('project.create') ? 'inline-block' : 'none';
+    
+    // KPI相关
+    if (kpiUserSelect) kpiUserSelect.style.display = getPermission('kpi.view') === 'all' ? 'block' : 'none';
+    if (exportKpiBtn) exportKpiBtn.style.display = getPermission('kpi.view') === 'all' ? 'inline-block' : 'none';
+    if (generateKpiBtn) generateKpiBtn.style.display = getPermission('kpi.view') === 'all' ? 'inline-block' : 'none';
+}
+
 // 显示主应用
 function showMainApp() {
     console.log('[UI] showMainApp user:', currentUser?.username, 'roles:', currentUser?.roles);
@@ -241,50 +554,39 @@ function showMainApp() {
     document.getElementById('mainApp').style.display = 'block';
     document.getElementById('userName').textContent = currentUser.name;
 
-    // 根据角色显示菜单
-    const isAdmin = currentUser.roles.includes('admin');
-    const isFinance = currentUser.roles.includes('finance');
-    const isSales = currentUser.roles.includes('sales');
-    const isPartTimeSales = currentUser.roles.includes('part_time_sales');
+    // 初始化角色切换器
+    initRoleSwitcher();
+    
+    // 刷新菜单显示
+    refreshMenu();
 
-    if (isAdmin) {
-        document.getElementById('configBtn').style.display = 'inline-block';
-        document.getElementById('usersBtn').style.display = 'inline-block';
-        document.getElementById('languagesBtn').style.display = 'inline-block';
-        document.getElementById('createLanguageBtn').style.display = 'inline-block';
-    }
-    if (isAdmin || isFinance) {
-        document.getElementById('financeBtn').style.display = 'inline-block';
-    }
+    // 根据当前角色加载数据
+    const isAdmin = hasPermission('system.config');
+    const isFinance = hasPermission('finance.view');
+    const canCreateProject = hasPermission('project.create');
+    const canViewCustomers = hasPermission('customer.view');
 
-    if (isSales || isPartTimeSales || isAdmin) {
-        document.getElementById('createProjectBtn').style.display = 'inline-block';
-        document.getElementById('customersBtn').style.display = 'inline-block';
-    }
-
-    if (isAdmin || isFinance) {
-        document.getElementById('kpiUserSelect').style.display = 'block';
-        document.getElementById('exportKpiBtn').style.display = 'inline-block';
-        document.getElementById('generateKpiBtn').style.display = 'inline-block';
-        loadUsersForSelect();
-    }
-
-    // 先加载用户列表（用于下拉选择）
-    if (isAdmin || isFinance) {
-        loadUsersForSelect();
-    }
+    // 加载数据
     if (isAdmin) {
         loadUsers();
         loadConfig();
     }
-    // 销售和兼职销售也需要加载用户列表（用于创建项目时选择成员）
-    if (isSales || isPartTimeSales) {
+    
+    // 加载用户列表（用于下拉选择）
+    if (isAdmin || isFinance) {
+        loadUsersForSelect();
+    }
+    
+    // 创建项目时需要加载用户列表（用于选择成员）
+    if (canCreateProject) {
         loadUsersForProjectMembers();
     }
-    // 加载客户列表（销售、兼职销售和管理员需要）
-    if (isSales || isPartTimeSales || isAdmin) {
+    
+    // 加载客户列表
+    if (canViewCustomers || isAdmin || isFinance) {
         loadCustomers();
     }
+    
     // 财务筛选下拉需要客户/销售
     if (isAdmin || isFinance) {
         loadCustomers().then(() => fillFinanceFilters());
@@ -298,7 +600,7 @@ function showMainApp() {
     loadDashboard();
     loadProjects();
     loadKPI();
-    if (isAdmin || isFinance) {
+    if (isFinance) {
         // 不自动设置月份，让用户自己选择
         loadReceivables();
         loadPaymentRecordsProjects(); // 加载回款记录项目列表
@@ -306,7 +608,9 @@ function showMainApp() {
         loadPendingKpi();
         loadFinanceSummary();
     }
-    if (isAdmin || isSales || isPartTimeSales || currentUser.roles.includes('pm')) {
+    
+    // 加载语种（需要创建项目或管理的角色）
+    if (canCreateProject || isAdmin || hasPermission('system.config')) {
         loadLanguages(true);
     }
 }
@@ -662,9 +966,7 @@ function closeModal() {
 // ==================== 用户管理 ====================
 async function loadUsers() {
     try {
-        const response = await fetch(`${API_BASE}/users`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await apiFetch(`${API_BASE}/users`);
         const data = await response.json();
 
         if (data.success) {
@@ -708,9 +1010,7 @@ async function loadUsers() {
 
 async function loadUsersForSelect() {
     try {
-        const response = await fetch(`${API_BASE}/users`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await apiFetch(`${API_BASE}/users`);
         const data = await response.json();
         if (data.success) {
             // 保存到全局变量，供其他功能使用
@@ -731,9 +1031,7 @@ async function loadUsersForSelect() {
 // 为项目成员选择加载用户列表
 async function loadUsersForProjectMembers() {
     try {
-        const response = await fetch(`${API_BASE}/users`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await apiFetch(`${API_BASE}/users`);
         const data = await response.json();
         if (data.success) {
             allUsers = data.data;
@@ -908,9 +1206,8 @@ async function deleteUser(userId) {
     if (!confirm('确定要删除此用户吗？')) return;
 
     try {
-        const response = await fetch(`${API_BASE}/users/${userId}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
+        const response = await apiFetch(`${API_BASE}/users/${userId}`, {
+            method: 'DELETE'
         });
         const result = await response.json();
         
@@ -928,9 +1225,7 @@ async function deleteUser(userId) {
 // ==================== 客户管理 ====================
 async function loadCustomers() {
     try {
-        const response = await fetch(`${API_BASE}/customers`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await apiFetch(`${API_BASE}/customers`);
         const data = await response.json();
 
         if (data.success) {
@@ -1176,9 +1471,8 @@ async function deleteCustomer(customerId) {
     if (!confirm('确定要删除此客户吗？')) return;
 
     try {
-        const response = await fetch(`${API_BASE}/customers/${customerId}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
+        const response = await apiFetch(`${API_BASE}/customers/${customerId}`, {
+            method: 'DELETE'
         });
         const result = await response.json();
         
@@ -1196,9 +1490,7 @@ async function deleteCustomer(customerId) {
 // ==================== 项目管理 ====================
 async function loadProjects() {
     try {
-        const response = await fetch(`${API_BASE}/projects`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await apiFetch(`${API_BASE}/projects`);
         const data = await response.json();
 
         if (data.success) {
@@ -2505,12 +2797,8 @@ async function createProject(e) {
     };
 
     try {
-        const response = await fetch(`${API_BASE}/projects/create`, {
+        const response = await apiFetch(`${API_BASE}/projects/create`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify(data)
         });
         const result = await response.json();
@@ -2529,9 +2817,7 @@ async function createProject(e) {
 
 async function viewProject(projectId) {
     try {
-        const response = await fetch(`${API_BASE}/projects/${projectId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await apiFetch(`${API_BASE}/projects/${projectId}`);
         const data = await response.json();
 
         if (data.success) {
@@ -3112,9 +3398,8 @@ async function deleteMember(projectId, memberId) {
     if (!confirm('确定要删除此成员吗？')) return;
 
     try {
-        const response = await fetch(`${API_BASE}/projects/${projectId}/member/${memberId}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
+        const response = await apiFetch(`${API_BASE}/projects/${projectId}/member/${memberId}`, {
+            method: 'DELETE'
         });
         const result = await response.json();
         
@@ -3139,12 +3424,8 @@ async function setRevision(projectId, currentCount) {
     if (count === null) return;
 
     try {
-        const response = await fetch(`${API_BASE}/projects/${projectId}/set-revision`, {
+        const response = await apiFetch(`${API_BASE}/projects/${projectId}/set-revision`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
             body: JSON.stringify({ count: parseInt(count) })
         });
         const result = await response.json();
@@ -3167,9 +3448,8 @@ async function setDelay(projectId) {
     if (!confirm('确定要标记为延期吗？')) return;
 
     try {
-        const response = await fetch(`${API_BASE}/projects/${projectId}/set-delay`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
+        const response = await apiFetch(`${API_BASE}/projects/${projectId}/set-delay`, {
+            method: 'POST'
         });
         const result = await response.json();
         
@@ -3191,9 +3471,8 @@ async function setComplaint(projectId) {
     if (!confirm('确定要标记为客户投诉吗？')) return;
 
     try {
-        const response = await fetch(`${API_BASE}/projects/${projectId}/set-complaint`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
+        const response = await apiFetch(`${API_BASE}/projects/${projectId}/set-complaint`, {
+            method: 'POST'
         });
         const result = await response.json();
         
@@ -3215,9 +3494,8 @@ async function finishProject(projectId) {
     if (!confirm('确定要完成此项目吗？完成后将无法修改。')) return;
 
     try {
-        const response = await fetch(`${API_BASE}/projects/${projectId}/finish`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
+        const response = await apiFetch(`${API_BASE}/projects/${projectId}/finish`, {
+            method: 'POST'
         });
         const result = await response.json();
         
@@ -3558,9 +3836,7 @@ async function deleteProject(projectId) {
 async function showPaymentModal(projectId) {
     try {
         // 读取最新项目数据以填充默认值
-        const response = await fetch(`${API_BASE}/projects/${projectId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await apiFetch(`${API_BASE}/projects/${projectId}`);
         const data = await response.json();
         if (!data.success) {
             alert(data.message || '加载项目失败');

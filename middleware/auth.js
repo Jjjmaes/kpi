@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { PERMISSIONS, getPermission, getDefaultRole } = require('../config/permissions');
 
 // JWT验证中间件
 const authenticate = async (req, res, next) => {
@@ -24,6 +25,25 @@ const authenticate = async (req, res, next) => {
     }
 
     req.user = user;
+    
+    // 从 X-Role header 读取当前角色
+    const requestedRole = req.headers['x-role'];
+    const userRoles = user.roles || [];
+    
+    if (requestedRole) {
+      // 验证用户确实拥有请求的角色
+      if (!userRoles.includes(requestedRole)) {
+        return res.status(403).json({ 
+          success: false, 
+          message: '您不拥有该角色' 
+        });
+      }
+      req.currentRole = requestedRole;
+    } else {
+      // 如果没有提供 X-Role，使用默认角色（向后兼容）
+      req.currentRole = getDefaultRole(userRoles) || (userRoles.length > 0 ? userRoles[0] : null);
+    }
+    
     next();
   } catch (error) {
     return res.status(401).json({ 
@@ -43,6 +63,14 @@ const authorize = (...roles) => {
       });
     }
 
+    // 如果指定了当前角色，检查当前角色是否在允许的角色列表中
+    if (req.currentRole) {
+      if (roles.includes(req.currentRole)) {
+        return next();
+      }
+    }
+    
+    // 向后兼容：检查用户是否拥有任一允许的角色
     const userRoles = req.user.roles || [];
     const hasRole = roles.some(role => userRoles.includes(role));
 
@@ -57,7 +85,42 @@ const authorize = (...roles) => {
   };
 };
 
-module.exports = { authenticate, authorize };
+// 基于权限表的权限检查中间件
+const requirePermission = (permission) => {
+  return (req, res, next) => {
+    if (!req.user || !req.currentRole) {
+      return res.status(401).json({ 
+        success: false, 
+        message: '未认证' 
+      });
+    }
+
+    const permValue = getPermission(req.currentRole, permission);
+    if (!permValue || permValue === false) {
+      return res.status(403).json({ 
+        success: false, 
+        message: '权限不足' 
+      });
+    }
+
+    next();
+  };
+};
+
+// 获取当前角色的权限值（用于路由中）
+const getCurrentPermission = (req, permission) => {
+  if (!req.currentRole) {
+    return false;
+  }
+  return getPermission(req.currentRole, permission);
+};
+
+module.exports = { 
+  authenticate, 
+  authorize, 
+  requirePermission, 
+  getCurrentPermission 
+};
 
 
 

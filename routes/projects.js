@@ -1,13 +1,19 @@
 const express = require('express');
 const router = express.Router();
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, getCurrentPermission } = require('../middleware/auth');
 const Project = require('../models/Project');
 const ProjectMember = require('../models/ProjectMember');
 const KpiConfig = require('../models/KpiConfig');
 const Customer = require('../models/Customer');
 
 // 判断是否为仅交付角色（翻译/审校/排版），无查看客户信息权限
-function isDeliveryOnlyUser(user) {
+function isDeliveryOnlyUser(user, currentRole) {
+  if (currentRole) {
+    // 基于当前角色判断
+    const restricted = ['translator', 'reviewer', 'layout'];
+    return restricted.includes(currentRole);
+  }
+  // 向后兼容：基于所有角色判断
   const roles = user?.roles || [];
   const restricted = ['translator', 'reviewer', 'layout'];
   const privileged = ['admin', 'finance', 'pm', 'sales', 'part_time_sales', 'admin_staff'];
@@ -455,24 +461,45 @@ router.get('/', async (req, res) => {
   try {
     let query = {};
     
-    // 非管理员和财务只能看到自己参与的项目或自己创建的项目
-    if (!req.user.roles.includes('admin') && !req.user.roles.includes('finance')) {
-      // 获取作为成员参与的项目
+    // 基于当前角色的权限进行数据过滤
+    const viewPermission = getCurrentPermission(req, 'project.view');
+    
+    if (viewPermission === 'all') {
+      // 查看所有项目：管理员、财务、PM、综合岗
+      // 不需要额外过滤
+    } else if (viewPermission === 'sales') {
+      // 只看自己创建的项目：销售、兼职销售
+      query.createdBy = req.user._id;
+    } else if (viewPermission === 'assigned') {
+      // 只看分配给我的项目：翻译、审校、排版
       const memberProjects = await ProjectMember.find({ userId: req.user._id })
         .distinct('projectId');
       
-      // 获取自己创建的项目
-      const createdProjects = await Project.find({ createdBy: req.user._id })
-        .distinct('_id');
-      
-      // 合并两个列表
-      const allProjectIds = [...new Set([...memberProjects.map(id => id.toString()), ...createdProjects.map(id => id.toString())])];
-      
-      if (allProjectIds.length > 0) {
-        query._id = { $in: allProjectIds };
+      if (memberProjects.length > 0) {
+        query._id = { $in: memberProjects };
       } else {
-        // 如果没有参与任何项目，返回空结果
+        // 如果没有分配的项目，返回空结果
         query._id = { $in: [] };
+      }
+    } else {
+      // 向后兼容：如果没有提供 X-Role，使用旧逻辑
+      if (!req.user.roles.includes('admin') && !req.user.roles.includes('finance')) {
+        // 获取作为成员参与的项目
+        const memberProjects = await ProjectMember.find({ userId: req.user._id })
+          .distinct('projectId');
+        
+        // 获取自己创建的项目
+        const createdProjects = await Project.find({ createdBy: req.user._id })
+          .distinct('_id');
+        
+        // 合并两个列表
+        const allProjectIds = [...new Set([...memberProjects.map(id => id.toString()), ...createdProjects.map(id => id.toString())])];
+        
+        if (allProjectIds.length > 0) {
+          query._id = { $in: allProjectIds };
+        } else {
+          query._id = { $in: [] };
+        }
       }
     }
 
@@ -481,7 +508,8 @@ router.get('/', async (req, res) => {
       .populate('customerId', 'name shortName contactPerson phone email')
       .sort({ createdAt: -1 });
 
-    const isDeliveryOnly = isDeliveryOnlyUser(req.user);
+    // 基于当前角色判断是否需要脱敏客户信息
+    const isDeliveryOnly = isDeliveryOnlyUser(req.user, req.currentRole);
     const data = isDeliveryOnly ? projects.map(scrubCustomerInfo) : projects;
 
     res.json({
@@ -532,7 +560,7 @@ router.get('/:id', async (req, res) => {
     const members = await ProjectMember.find({ projectId: project._id })
       .populate('userId', 'name username email roles');
 
-    const isDeliveryOnly = isDeliveryOnlyUser(req.user);
+    const isDeliveryOnly = isDeliveryOnlyUser(req.user, req.currentRole);
     const projectData = isDeliveryOnly ? scrubCustomerInfo(project) : project.toObject();
 
     res.json({
