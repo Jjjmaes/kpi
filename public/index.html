@@ -48,6 +48,7 @@
                 <button onclick="showSection('config')" id="configBtn" style="display:none;">KPI配置</button>
                 <button onclick="showSection('users')" id="usersBtn" style="display:none;">用户管理</button>
                 <button onclick="showSection('languages')" id="languagesBtn" style="display:none;">语种管理</button>
+                <button onclick="showSection('permissions')" id="permissionsBtn" style="display:none;">权限配置</button>
             </nav>
 
             <!-- 业务看板 -->
@@ -416,6 +417,13 @@
                     <button onclick="loadConfigHistory()">查看变更历史</button>
                     <div id="configHistory" style="margin-top: 20px;"></div>
                 </div>
+            </div>
+
+            <!-- 权限配置 -->
+            <div id="permissions" class="section">
+                <h2>角色权限配置</h2>
+                <div id="permissionsAlert"></div>
+                <div id="permissionsConfig" style="margin-top: 20px;"></div>
             </div>
 
             <!-- 客户管理 -->

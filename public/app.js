@@ -613,6 +613,11 @@ function showMainApp() {
 
 // 切换section
 function showSection(sectionId, triggerBtn) {
+    // 如果是权限配置section，加载权限配置
+    if (sectionId === 'permissions') {
+        loadPermissionsConfig();
+    }
+    
     if (sectionId === 'finance') {
         if (isFinanceRole()) {
             // 财务或管理员完整访问
@@ -6773,4 +6778,107 @@ function exportReconciliation() {
         console.error('导出对账表失败:', error);
         showToast('导出失败: ' + error.message, 'error');
     });
+}
+
+// ==================== 权限配置 ====================
+async function loadPermissionsConfig() {
+    try {
+        // 从后端获取权限配置（实际上权限配置是硬编码在config/permissions.js中的）
+        // 这里我们直接使用前端的PERMISSIONS对象
+        const roles = Object.keys(PERMISSIONS);
+        const permissionKeys = [
+            'project.view', 'project.edit', 'project.create', 'project.delete', 'project.member.manage',
+            'kpi.view', 'kpi.view.self', 'kpi.config',
+            'finance.view', 'finance.edit',
+            'customer.view', 'customer.edit',
+            'user.manage', 'system.config'
+        ];
+        
+        const permissionLabels = {
+            'project.view': '查看项目',
+            'project.edit': '编辑项目',
+            'project.create': '创建项目',
+            'project.delete': '删除项目',
+            'project.member.manage': '管理项目成员',
+            'kpi.view': '查看KPI',
+            'kpi.view.self': '查看自己的KPI',
+            'kpi.config': 'KPI配置',
+            'finance.view': '查看财务',
+            'finance.edit': '编辑财务',
+            'customer.view': '查看客户',
+            'customer.edit': '编辑客户',
+            'user.manage': '用户管理',
+            'system.config': '系统配置'
+        };
+        
+        let html = `
+            <div style="background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <p style="color: #666; margin-bottom: 20px;">
+                    注意：权限配置目前为只读模式。如需修改权限，请联系系统管理员修改配置文件。
+                </p>
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                        <thead>
+                            <tr style="background: #f5f5f5;">
+                                <th style="padding: 12px; text-align: left; border: 1px solid #ddd; min-width: 120px;">权限</th>
+                                ${roles.map(role => `
+                                    <th style="padding: 12px; text-align: center; border: 1px solid #ddd; min-width: 100px;">
+                                        ${roleNames[role] || role}
+                                    </th>
+                                `).join('')}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${permissionKeys.map(permKey => `
+                                <tr>
+                                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: 500;">
+                                        ${permissionLabels[permKey] || permKey}
+                                    </td>
+                                    ${roles.map(role => {
+                                        const permValue = PERMISSIONS[role]?.[permKey];
+                                        let displayValue = '';
+                                        let bgColor = '#fff';
+                                        
+                                        if (permValue === true) {
+                                            displayValue = '✅ 是';
+                                            bgColor = '#e8f5e9';
+                                        } else if (permValue === false) {
+                                            displayValue = '❌ 否';
+                                            bgColor = '#ffebee';
+                                        } else if (permValue === 'all') {
+                                            displayValue = '全部';
+                                            bgColor = '#e3f2fd';
+                                        } else if (permValue === 'sales') {
+                                            displayValue = '自己的';
+                                            bgColor = '#fff3e0';
+                                        } else if (permValue === 'assigned') {
+                                            displayValue = '分配的';
+                                            bgColor = '#f3e5f5';
+                                        } else if (permValue === 'self') {
+                                            displayValue = '自己的';
+                                            bgColor = '#fff3e0';
+                                        } else {
+                                            displayValue = '❌ 否';
+                                            bgColor = '#ffebee';
+                                        }
+                                        
+                                        return `
+                                            <td style="padding: 12px; text-align: center; border: 1px solid #ddd; background: ${bgColor};">
+                                                ${displayValue}
+                                            </td>
+                                        `;
+                                    }).join('')}
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        
+        document.getElementById('permissionsConfig').innerHTML = html;
+    } catch (error) {
+        console.error('加载权限配置失败:', error);
+        showAlert('permissionsAlert', '加载权限配置失败: ' + error.message, 'error');
+    }
 }

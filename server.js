@@ -23,6 +23,7 @@ const financeRoutes = require('./routes/finance');
 const languagePairRoutes = require('./routes/languagePairs');
 const languageRoutes = require('./routes/languages');
 const customerRoutes = require('./routes/customers');
+const auditRoutes = require('./routes/audit');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -33,6 +34,7 @@ app.use('/api/finance', financeRoutes);
 app.use('/api/language-pairs', languagePairRoutes);
 app.use('/api/languages', languageRoutes);
 app.use('/api/customers', customerRoutes);
+app.use('/api/audit', auditRoutes);
 
 // 健康检查
 app.get('/health', (req, res) => {

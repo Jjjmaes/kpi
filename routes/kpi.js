@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, getCurrentPermission } = require('../middleware/auth');
 const KpiRecord = require('../models/KpiRecord');
 const Project = require('../models/Project');
 const ProjectMember = require('../models/ProjectMember');
@@ -24,15 +24,31 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
     const startDate = new Date(target.getFullYear(), target.getMonth(), 1);
     const endDate = new Date(target.getFullYear(), target.getMonth() + 1, 0, 23, 59, 59);
 
-    const isAdmin = req.user.roles.includes('admin');
-    const isFinance = req.user.roles.includes('finance');
-    const isSales = req.user.roles.includes('sales') || req.user.roles.includes('part_time_sales');
+    // 使用当前角色进行权限判断
+    const currentRole = req.currentRole;
+    const kpiViewPerm = getCurrentPermission(req, 'kpi.view');
+    const projectViewPerm = getCurrentPermission(req, 'project.view');
+    const financeViewPerm = getCurrentPermission(req, 'finance.view');
+    
+    const isAdmin = currentRole === 'admin';
+    const isFinance = currentRole === 'finance';
+    const isSales = currentRole === 'sales' || currentRole === 'part_time_sales';
     // 管理员、财务、销售和兼职销售可以查看项目金额（成交额）
     const canViewAmount = isAdmin || isFinance || isSales;
 
-    // 项目可见性
+    // 项目可见性 - 基于当前角色的权限
     let projectQuery = {};
-    if (!isAdmin && !isFinance) {
+    if (projectViewPerm === 'all') {
+      // 可以查看所有项目，不需要过滤
+    } else if (projectViewPerm === 'sales') {
+      // 只看自己创建的项目
+      projectQuery.createdBy = req.user._id;
+    } else if (projectViewPerm === 'assigned') {
+      // 只看分配给我的项目
+      const memberProjects = await ProjectMember.find({ userId: req.user._id }).distinct('projectId');
+      projectQuery._id = memberProjects.length > 0 ? { $in: memberProjects } : { $in: [] };
+    } else {
+      // 默认：只看自己创建或分配的项目
       const memberProjects = await ProjectMember.find({ userId: req.user._id }).distinct('projectId');
       const createdProjects = await Project.find({ createdBy: req.user._id }).distinct('_id');
       const allIds = [...new Set([...memberProjects.map(String), ...createdProjects.map(String)])];
@@ -75,9 +91,17 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
       return acc;
     }, {});
 
-    // KPI 汇总
+    // KPI 汇总 - 基于当前角色的权限
     const kpiQuery = { month: monthStr };
-    if (!isAdmin && !isFinance) kpiQuery.userId = req.user._id;
+    if (kpiViewPerm === 'all') {
+      // 可以查看所有KPI，不需要过滤用户
+    } else if (kpiViewPerm === 'self') {
+      // 只看自己的KPI
+      kpiQuery.userId = req.user._id;
+    } else {
+      // 默认：只看自己的KPI
+      kpiQuery.userId = req.user._id;
+    }
     if (role) kpiQuery.role = role;
 
     const kpiRecords = await KpiRecord.find(kpiQuery);
@@ -136,7 +160,12 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
     } else {
       // 其他角色：计算KPI趋势
       const trendQuery = { month: { $in: trendMonths } };
-      if (!isAdmin && !isFinance) trendQuery.userId = req.user._id;
+      if (kpiViewPerm === 'all') {
+        // 可以查看所有KPI，不需要过滤用户
+      } else {
+        // 只看自己的KPI
+        trendQuery.userId = req.user._id;
+      }
       const trendRecords = await KpiRecord.find(trendQuery);
       kpiTrend = trendMonths.map(m => ({
         month: m,
@@ -367,9 +396,10 @@ router.get('/user/:userId', async (req, res) => {
     if (month) query.month = month;
     if (role) query.role = role;
 
-    // 根据角色决定是否返回项目金额信息
+    // 根据当前角色决定是否返回项目金额信息
     // 财务和管理员可以看到金额，其他角色（PM、翻译、审校）不能看到
-    const canViewAmount = req.user.roles.includes('admin') || req.user.roles.includes('finance');
+    const currentRole = req.currentRole;
+    const canViewAmount = currentRole === 'admin' || currentRole === 'finance';
     
     const records = await KpiRecord.find(query)
       .populate('projectId', 'projectName clientName projectAmount')

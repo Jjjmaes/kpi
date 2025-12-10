@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, getCurrentPermission } = require('../middleware/auth');
 const Project = require('../models/Project');
 const ProjectMember = require('../models/ProjectMember');
 const PaymentRecord = require('../models/PaymentRecord');
@@ -20,18 +20,27 @@ router.get('/receivables', allowViewFinance, async (req, res) => {
   try {
     const { customerId, status, dueBefore, salesId, paymentStatus, hasInvoice, expectedStartDate, expectedEndDate } = req.query;
     
-    const roles = req.user.roles || [];
-    const isAdmin = roles.includes('admin');
-    const isFinance = roles.includes('finance');
+    // 基于当前角色进行权限判断
+    const currentRole = req.currentRole;
+    const financeViewPerm = getCurrentPermission(req, 'finance.view');
+    const isAdmin = currentRole === 'admin';
+    const isFinance = currentRole === 'finance';
     const isAdminOrFinance = isAdmin || isFinance;
     
     // 收集所有基础条件
     const baseConditions = {};
     if (customerId) baseConditions.customerId = customerId;
-    // 财务/管理员可按销售筛选；销售本人仅看自己创建的项目
-    if (salesId && isAdminOrFinance) baseConditions.createdBy = salesId;
-    if (!isAdminOrFinance) {
+    
+    // 根据财务查看权限过滤项目
+    if (financeViewPerm === true || financeViewPerm === 'all') {
+      // 可以查看所有财务数据，财务/管理员可按销售筛选
+      if (salesId && isAdminOrFinance) baseConditions.createdBy = salesId;
+    } else if (financeViewPerm === 'sales') {
+      // 只能查看自己创建的项目
       baseConditions.createdBy = req.user._id;
+    } else {
+      // 无权限，返回空结果
+      baseConditions._id = { $in: [] };
     }
     if (status) {
       baseConditions.status = status;
