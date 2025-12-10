@@ -66,7 +66,8 @@ const PERMISSIONS = {
     'kpi.view': 'self',                 // 只看自己的KPI
     'kpi.view.self': true,
     'kpi.config': false,
-    'finance.view': 'sales',            // 只看自己项目的财务
+    // 销售不再显示财务模块入口，完全无财务权限
+    'finance.view': false,
     'finance.edit': false,
     'customer.view': true,
     'customer.edit': true,
@@ -84,7 +85,8 @@ const PERMISSIONS = {
     'kpi.view': 'self',
     'kpi.view.self': true,
     'kpi.config': false,
-    'finance.view': 'sales',
+    // 兼职销售无财务权限
+    'finance.view': false,
     'finance.edit': false,
     'customer.view': true,
     'customer.edit': false,

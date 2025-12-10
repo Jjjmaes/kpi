@@ -92,7 +92,8 @@ const PERMISSIONS = {
         'project.edit': 'sales',
         'project.create': true,
         'kpi.view': 'self',
-        'finance.view': 'sales',
+        // 销售无财务模块权限
+        'finance.view': false,
         'customer.view': true,
         'customer.edit': true,
         'user.manage': false,
@@ -103,7 +104,8 @@ const PERMISSIONS = {
         'project.edit': 'sales',
         'project.create': true,
         'kpi.view': 'self',
-        'finance.view': 'sales',
+        // 兼职销售无财务模块权限
+        'finance.view': false,
         'customer.view': true,
         'customer.edit': false,
         'user.manage': false,
