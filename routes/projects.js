@@ -376,6 +376,8 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
             terminology: specialRequirements.terminology === true || specialRequirements.terminology === 'true',
             nda: specialRequirements.nda === true || specialRequirements.nda === 'true',
             referenceFiles: specialRequirements.referenceFiles === true || specialRequirements.referenceFiles === 'true',
+            pureTranslationDelivery: specialRequirements.pureTranslationDelivery === true || specialRequirements.pureTranslationDelivery === 'true',
+            bilingualDelivery: specialRequirements.bilingualDelivery === true || specialRequirements.bilingualDelivery === 'true',
             notes: typeof specialRequirements.notes === 'string' ? specialRequirements.notes.trim().substring(0, 500) : undefined
           }
         : {},
@@ -537,6 +539,19 @@ router.put('/:id', authorize('admin', 'pm', 'sales'), async (req, res) => {
         project[field] = req.body[field];
       }
     });
+
+  // 规范化特殊要求，防止覆盖或写入无效字段
+  if (req.body.specialRequirements && typeof req.body.specialRequirements === 'object') {
+    const sr = req.body.specialRequirements;
+    project.specialRequirements = {
+      terminology: sr.terminology === true || sr.terminology === 'true',
+      nda: sr.nda === true || sr.nda === 'true',
+      referenceFiles: sr.referenceFiles === true || sr.referenceFiles === 'true',
+      pureTranslationDelivery: sr.pureTranslationDelivery === true || sr.pureTranslationDelivery === 'true',
+      bilingualDelivery: sr.bilingualDelivery === true || sr.bilingualDelivery === 'true',
+      notes: typeof sr.notes === 'string' ? sr.notes.trim().substring(0, 500) : undefined
+    };
+  }
 
     // 字段修正
     if (project.businessType !== 'translation') {

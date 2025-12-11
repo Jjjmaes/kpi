@@ -37,18 +37,29 @@ app.use('/api/auth/login', authLimiter);
 // CORS配置：生产环境建议配置白名单
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-  : true; // 开发环境允许所有来源，生产环境建议配置
+  : null; // null 表示未配置，允许所有来源
 
 app.use(cors({
   origin: (origin, callback) => {
-    // 允许无origin的请求（如移动应用、Postman等）
+    // 允许无origin的请求（如移动应用、Postman、同源请求等）
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins === true || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('不允许的来源'));
+    // 如果未配置白名单（ALLOWED_ORIGINS环境变量），允许所有来源
+    if (!allowedOrigins) {
+      return callback(null, true);
     }
+    
+    // 检查是否在白名单中
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // 记录被拒绝的请求以便调试
+    console.warn(`⚠️  CORS拒绝请求: ${origin}`);
+    console.warn(`   允许的来源: ${allowedOrigins.join(', ')}`);
+    console.warn(`   提示: 如果这是合法请求，请在 .env 文件中添加: ALLOWED_ORIGINS=${origin}`);
+    
+    callback(new Error(`不允许的来源: ${origin}。请在服务器 .env 文件中配置 ALLOWED_ORIGINS 环境变量，添加允许的域名/IP，例如: ALLOWED_ORIGINS=http://${origin.replace(/^https?:\/\//, '')},https://${origin.replace(/^https?:\/\//, '')}`));
   },
   credentials: true,
   optionsSuccessStatus: 200

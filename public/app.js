@@ -2219,6 +2219,14 @@ async function showCreateProjectModal() {
                         <input type="checkbox" name="specialRequirements.referenceFiles">
                         参考文件
                     </label>
+                    <label style="display: flex; align-items: center; gap: 5px; font-weight: normal;">
+                        <input type="checkbox" name="specialRequirements.pureTranslationDelivery">
+                        纯译文交付
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 5px; font-weight: normal;">
+                        <input type="checkbox" name="specialRequirements.bilingualDelivery">
+                        对照版交付
+                    </label>
                 </div>
                 <textarea name="specialRequirements.notes" rows="2" placeholder="其他特殊要求备注" style="margin-top: 10px;"></textarea>
             </div>
@@ -2945,6 +2953,8 @@ async function exportQuotationPreview() {
             terminology: formData.get('specialRequirements.terminology') === 'on',
             nda: formData.get('specialRequirements.nda') === 'on',
             referenceFiles: formData.get('specialRequirements.referenceFiles') === 'on',
+            pureTranslationDelivery: formData.get('specialRequirements.pureTranslationDelivery') === 'on',
+            bilingualDelivery: formData.get('specialRequirements.bilingualDelivery') === 'on',
             notes: formData.get('specialRequirements.notes') || undefined
         };
         
@@ -3065,6 +3075,8 @@ async function createProject(e) {
         terminology: formData.get('specialRequirements.terminology') === 'on',
         nda: formData.get('specialRequirements.nda') === 'on',
         referenceFiles: formData.get('specialRequirements.referenceFiles') === 'on',
+        pureTranslationDelivery: formData.get('specialRequirements.pureTranslationDelivery') === 'on',
+        bilingualDelivery: formData.get('specialRequirements.bilingualDelivery') === 'on',
         notes: formData.get('specialRequirements.notes') || undefined
     };
     
@@ -3297,13 +3309,22 @@ async function viewProject(projectId) {
                                 </div>
                             </div>
                         ` : ''}
-                        ${project.specialRequirements && (project.specialRequirements.terminology || project.specialRequirements.nda || project.specialRequirements.referenceFiles) ? `
+                        ${project.specialRequirements && (
+                            project.specialRequirements.terminology ||
+                            project.specialRequirements.nda ||
+                            project.specialRequirements.referenceFiles ||
+                            project.specialRequirements.pureTranslationDelivery ||
+                            project.specialRequirements.bilingualDelivery ||
+                            project.specialRequirements.notes
+                        ) ? `
                             <div class="detail-row">
                                 <div class="detail-label">特殊要求:</div>
                                 <div class="detail-value">
                                     ${project.specialRequirements.terminology ? '<span class="badge badge-info">术语表</span>' : ''}
                                     ${project.specialRequirements.nda ? '<span class="badge badge-info">保密协议</span>' : ''}
                                     ${project.specialRequirements.referenceFiles ? '<span class="badge badge-info">参考文件</span>' : ''}
+                                    ${project.specialRequirements.pureTranslationDelivery ? '<span class="badge badge-info">纯译文交付</span>' : ''}
+                                    ${project.specialRequirements.bilingualDelivery ? '<span class="badge badge-info">对照版交付</span>' : ''}
                                     ${project.specialRequirements.notes ? '<br><small>' + project.specialRequirements.notes + '</small>' : ''}
                                 </div>
                             </div>
@@ -3936,8 +3957,25 @@ async function showEditProjectModal() {
                 </label>
             </div>
             <div class="form-group">
-                <label>特殊要求备注</label>
-                <textarea name="specialRequirements.notes" rows="3">${p.specialRequirements?.notes || ''}</textarea>
+                <label>特殊要求</label>
+                <div style="display:flex;gap:15px;flex-wrap:wrap;margin-top:5px;">
+                    <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+                        <input type="checkbox" name="specialRequirements.terminology" ${p.specialRequirements?.terminology ? 'checked' : ''}> 术语表
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+                        <input type="checkbox" name="specialRequirements.nda" ${p.specialRequirements?.nda ? 'checked' : ''}> 保密协议
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+                        <input type="checkbox" name="specialRequirements.referenceFiles" ${p.specialRequirements?.referenceFiles ? 'checked' : ''}> 参考文件
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+                        <input type="checkbox" name="specialRequirements.pureTranslationDelivery" ${p.specialRequirements?.pureTranslationDelivery ? 'checked' : ''}> 纯译文交付
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+                        <input type="checkbox" name="specialRequirements.bilingualDelivery" ${p.specialRequirements?.bilingualDelivery ? 'checked' : ''}> 对照版交付
+                    </label>
+                </div>
+                <textarea name="specialRequirements.notes" rows="3" style="margin-top:8px;">${p.specialRequirements?.notes || ''}</textarea>
             </div>
             
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
@@ -4119,6 +4157,11 @@ async function updateProject(e, projectId) {
         isTaxIncluded: formData.get('isTaxIncluded') === 'on',
         needInvoice: formData.get('needInvoice') === 'on',
         specialRequirements: {
+            terminology: formData.get('specialRequirements.terminology') === 'on',
+            nda: formData.get('specialRequirements.nda') === 'on',
+            referenceFiles: formData.get('specialRequirements.referenceFiles') === 'on',
+            pureTranslationDelivery: formData.get('specialRequirements.pureTranslationDelivery') === 'on',
+            bilingualDelivery: formData.get('specialRequirements.bilingualDelivery') === 'on',
             notes: formData.get('specialRequirements.notes') || undefined
         },
         partTimeSales: editPartTimeSales,

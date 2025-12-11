@@ -85,6 +85,8 @@ const projectSchema = new mongoose.Schema({
     terminology: { type: Boolean, default: false }, // 术语表
     nda: { type: Boolean, default: false }, // 保密协议
     referenceFiles: { type: Boolean, default: false }, // 参考文件
+    pureTranslationDelivery: { type: Boolean, default: false }, // 纯译文交付
+    bilingualDelivery: { type: Boolean, default: false }, // 对照版交付
     notes: String // 其他备注
   },
   // 交付时间
