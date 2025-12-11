@@ -744,7 +744,7 @@ function showMainApp() {
         loadUsers();
         loadConfig();
     }
-    
+
     // 加载用户列表（用于下拉选择）
     if (isAdmin || isFinance) {
         loadUsersForSelect();

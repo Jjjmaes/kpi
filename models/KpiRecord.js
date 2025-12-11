@@ -57,10 +57,12 @@ const kpiRecordSchema = new mongoose.Schema({
   }
 });
 
-// 复合索引：用户+月份+角色
-kpiRecordSchema.index({ userId: 1, month: 1, role: 1 });
+// 复合唯一索引：确保同一用户在同一项目的同一月份同一角色只有一条记录（幂等性）
+kpiRecordSchema.index({ userId: 1, projectId: 1, month: 1, role: 1 }, { unique: true });
 // 月份索引
 kpiRecordSchema.index({ month: 1 });
+// 项目索引（用于查询项目相关KPI）
+kpiRecordSchema.index({ projectId: 1 });
 
 module.exports = mongoose.model('KpiRecord', kpiRecordSchema);
 

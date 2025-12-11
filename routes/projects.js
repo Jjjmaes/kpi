@@ -109,6 +109,9 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
       partTimeLayout // { isPartTime, layoutCost, layoutAssignedTo }
     } = req.body;
 
+    // ========== 输入校验 ==========
+    
+    // 1. 必填字段校验
     if (!projectName || !customerId || !deadline || !sourceLanguage || !targetLanguages || targetLanguages.length === 0) {
       return res.status(400).json({ 
         success: false, 
@@ -116,13 +119,108 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
       });
     }
 
-    // 验证客户是否存在
-    const customer = await Customer.findById(customerId);
-    if (!customer || !customer.isActive) {
+    // 2. 项目名称长度限制
+    if (projectName.trim().length < 2 || projectName.trim().length > 200) {
       return res.status(400).json({
         success: false,
-        message: '客户不存在或已被禁用'
+        message: '项目名称长度应在2-200个字符之间'
       });
+    }
+
+    // 3. 目标语言列表长度限制
+    if (!Array.isArray(targetLanguages)) {
+      return res.status(400).json({
+        success: false,
+        message: '目标语言必须是数组格式'
+      });
+    }
+    if (targetLanguages.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: '至少需要指定一个目标语言'
+      });
+    }
+    if (targetLanguages.length > 20) {
+      return res.status(400).json({
+        success: false,
+        message: '目标语言数量不能超过20个'
+      });
+    }
+    // 去重并验证每个语言项
+    const uniqueTargetLanguages = [...new Set(targetLanguages.map(lang => String(lang).trim()).filter(lang => lang))];
+    if (uniqueTargetLanguages.length !== targetLanguages.length) {
+      return res.status(400).json({
+        success: false,
+        message: '目标语言列表中存在重复项'
+      });
+    }
+
+    // 4. 成员数组校验
+    if (members && !Array.isArray(members)) {
+      return res.status(400).json({
+        success: false,
+        message: '成员信息必须是数组格式'
+      });
+    }
+    if (members && members.length > 50) {
+      return res.status(400).json({
+        success: false,
+        message: '项目成员数量不能超过50个'
+      });
+    }
+    // 验证成员数据结构
+    if (members && members.length > 0) {
+      for (const member of members) {
+        if (!member.userId || !member.role) {
+          return res.status(400).json({
+            success: false,
+            message: '每个成员必须包含userId和role字段'
+          });
+        }
+        // 验证角色枚举值
+        const validRoles = ['translator', 'reviewer', 'pm', 'sales', 'admin_staff', 'part_time_sales', 'layout'];
+        if (!validRoles.includes(member.role)) {
+          return res.status(400).json({
+            success: false,
+            message: `无效的角色: ${member.role}`
+          });
+        }
+        // 验证wordRatio范围（如果提供）
+        if (member.wordRatio !== undefined) {
+          const wordRatio = parseFloat(member.wordRatio);
+          if (isNaN(wordRatio) || wordRatio < 0 || wordRatio > 10) {
+            return res.status(400).json({
+              success: false,
+              message: '字数比例必须在0-10之间'
+            });
+          }
+        }
+      }
+    }
+
+    // 5. 金额校验
+    const MAX_PROJECT_AMOUNT = 100000000; // 1亿上限
+    const MAX_WORD_COUNT = 100000000; // 1亿字上限
+    const MAX_UNIT_PRICE = 100000; // 每千字10万上限
+
+    if (wordCount !== undefined && wordCount !== null) {
+      const wordCountNum = parseFloat(wordCount);
+      if (isNaN(wordCountNum) || wordCountNum < 0 || wordCountNum > MAX_WORD_COUNT) {
+        return res.status(400).json({
+          success: false,
+          message: `字数必须在0-${MAX_WORD_COUNT.toLocaleString()}之间`
+        });
+      }
+    }
+
+    if (unitPrice !== undefined && unitPrice !== null) {
+      const unitPriceNum = parseFloat(unitPrice);
+      if (isNaN(unitPriceNum) || unitPriceNum < 0 || unitPriceNum > MAX_UNIT_PRICE) {
+        return res.status(400).json({
+          success: false,
+          message: `单价必须在0-${MAX_UNIT_PRICE.toLocaleString()}之间`
+        });
+      }
     }
 
     // 计算总金额（如果提供了字数和单价）
@@ -134,6 +232,75 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
       return res.status(400).json({
         success: false,
         message: '请提供项目金额或字数和单价'
+      });
+    }
+
+    // 验证最终金额范围
+    if (isNaN(finalAmount) || finalAmount < 0 || finalAmount > MAX_PROJECT_AMOUNT) {
+      return res.status(400).json({
+        success: false,
+        message: `项目金额必须在0-${MAX_PROJECT_AMOUNT.toLocaleString()}之间`
+      });
+    }
+
+    // 6. 日期校验
+    const deadlineDate = new Date(deadline);
+    if (isNaN(deadlineDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: '交付时间格式无效'
+      });
+    }
+    if (deadlineDate < new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: '交付时间不能早于当前时间'
+      });
+      // 注意：这里可以根据业务需求调整，有些项目可能是补录历史数据
+    }
+
+    // 7. 兼职销售字段校验
+    if (partTimeSales && partTimeSales.isPartTime) {
+      const companyReceivable = parseFloat(partTimeSales.companyReceivable || 0);
+      const taxRate = parseFloat(partTimeSales.taxRate || 0);
+      
+      if (isNaN(companyReceivable) || companyReceivable < 0 || companyReceivable > finalAmount) {
+        return res.status(400).json({
+          success: false,
+          message: '公司应收金额必须在0到项目总金额之间'
+        });
+      }
+      if (isNaN(taxRate) || taxRate < 0 || taxRate > 1) {
+        return res.status(400).json({
+          success: false,
+          message: '税率必须在0-1之间（0-100%）'
+        });
+      }
+    }
+
+    // 8. 兼职排版字段校验
+    if (partTimeLayout && partTimeLayout.isPartTime) {
+      const layoutCost = parseFloat(partTimeLayout.layoutCost || 0);
+      if (isNaN(layoutCost) || layoutCost < 0) {
+        return res.status(400).json({
+          success: false,
+          message: '排版费用必须是非负数'
+        });
+      }
+      if (layoutCost > finalAmount * 0.05) {
+        return res.status(400).json({
+          success: false,
+          message: '排版费用不能超过项目总金额的5%'
+        });
+      }
+    }
+
+    // 验证客户是否存在
+    const customer = await Customer.findById(customerId);
+    if (!customer || !customer.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: '客户不存在或已被禁用'
       });
     }
 
@@ -195,15 +362,23 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
       clientName: customer.name,
       businessType: businessType || 'translation',
       projectType: projectType || 'mtpe',
-      sourceLanguage: sourceLanguage,
-      targetLanguages: Array.isArray(targetLanguages) ? targetLanguages : [targetLanguages],
+      sourceLanguage: sourceLanguage.trim(),
+      targetLanguages: uniqueTargetLanguages,
       wordCount: wordCount || 0,
       unitPrice: unitPrice || 0,
       projectAmount: finalAmount,
       deadline: new Date(deadline),
       isTaxIncluded: isTaxIncluded || false,
       needInvoice: needInvoice || false,
-      specialRequirements: specialRequirements || {},
+      // 安全处理嵌套字段，防止整体覆盖
+      specialRequirements: specialRequirements && typeof specialRequirements === 'object' 
+        ? {
+            terminology: specialRequirements.terminology === true || specialRequirements.terminology === 'true',
+            nda: specialRequirements.nda === true || specialRequirements.nda === 'true',
+            referenceFiles: specialRequirements.referenceFiles === true || specialRequirements.referenceFiles === 'true',
+            notes: typeof specialRequirements.notes === 'string' ? specialRequirements.notes.trim().substring(0, 500) : undefined
+          }
+        : {},
       createdBy: req.user._id,
       locked_ratios: lockedRatios,
       status: 'pending',
@@ -788,6 +963,11 @@ router.post('/:id/start', authorize('pm', 'admin', 'sales'), async (req, res) =>
 });
 
 // 标记返修（PM、管理员或项目创建人）
+// 业务规则：
+// - 返修可能是PM人员安排不当、翻译/审校/排版质量问题，或销售在项目初期沟通、需求理解、客户管理等方面的问题
+// - 销售需登记返修但不扣KPI，通过其他指标（返修率统计、流程考核）约束销售行为
+// - 返修会影响PM的KPI（因为PM负责人员安排和质量管控），通过完成系数扣减
+// - 允许销售标记返修，确保返修信息如实登记，同时通过返修率统计等指标进行流程考核
 router.post('/:id/set-revision', authorize('pm', 'admin', 'sales'), async (req, res) => {
   try {
     const { count } = req.body;
@@ -800,7 +980,7 @@ router.post('/:id/set-revision', authorize('pm', 'admin', 'sales'), async (req, 
       });
     }
 
-    // 权限：PM、管理员、或项目创建人
+    // 权限：PM、管理员或项目创建人可标记返修
     const isCreator = project.createdBy.toString() === req.user._id.toString();
     const isAllowedRole = req.user.roles.includes('pm') || req.user.roles.includes('admin');
     if (!isCreator && !isAllowedRole) {
@@ -828,6 +1008,7 @@ router.post('/:id/set-revision', authorize('pm', 'admin', 'sales'), async (req, 
 });
 
 // 标记延期（PM、管理员或项目创建人）
+// 注意：延期可能涉及客户沟通，允许销售标记；但延期不影响销售KPI
 router.post('/:id/set-delay', authorize('pm', 'admin', 'sales'), async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
@@ -866,6 +1047,7 @@ router.post('/:id/set-delay', authorize('pm', 'admin', 'sales'), async (req, res
 });
 
 // 标记客户投诉（PM、管理员或项目创建人）
+// 注意：客诉可能涉及客户沟通，允许销售标记；但客诉不影响销售KPI
 router.post('/:id/set-complaint', authorize('pm', 'admin', 'sales'), async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
