@@ -503,8 +503,8 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
   }
 });
 
-// 更新项目（管理员、PM、项目创建人）
-router.put('/:id', authorize('admin', 'pm', 'sales'), async (req, res) => {
+// 更新项目（管理员、销售、兼职销售；含PM身份的销售也不可编辑）
+router.put('/:id', authorize('admin', 'sales', 'part_time_sales'), async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
 
@@ -515,13 +515,17 @@ router.put('/:id', authorize('admin', 'pm', 'sales'), async (req, res) => {
       });
     }
 
-    // 权限：管理员/PM或创建人
-    const isCreator = project.createdBy.toString() === req.user._id.toString();
-    const isAllowedRole = req.user.roles.includes('admin') || req.user.roles.includes('pm');
-    if (!isCreator && !isAllowedRole) {
+    const isAdmin = req.user.roles.includes('admin');
+    const isSales = req.user.roles.includes('sales');
+    const isPartTimeSales = req.user.roles.includes('part_time_sales');
+    const isPM = req.user.roles.includes('pm');
+
+    // 管理员始终允许；销售/兼职销售允许但若同时拥有PM则禁止
+    const isAllowedRole = isAdmin || ((isSales || isPartTimeSales) && !isPM);
+    if (!isAllowedRole) {
       return res.status(403).json({
         success: false,
-        message: '仅管理员、PM或项目创建人可修改项目'
+        message: '仅管理员或纯销售可修改项目'
       });
     }
 
@@ -567,10 +571,6 @@ router.put('/:id', authorize('admin', 'pm', 'sales'), async (req, res) => {
     }
 
     // 检查：销售编辑项目时不能设置兼职排版，应由项目经理添加
-    const isSales = req.user.roles.includes('sales') || req.user.roles.includes('part_time_sales');
-    const isAdmin = req.user.roles.includes('admin');
-    const isPM = req.user.roles.includes('pm');
-    
     if (isSales && !isAdmin && !isPM && req.body.partTimeLayout?.isPartTime) {
       return res.status(400).json({
         success: false,
@@ -604,8 +604,8 @@ router.put('/:id', authorize('admin', 'pm', 'sales'), async (req, res) => {
   }
 });
 
-// 取消/删除项目（管理员、PM、项目创建人）
-router.delete('/:id', authorize('admin', 'pm', 'sales'), async (req, res) => {
+// 取消/删除项目（管理员、销售、兼职销售；含PM身份的销售也不可删除）
+router.delete('/:id', authorize('admin', 'sales', 'part_time_sales'), async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
 
@@ -616,12 +616,17 @@ router.delete('/:id', authorize('admin', 'pm', 'sales'), async (req, res) => {
       });
     }
 
-    const isCreator = project.createdBy.toString() === req.user._id.toString();
-    const isAllowedRole = req.user.roles.includes('admin') || req.user.roles.includes('pm');
-    if (!isCreator && !isAllowedRole) {
+    const isAdmin = req.user.roles.includes('admin');
+    const isSales = req.user.roles.includes('sales');
+    const isPartTimeSales = req.user.roles.includes('part_time_sales');
+    const isPM = req.user.roles.includes('pm');
+
+    // 管理员始终允许；销售/兼职销售允许但若同时拥有PM则禁止
+    const isAllowedRole = isAdmin || ((isSales || isPartTimeSales) && !isPM);
+    if (!isAllowedRole) {
       return res.status(403).json({
         success: false,
-        message: '仅管理员、PM或项目创建人可删除项目'
+        message: '仅管理员或纯销售可删除项目'
       });
     }
 
@@ -921,8 +926,8 @@ router.post('/:id/add-member', async (req, res) => {
   }
 });
 
-// 项目开始执行（PM或项目创建人确认进入执行状态）
-router.post('/:id/start', authorize('pm', 'admin', 'sales'), async (req, res) => {
+// 项目开始执行（管理员、销售、兼职销售）
+router.post('/:id/start', authorize('admin', 'sales', 'part_time_sales'), async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
 
@@ -977,13 +982,97 @@ router.post('/:id/start', authorize('pm', 'admin', 'sales'), async (req, res) =>
   }
 });
 
-// 标记返修（PM、管理员或项目创建人）
-// 业务规则：
-// - 返修可能是PM人员安排不当、翻译/审校/排版质量问题，或销售在项目初期沟通、需求理解、客户管理等方面的问题
-// - 销售需登记返修但不扣KPI，通过其他指标（返修率统计、流程考核）约束销售行为
-// - 返修会影响PM的KPI（因为PM负责人员安排和质量管控），通过完成系数扣减
-// - 允许销售标记返修，确保返修信息如实登记，同时通过返修率统计等指标进行流程考核
-router.post('/:id/set-revision', authorize('pm', 'admin', 'sales'), async (req, res) => {
+// 更新项目状态（中间节点）
+router.post('/:id/status', authorize('admin', 'pm', 'translator', 'reviewer', 'layout'), async (req, res) => {
+  try {
+    const { status } = req.body;
+    const project = await Project.findById(req.params.id);
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: '项目不存在'
+      });
+    }
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: '缺少状态参数'
+      });
+    }
+
+    if (['completed', 'cancelled'].includes(project.status)) {
+      return res.status(400).json({
+        success: false,
+        message: '项目已结束，不能更新状态'
+      });
+    }
+
+    const allowedStatuses = ['scheduled', 'translation_done', 'review_done', 'layout_done'];
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: '不支持的状态'
+      });
+    }
+
+    const isAdmin = req.user.roles.includes('admin');
+    const isPM = req.user.roles.includes('pm');
+
+    // 查询当前用户的项目成员角色
+    const member = await ProjectMember.findOne({ projectId: project._id, userId: req.user._id });
+    const memberRole = member?.role;
+
+    const roleAllowed = {
+      scheduled: isAdmin || isPM, // 管理员、PM可设已安排
+      translation_done: isAdmin || isPM || memberRole === 'translator', // PM可标记翻译完成
+      review_done: isAdmin || isPM || memberRole === 'reviewer', // PM可标记审校完成
+      layout_done: isAdmin || isPM || memberRole === 'layout' // PM可标记排版完成
+    };
+
+    if (!roleAllowed[status]) {
+      return res.status(403).json({
+        success: false,
+        message: '当前角色无权执行此状态更新'
+      });
+    }
+
+    // 仅允许向前推进
+    const order = ['pending', 'in_progress', 'scheduled', 'translation_done', 'review_done', 'layout_done', 'completed'];
+    const currentIdx = order.indexOf(project.status);
+    const targetIdx = order.indexOf(status);
+    if (targetIdx === -1 || currentIdx === -1) {
+      return res.status(400).json({
+        success: false,
+        message: '状态无效'
+      });
+    }
+    if (targetIdx < currentIdx) {
+      return res.status(400).json({
+        success: false,
+        message: '状态不可回退'
+      });
+    }
+
+    project.status = status;
+    await project.save();
+
+    res.json({
+      success: true,
+      message: '项目状态已更新',
+      data: project
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// 标记返修（PM、管理员、销售、兼职销售）
+router.post('/:id/set-revision', authorize('pm', 'admin', 'sales', 'part_time_sales'), async (req, res) => {
   try {
     const { count } = req.body;
     const project = await Project.findById(req.params.id);
@@ -995,13 +1084,12 @@ router.post('/:id/set-revision', authorize('pm', 'admin', 'sales'), async (req, 
       });
     }
 
-    // 权限：PM、管理员或项目创建人可标记返修
-    const isCreator = project.createdBy.toString() === req.user._id.toString();
-    const isAllowedRole = req.user.roles.includes('pm') || req.user.roles.includes('admin');
-    if (!isCreator && !isAllowedRole) {
+    // 权限：PM、管理员、销售、兼职销售
+    const isAllowedRole = req.user.roles.includes('pm') || req.user.roles.includes('admin') || req.user.roles.includes('sales') || req.user.roles.includes('part_time_sales');
+    if (!isAllowedRole) {
       return res.status(403).json({
         success: false,
-        message: '仅PM、管理员或项目创建人可标记返修'
+        message: '仅PM或管理员可标记返修'
       });
     }
 
@@ -1022,9 +1110,8 @@ router.post('/:id/set-revision', authorize('pm', 'admin', 'sales'), async (req, 
   }
 });
 
-// 标记延期（PM、管理员或项目创建人）
-// 注意：延期可能涉及客户沟通，允许销售标记；但延期不影响销售KPI
-router.post('/:id/set-delay', authorize('pm', 'admin', 'sales'), async (req, res) => {
+// 标记延期（PM、管理员、销售、兼职销售）
+router.post('/:id/set-delay', authorize('pm', 'admin', 'sales', 'part_time_sales'), async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
 
@@ -1035,12 +1122,11 @@ router.post('/:id/set-delay', authorize('pm', 'admin', 'sales'), async (req, res
       });
     }
 
-    const isCreator = project.createdBy.toString() === req.user._id.toString();
-    const isAllowedRole = req.user.roles.includes('pm') || req.user.roles.includes('admin');
-    if (!isCreator && !isAllowedRole) {
+    const isAllowedRole = req.user.roles.includes('pm') || req.user.roles.includes('admin') || req.user.roles.includes('sales') || req.user.roles.includes('part_time_sales');
+    if (!isAllowedRole) {
       return res.status(403).json({
         success: false,
-        message: '仅PM、管理员或项目创建人可标记延期'
+        message: '仅PM或管理员可标记延期'
       });
     }
 
@@ -1061,9 +1147,8 @@ router.post('/:id/set-delay', authorize('pm', 'admin', 'sales'), async (req, res
   }
 });
 
-// 标记客户投诉（PM、管理员或项目创建人）
-// 注意：客诉可能涉及客户沟通，允许销售标记；但客诉不影响销售KPI
-router.post('/:id/set-complaint', authorize('pm', 'admin', 'sales'), async (req, res) => {
+// 标记客户投诉（PM、管理员、销售、兼职销售）
+router.post('/:id/set-complaint', authorize('pm', 'admin', 'sales', 'part_time_sales'), async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
 
@@ -1074,12 +1159,11 @@ router.post('/:id/set-complaint', authorize('pm', 'admin', 'sales'), async (req,
       });
     }
 
-    const isCreator = project.createdBy.toString() === req.user._id.toString();
-    const isAllowedRole = req.user.roles.includes('pm') || req.user.roles.includes('admin');
-    if (!isCreator && !isAllowedRole) {
+    const isAllowedRole = req.user.roles.includes('pm') || req.user.roles.includes('admin') || req.user.roles.includes('sales') || req.user.roles.includes('part_time_sales');
+    if (!isAllowedRole) {
       return res.status(403).json({
         success: false,
-        message: '仅PM、管理员或项目创建人可标记客诉'
+        message: '仅PM或管理员可标记客诉'
       });
     }
 
@@ -1100,8 +1184,8 @@ router.post('/:id/set-complaint', authorize('pm', 'admin', 'sales'), async (req,
   }
 });
 
-// 标记项目完成
-router.post('/:id/finish', authorize('pm', 'admin'), async (req, res) => {
+// 标记项目交付（仅管理员、销售、兼职销售）
+router.post('/:id/finish', authorize('admin', 'sales', 'part_time_sales'), async (req, res) => {
   try {
     const project = await Project.findById(req.params.id);
 
@@ -1109,6 +1193,19 @@ router.post('/:id/finish', authorize('pm', 'admin'), async (req, res) => {
       return res.status(404).json({ 
         success: false, 
         message: '项目不存在' 
+      });
+    }
+
+    // 额外权限校验：含PM身份的销售不允许交付，管理员始终允许
+    const isAdmin = req.user.roles.includes('admin');
+    const isSales = req.user.roles.includes('sales');
+    const isPartTimeSales = req.user.roles.includes('part_time_sales');
+    const isPM = req.user.roles.includes('pm');
+    const canDeliver = isAdmin || ((isSales || isPartTimeSales) && !isPM);
+    if (!canDeliver) {
+      return res.status(403).json({
+        success: false,
+        message: '仅管理员或纯销售可交付项目'
       });
     }
 
@@ -1274,12 +1371,16 @@ router.get('/:id/quotation', authenticate, async (req, res) => {
       });
     }
     
-    // 检查权限：创建者、管理员、PM可以导出
+    // 检查权限：创建者、管理员、销售、兼职销售、财务可以导出（含PM身份时不允许）
     const isCreator = project.createdBy._id.toString() === req.user._id.toString();
-    const canView = req.user.roles.includes('admin') || 
-                    req.user.roles.includes('pm') ||
-                    req.user.roles.includes('finance') ||
-                    isCreator;
+    const isAdmin = req.user.roles.includes('admin');
+    const isFinance = req.user.roles.includes('finance');
+    const isSales = req.user.roles.includes('sales');
+    const isPartTimeSales = req.user.roles.includes('part_time_sales');
+    const isPM = req.user.roles.includes('pm');
+
+    const canViewRole = (isAdmin || isFinance || isSales || isPartTimeSales) && !isPM;
+    const canView = canViewRole || (isCreator && !isPM);
     
     if (!canView) {
       return res.status(403).json({

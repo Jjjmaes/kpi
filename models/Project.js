@@ -118,7 +118,16 @@ const projectSchema = new mongoose.Schema({
   // 项目状态
   status: {
     type: String,
-    enum: ['pending', 'in_progress', 'completed', 'cancelled'],
+    enum: [
+      'pending',            // 待开始
+      'in_progress',        // 进行中
+      'scheduled',          // 已安排（PM完成人员安排）
+      'translation_done',   // 翻译完成
+      'review_done',        // 审校完成
+      'layout_done',        // 排版完成
+      'completed',          // 已完成
+      'cancelled'           // 已取消
+    ],
     default: 'pending'
   },
   // 项目开始时间（PM确认进入执行状态）

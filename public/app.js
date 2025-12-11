@@ -3177,14 +3177,49 @@ async function viewProject(projectId) {
         if (data.success) {
             const project = data.data;
             currentProjectDetail = project;
-            const canModify = currentUser.roles.includes('admin') || 
-                            currentUser.roles.includes('pm') ||
-                            project.createdBy._id === currentUser._id;
+            const isAdmin = currentUser.roles.includes('admin');
+            const isPM = currentUser.roles.includes('pm');
+            const isSales = currentUser.roles.includes('sales');
+            const isPartTimeSales = currentUser.roles.includes('part_time_sales');
+
+            const canStart = isAdmin || isSales || isPartTimeSales; // 开始：管理员、销售、兼职销售
+            const canSchedule = isAdmin || isPM; // 已安排：管理员、PM
+            const canQualityOps = isAdmin || isPM || isSales || isPartTimeSales; // 返修/延期/客诉
+            // 交付仅管理员/销售/兼职销售，且不含PM身份
+            const canDeliver = (isAdmin || isSales || isPartTimeSales) && !isPM;
+            // 编辑/删除/导出：仅管理员、销售、兼职销售，且用户不能含PM角色
+            const canEditDeleteExport = (isAdmin || isSales || isPartTimeSales) && !isPM;
+            const canManageMembers = isAdmin || isPM; // 添加/删除成员
             const canFinance = isFinanceRole();
 
             const canManagePayment = currentUser.roles.includes('admin') || 
                                     currentUser.roles.includes('finance') ||
                             project.createdBy._id === currentUser._id;
+
+            const memberRoles = (project.members || []).reduce((acc, m) => {
+                if (!m || !m.userId || !currentUser || !currentUser._id) return acc;
+                const raw = typeof m.userId === 'object' ? m.userId._id : m.userId;
+                if (!raw) return acc;
+                const uidStr = raw.toString();
+                if (uidStr === currentUser._id.toString()) {
+                    acc.push(m.role);
+                }
+                return acc;
+            }, []);
+            const isTranslatorMember = memberRoles.includes('translator');
+            const isReviewerMember = memberRoles.includes('reviewer');
+            const isLayoutMember = memberRoles.includes('layout');
+            const canSetScheduled = canSchedule;
+            const canSetTranslationDone = isAdmin || isPM || isTranslatorMember; // PM可标记翻译完成
+            const canSetReviewDone = isAdmin || isPM || isReviewerMember; // PM可标记审校完成
+            const canSetLayoutDone = isAdmin || isPM || isLayoutMember; // PM可标记排版完成
+            const statusOrder = ['pending','in_progress','scheduled','translation_done','review_done','layout_done','completed'];
+            const currentStatusIdx = statusOrder.indexOf(project.status);
+            const startReached = currentStatusIdx >= statusOrder.indexOf('in_progress');
+            const scheduledReached = currentStatusIdx >= statusOrder.indexOf('scheduled');
+            const translationReached = currentStatusIdx >= statusOrder.indexOf('translation_done');
+            const reviewReached = currentStatusIdx >= statusOrder.indexOf('review_done');
+            const layoutReached = currentStatusIdx >= statusOrder.indexOf('layout_done');
 
             const content = `
                 <div class="project-detail">
@@ -3301,7 +3336,7 @@ async function viewProject(projectId) {
                                             ` : ''}
                                         </div>
                                     </div>
-                                    ${canModify && project.status !== 'completed' ? `
+                                    ${canManageMembers && project.status !== 'completed' ? `
                                         <button class="btn-small" onclick="showSetLayoutCostModal('${projectId}')" style="margin-left: 10px;">
                                             ${(project.partTimeLayout?.layoutCost || 0) > 0 ? '修改费用' : '设置费用'}
                                         </button>
@@ -3383,7 +3418,7 @@ async function viewProject(projectId) {
                     <div class="detail-section">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                             <h4>项目成员</h4>
-                            ${canModify ? '<button class="btn-small" onclick="closeModal(); setTimeout(() => showAddMemberModal(\'' + projectId + '\'), 100)">添加成员</button>' : ''}
+                            ${canManageMembers ? '<button class="btn-small" onclick="closeModal(); setTimeout(() => showAddMemberModal(\'' + projectId + '\'), 100)">添加成员</button>' : ''}
                         </div>
                         <div id="projectMembers">
                             ${project.members && project.members.length > 0 ? project.members.map(m => `
@@ -3392,7 +3427,7 @@ async function viewProject(projectId) {
                                         <strong>${m.userId.name}</strong> - ${getRoleText(m.role)}
                                         ${m.role === 'translator' ? ` (${m.translatorType === 'deepedit' ? '深度编辑' : 'MTPE'}, 字数占比: ${(m.wordRatio * 100).toFixed(0)}%)` : ''}
                                     </div>
-                                    ${canModify ? `
+                                    ${canManageMembers ? `
                                         <div class="member-actions">
                                             <button class="btn-small btn-danger" onclick="deleteMember('${projectId}', '${m._id}')">删除</button>
                                         </div>
@@ -3443,22 +3478,38 @@ async function viewProject(projectId) {
                     </div>
                     ` : ''}
 
-                    ${canModify && project.status !== 'completed' ? `
+                    ${(canStart || canSchedule || canQualityOps || isTranslatorMember || isReviewerMember || isLayoutMember) && project.status !== 'completed' && project.status !== 'cancelled' ? `
                         <div class="detail-section">
                             <h4>项目管理</h4>
                             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                                ${project.status === 'pending' ? `
-                                    <button class="btn-small btn-success" onclick="startProject('${projectId}')">开始项目</button>
+                                ${canStart ? `
+                                    <button class="btn-small btn-success" ${startReached ? 'disabled' : ''} onclick="startProject('${projectId}')">开始项目</button>
                                 ` : ''}
-                                ${project.status === 'in_progress' ? `
+                                ${canSetScheduled ? `
+                                    <button class="btn-small" ${scheduledReached ? 'disabled' : ''} onclick="updateProjectStatus('${projectId}','scheduled','确认将项目标记为已安排？')">已安排</button>
+                                ` : ''}
+                                ${canSetTranslationDone ? `
+                                    <button class="btn-small" ${translationReached ? 'disabled' : ''} onclick="updateProjectStatus('${projectId}','translation_done','确认标记翻译完成？')">翻译完成</button>
+                                ` : ''}
+                                ${canSetReviewDone ? `
+                                    <button class="btn-small" ${reviewReached ? 'disabled' : ''} onclick="updateProjectStatus('${projectId}','review_done','确认标记审校完成？')">审校完成</button>
+                                ` : ''}
+                                ${canSetLayoutDone ? `
+                                    <button class="btn-small" ${layoutReached ? 'disabled' : ''} onclick="updateProjectStatus('${projectId}','layout_done','确认标记排版完成？')">排版完成</button>
+                                ` : ''}
+                                ${(project.status === 'in_progress' || project.status === 'scheduled' || project.status === 'translation_done' || project.status === 'review_done' || project.status === 'layout_done') && canQualityOps ? `
                                     <button class="btn-small" onclick="setRevision('${projectId}', ${project.revisionCount})">标记返修</button>
                                     <button class="btn-small" onclick="setDelay('${projectId}')">标记延期</button>
                                     <button class="btn-small" onclick="setComplaint('${projectId}')">标记客诉</button>
-                                    <button class="btn-small btn-success" onclick="finishProject('${projectId}')">完成项目</button>
                                 ` : ''}
-                                <button class="btn-small" onclick="exportProjectQuotation('${projectId}')" style="background: #10b981;">📄 导出报价单</button>
-                                <button class="btn-small" onclick="showEditProjectModal()">编辑项目</button>
-                                <button class="btn-small btn-danger" onclick="deleteProject('${projectId}')">删除项目</button>
+                                ${(project.status === 'in_progress' || project.status === 'scheduled' || project.status === 'translation_done' || project.status === 'review_done' || project.status === 'layout_done') && canDeliver ? `
+                                    <button class="btn-small btn-success" onclick="finishProject('${projectId}')">交付项目</button>
+                                ` : ''}
+                                ${canEditDeleteExport ? `
+                                  <button class="btn-small" onclick="exportProjectQuotation('${projectId}')" style="background: #10b981;">📄 导出报价单</button>
+                                  <button class="btn-small" onclick="showEditProjectModal()">编辑项目</button>
+                                  <button class="btn-small btn-danger" onclick="deleteProject('${projectId}')">删除项目</button>
+                                ` : ''}
                             </div>
                         </div>
                     ` : ''}
@@ -3847,7 +3898,7 @@ async function setComplaint(projectId) {
 }
 
 async function finishProject(projectId) {
-    if (!confirm('确定要完成此项目吗？完成后将无法修改。')) return;
+    if (!confirm('确定要交付此项目吗？交付后将无法修改。')) return;
 
     try {
         const response = await apiFetch(`${API_BASE}/projects/${projectId}/finish`, {
@@ -3861,6 +3912,28 @@ async function finishProject(projectId) {
             showToast('项目已完成', 'success');
         } else {
             showToast(result.message, 'error');
+        }
+    } catch (error) {
+        showToast('操作失败: ' + error.message, 'error');
+    }
+}
+
+async function updateProjectStatus(projectId, status, confirmMessage) {
+    if (confirmMessage && !confirm(confirmMessage)) return;
+    try {
+        const response = await apiFetch(`${API_BASE}/projects/${projectId}/status`, {
+            method: 'POST',
+            body: JSON.stringify({ status })
+        });
+        const result = await response.json();
+        if (result.success) {
+            loadProjects();
+            if (document.getElementById('modalOverlay').classList.contains('active')) {
+                viewProject(projectId);
+            }
+            showToast('项目状态已更新', 'success');
+        } else {
+            showToast(result.message || '状态更新失败', 'error');
         }
     } catch (error) {
         showToast('操作失败: ' + error.message, 'error');
@@ -4567,7 +4640,11 @@ function getStatusText(status) {
     const statusMap = {
         'pending': '待开始',
         'in_progress': '进行中',
-        'completed': '已完成',
+        'scheduled': '已安排',
+        'translation_done': '翻译完成',
+        'review_done': '审校完成',
+        'layout_done': '排版完成',
+        'completed': '已交付',
         'cancelled': '已取消'
     };
     return statusMap[status] || status;
@@ -4577,6 +4654,10 @@ function getStatusBadgeClass(status) {
     const classMap = {
         'pending': 'badge-warning',
         'in_progress': 'badge-info',
+        'scheduled': 'badge-primary',
+        'translation_done': 'badge-success',
+        'review_done': 'badge-success',
+        'layout_done': 'badge-success',
         'completed': 'badge-success',
         'cancelled': 'badge-danger'
     };
