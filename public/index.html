@@ -373,36 +373,41 @@
 
             <!-- 项目管理 -->
             <div id="projects" class="section">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap:10px; flex-wrap:wrap;">
-                    <div style="display:flex; gap:10px; align-items:center;">
-                        <h2 style="margin:0;">项目管理</h2>
-                        <input type="text" id="projectSearch" placeholder="项目名/编号/客户" style="padding:8px; min-width:220px;" onkeyup="renderProjects()">
-                        <select id="projectStatusFilter" style="padding:8px;" onchange="renderProjects()">
-                            <option value="">全部状态</option>
-                            <option value="pending">待开始</option>
-                            <option value="in_progress">进行中</option>
-                            <option value="completed">已完成</option>
-                            <option value="cancelled">已取消</option>
-                        </select>
-                        <select id="projectBizFilter" style="padding:8px;" onchange="renderProjects()">
-                            <option value="">全部业务</option>
-                            <option value="translation">笔译</option>
-                            <option value="interpretation">口译</option>
-                            <option value="transcription">转录</option>
-                            <option value="localization">本地化</option>
-                            <option value="other">其他</option>
-                        </select>
-                        <select id="projectCustomerFilter" style="padding:8px; min-width:180px;" onchange="renderProjects()">
-                            <option value="">全部客户</option>
-                        </select>
-                        <select id="projectPageSize" style="padding:8px;" onchange="renderProjects()">
-                            <option value="10">每页10</option>
-                            <option value="20">每页20</option>
-                            <option value="50">每页50</option>
-                        </select>
-                        <button class="btn-small" onclick="exportProjects()">导出当前筛选</button>
+                <div class="projects-header-row">
+                    <div class="projects-header">
+                        <h2 class="projects-title">项目管理</h2>
+                        <p class="projects-subtitle">筛选项目并快捷导出</p>
                     </div>
-                    <button onclick="showCreateProjectModal()" id="createProjectBtn" style="display:none;">创建新项目</button>
+                    <div class="projects-actions">
+                        <button class="btn-secondary" onclick="exportProjects()">导出当前筛选</button>
+                        <button onclick="showCreateProjectModal()" id="createProjectBtn" style="display:none;">创建新项目</button>
+                    </div>
+                </div>
+                <div class="projects-filters">
+                    <input type="text" id="projectSearch" placeholder="项目名/编号/客户" onkeyup="renderProjects()">
+                    <select id="projectStatusFilter" onchange="renderProjects()">
+                        <option value="">全部状态</option>
+                        <option value="pending">待开始</option>
+                        <option value="in_progress">进行中</option>
+                        <option value="completed">已完成</option>
+                        <option value="cancelled">已取消</option>
+                    </select>
+                    <select id="projectBizFilter" onchange="renderProjects()">
+                        <option value="">全部业务</option>
+                        <option value="translation">笔译</option>
+                        <option value="interpretation">口译</option>
+                        <option value="transcription">转录</option>
+                        <option value="localization">本地化</option>
+                        <option value="other">其他</option>
+                    </select>
+                    <select id="projectCustomerFilter" onchange="renderProjects()">
+                        <option value="">全部客户</option>
+                    </select>
+                    <select id="projectPageSize" onchange="renderProjects()">
+                        <option value="10">每页10</option>
+                        <option value="20">每页20</option>
+                        <option value="50">每页50</option>
+                    </select>
                 </div>
                 <div id="projectsList"></div>
             </div>

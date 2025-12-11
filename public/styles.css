@@ -90,6 +90,54 @@ h2 {
     color: #667eea;
 }
 
+.projects-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.projects-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.projects-title {
+    margin: 0;
+    color: #667eea; /* 与其他功能标题保持一致 */
+    white-space: nowrap;
+}
+
+.projects-subtitle {
+    margin: 0;
+    color: #6b7280;
+    font-size: 13px;
+}
+
+.projects-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.projects-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.projects-filters input,
+.projects-filters select {
+    padding: 8px;
+    min-width: 180px;
+    width: auto;
+}
+
 .form-group {
     margin-bottom: 15px;
 }
