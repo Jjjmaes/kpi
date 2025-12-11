@@ -72,6 +72,7 @@ const languageRoutes = require('./routes/languages');
 const customerRoutes = require('./routes/customers');
 const auditRoutes = require('./routes/audit');
 const notificationRoutes = require('./routes/notifications');
+const backupRoutes = require('./routes/backup');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -84,6 +85,7 @@ app.use('/api/languages', languageRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/backup', backupRoutes);
 
 // 健康检查
 app.get('/health', (req, res) => {
@@ -134,12 +136,24 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/kpi_syste
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
-.then(() => {
+.then(async () => {
   console.log('✅ MongoDB connected');
   
+  // 确保备份目录存在
+  const fs = require('fs').promises;
+  const path = require('path');
+  const backupDir = path.join(__dirname, 'backups');
+  try {
+    await fs.mkdir(backupDir, { recursive: true });
+    console.log('✅ Backup directory ready:', backupDir);
+  } catch (error) {
+    console.error('⚠️ Failed to create backup directory:', error.message);
+  }
+
   // 启动Cron任务
-  const { scheduleMonthlyKPICalculation } = require('./services/cronService');
+  const { scheduleMonthlyKPICalculation, scheduleDailyBackup } = require('./services/cronService');
   scheduleMonthlyKPICalculation();
+  scheduleDailyBackup();
   console.log('✅ Cron tasks scheduled');
 })
 .catch(err => {

@@ -67,6 +67,7 @@
                 <button onclick="showSection('users')" id="usersBtn" style="display:none;">用户管理</button>
                 <button onclick="showSection('languages')" id="languagesBtn" style="display:none;">语种管理</button>
                 <button onclick="showSection('permissions')" id="permissionsBtn" style="display:none;">权限配置</button>
+                <button onclick="showSection('backup')" id="backupBtn" style="display:none;">数据备份</button>
             </nav>
 
             <!-- 业务看板 -->
@@ -465,6 +466,31 @@
                     <button onclick="showCreateUserModal()">创建新用户</button>
                 </div>
                 <div id="usersList"></div>
+            </div>
+
+            <!-- 数据备份 -->
+            <div id="backup" class="section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h2>数据备份与恢复</h2>
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="createBackup()" class="btn-success">创建备份</button>
+                        <button onclick="cleanupOldBackups()" class="btn-small">清理旧备份</button>
+                        <button onclick="loadBackups()" class="btn-small">刷新列表</button>
+                    </div>
+                </div>
+                <div id="backupAlert" style="margin-bottom: 20px;"></div>
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+                    <h4 style="margin-bottom: 10px;">📋 备份说明</h4>
+                    <ul style="margin: 0; padding-left: 20px; color: #666;">
+                        <li>系统每天00:00自动备份数据库</li>
+                        <li>自动删除超过5天的旧备份</li>
+                        <li>备份文件保存在服务器的 <code>backups</code> 目录</li>
+                        <li><strong style="color: #d32f2f;">恢复操作会覆盖当前数据库，请谨慎操作！</strong></li>
+                    </ul>
+                </div>
+                <div id="backupsList">
+                    <div class="card-desc">加载中...</div>
+                </div>
             </div>
 
             <!-- 语种管理 -->

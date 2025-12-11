@@ -1,5 +1,6 @@
 const cron = require('node-cron');
 const { generateMonthlyKPIRecords } = require('./kpiService');
+const { backupDatabase, deleteOldBackups } = require('./backupService');
 
 /**
  * 安排月度KPI自动计算任务
@@ -35,6 +36,46 @@ function scheduleMonthlyKPICalculation() {
 }
 
 /**
+ * 安排每日数据库备份任务
+ * 每天00:00执行备份，并删除超过5天的旧备份
+ */
+function scheduleDailyBackup() {
+  // 每天00:00执行
+  cron.schedule('0 0 * * *', async () => {
+    try {
+      console.log('🔄 开始执行每日数据库备份任务...');
+      
+      // 执行备份
+      const backupResult = await backupDatabase();
+      
+      if (backupResult.success) {
+        console.log(`✅ 数据库备份成功: ${backupResult.filename} (${(backupResult.size / 1024 / 1024).toFixed(2)} MB)`);
+      } else {
+        console.error('❌ 数据库备份失败:', backupResult.error);
+      }
+      
+      // 删除超过保留期的备份
+      const deleteResult = await deleteOldBackups();
+      
+      if (deleteResult.deleted > 0) {
+        console.log(`✅ 清理旧备份完成: 删除了 ${deleteResult.deleted} 个备份文件`);
+        if (deleteResult.errors && deleteResult.errors.length > 0) {
+          console.warn('⚠️ 部分备份删除失败:', deleteResult.errors);
+        }
+      } else {
+        console.log('ℹ️ 无需清理旧备份');
+      }
+    } catch (error) {
+      console.error('❌ 每日备份任务失败:', error);
+    }
+  }, {
+    timezone: 'Asia/Shanghai'
+  });
+
+  console.log('✅ 每日数据库备份任务已安排（每天00:00执行）');
+}
+
+/**
  * 手动触发月度KPI计算（用于测试）
  */
 async function triggerMonthlyCalculation(month) {
@@ -51,7 +92,8 @@ async function triggerMonthlyCalculation(month) {
 
 module.exports = {
   scheduleMonthlyKPICalculation,
-  triggerMonthlyCalculation
+  triggerMonthlyCalculation,
+  scheduleDailyBackup
 };
 
 
