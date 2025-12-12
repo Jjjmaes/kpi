@@ -42,6 +42,10 @@ const projectMemberSchema = new mongoose.Schema({
 
 // 复合索引：确保同一项目同一用户同一角色只能有一条记录
 projectMemberSchema.index({ projectId: 1, userId: 1, role: 1 }, { unique: true });
+// 优化查询性能：按用户ID查询项目
+projectMemberSchema.index({ userId: 1, projectId: 1 });
+// 优化查询性能：按项目ID查询成员
+projectMemberSchema.index({ projectId: 1 });
 
 module.exports = mongoose.model('ProjectMember', projectMemberSchema);
 

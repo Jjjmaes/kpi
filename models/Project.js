@@ -344,5 +344,17 @@ projectSchema.pre('save', function(next) {
   next();
 });
 
+// 添加索引优化查询性能
+// 按创建者查询（销售查看自己的项目）
+projectSchema.index({ createdBy: 1, status: 1, createdAt: -1 });
+// 按状态和完成时间查询（用于Dashboard统计）
+projectSchema.index({ status: 1, completedAt: -1 });
+// 按状态和交付时间查询（用于"今日待交付"查询）
+projectSchema.index({ status: 1, deadline: 1 });
+// 按月份查询（用于月度KPI生成）
+projectSchema.index({ status: 1, completedAt: 1 });
+// 客户索引（用于按客户查询）
+projectSchema.index({ customerId: 1 });
+
 module.exports = mongoose.model('Project', projectSchema);
 

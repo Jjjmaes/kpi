@@ -8,6 +8,8 @@ const Customer = require('../models/Customer');
 const User = require('../models/User');
 const { exportProjectQuotation } = require('../services/excelService');
 const { createNotification, createNotificationsForUsers, NotificationTypes } = require('../services/notificationService');
+const { getUserProjectIds } = require('../utils/projectUtils');
+const { createProjectValidation, handleValidationErrors } = require('../validators/projectValidator');
 
 // 判断是否为仅交付角色（翻译/审校/排版），无查看客户信息权限
 function isDeliveryOnlyUser(user, currentRole) {
@@ -86,7 +88,11 @@ async function generateProjectNumber() {
 }
 
 // 创建项目（销售角色和兼职销售）
-router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (req, res) => {
+router.post('/create', 
+  authorize('sales', 'admin', 'part_time_sales'),
+  createProjectValidation,
+  handleValidationErrors,
+  async (req, res) => {
   try {
     const { 
       projectName, 
@@ -111,119 +117,10 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
       partTimeLayout // { isPartTime, layoutCost, layoutAssignedTo }
     } = req.body;
 
-    // ========== 输入校验 ==========
+    // ========== 业务逻辑校验 ==========
     
-    // 1. 必填字段校验
-    if (!projectName || !customerId || !deadline || !sourceLanguage || !targetLanguages || targetLanguages.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: '请填写所有必填字段（项目名称、客户、源语种、目标语言、交付时间）' 
-      });
-    }
-
-    // 2. 项目名称长度限制
-    if (projectName.trim().length < 2 || projectName.trim().length > 200) {
-      return res.status(400).json({
-        success: false,
-        message: '项目名称长度应在2-200个字符之间'
-      });
-    }
-
-    // 3. 目标语言列表长度限制
-    if (!Array.isArray(targetLanguages)) {
-      return res.status(400).json({
-        success: false,
-        message: '目标语言必须是数组格式'
-      });
-    }
-    if (targetLanguages.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: '至少需要指定一个目标语言'
-      });
-    }
-    if (targetLanguages.length > 20) {
-      return res.status(400).json({
-        success: false,
-        message: '目标语言数量不能超过20个'
-      });
-    }
-    // 去重并验证每个语言项
+    // 去重并验证每个语言项（express-validator已做基础验证，这里做去重处理）
     const uniqueTargetLanguages = [...new Set(targetLanguages.map(lang => String(lang).trim()).filter(lang => lang))];
-    if (uniqueTargetLanguages.length !== targetLanguages.length) {
-      return res.status(400).json({
-        success: false,
-        message: '目标语言列表中存在重复项'
-      });
-    }
-
-    // 4. 成员数组校验
-    if (members && !Array.isArray(members)) {
-      return res.status(400).json({
-        success: false,
-        message: '成员信息必须是数组格式'
-      });
-    }
-    if (members && members.length > 50) {
-      return res.status(400).json({
-        success: false,
-        message: '项目成员数量不能超过50个'
-      });
-    }
-    // 验证成员数据结构
-    if (members && members.length > 0) {
-      for (const member of members) {
-        if (!member.userId || !member.role) {
-          return res.status(400).json({
-            success: false,
-            message: '每个成员必须包含userId和role字段'
-          });
-        }
-        // 验证角色枚举值
-        const validRoles = ['translator', 'reviewer', 'pm', 'sales', 'admin_staff', 'part_time_sales', 'layout'];
-        if (!validRoles.includes(member.role)) {
-          return res.status(400).json({
-            success: false,
-            message: `无效的角色: ${member.role}`
-          });
-        }
-        // 验证wordRatio范围（如果提供）
-        if (member.wordRatio !== undefined) {
-          const wordRatio = parseFloat(member.wordRatio);
-          if (isNaN(wordRatio) || wordRatio < 0 || wordRatio > 10) {
-            return res.status(400).json({
-              success: false,
-              message: '字数比例必须在0-10之间'
-            });
-          }
-        }
-      }
-    }
-
-    // 5. 金额校验
-    const MAX_PROJECT_AMOUNT = 100000000; // 1亿上限
-    const MAX_WORD_COUNT = 100000000; // 1亿字上限
-    const MAX_UNIT_PRICE = 100000; // 每千字10万上限
-
-    if (wordCount !== undefined && wordCount !== null) {
-      const wordCountNum = parseFloat(wordCount);
-      if (isNaN(wordCountNum) || wordCountNum < 0 || wordCountNum > MAX_WORD_COUNT) {
-        return res.status(400).json({
-          success: false,
-          message: `字数必须在0-${MAX_WORD_COUNT.toLocaleString()}之间`
-        });
-      }
-    }
-
-    if (unitPrice !== undefined && unitPrice !== null) {
-      const unitPriceNum = parseFloat(unitPrice);
-      if (isNaN(unitPriceNum) || unitPriceNum < 0 || unitPriceNum > MAX_UNIT_PRICE) {
-        return res.status(400).json({
-          success: false,
-          message: `单价必须在0-${MAX_UNIT_PRICE.toLocaleString()}之间`
-        });
-      }
-    }
 
     // 计算总金额（如果提供了字数和单价）
     let finalAmount = projectAmount;
@@ -237,7 +134,8 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
       });
     }
 
-    // 验证最终金额范围
+    // 验证最终金额范围（express-validator已做基础验证，这里做业务逻辑校验）
+    const MAX_PROJECT_AMOUNT = 100000000; // 1亿上限
     if (isNaN(finalAmount) || finalAmount < 0 || finalAmount > MAX_PROJECT_AMOUNT) {
       return res.status(400).json({
         success: false,
@@ -245,14 +143,8 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
       });
     }
 
-    // 6. 日期校验
+    // 日期业务逻辑校验（express-validator已做格式验证）
     const deadlineDate = new Date(deadline);
-    if (isNaN(deadlineDate.getTime())) {
-      return res.status(400).json({
-        success: false,
-        message: '交付时间格式无效'
-      });
-    }
     if (deadlineDate < new Date()) {
       return res.status(400).json({
         success: false,
@@ -261,34 +153,21 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
       // 注意：这里可以根据业务需求调整，有些项目可能是补录历史数据
     }
 
-    // 7. 兼职销售字段校验
+    // 兼职销售字段业务逻辑校验（express-validator已做基础验证）
     if (partTimeSales && partTimeSales.isPartTime) {
       const companyReceivable = parseFloat(partTimeSales.companyReceivable || 0);
-      const taxRate = parseFloat(partTimeSales.taxRate || 0);
       
-      if (isNaN(companyReceivable) || companyReceivable < 0 || companyReceivable > finalAmount) {
+      if (companyReceivable > finalAmount) {
         return res.status(400).json({
           success: false,
           message: '公司应收金额必须在0到项目总金额之间'
         });
       }
-      if (isNaN(taxRate) || taxRate < 0 || taxRate > 1) {
-        return res.status(400).json({
-          success: false,
-          message: '税率必须在0-1之间（0-100%）'
-        });
-      }
     }
 
-    // 8. 兼职排版字段校验
+    // 兼职排版字段业务逻辑校验（express-validator已做基础验证）
     if (partTimeLayout && partTimeLayout.isPartTime) {
       const layoutCost = parseFloat(partTimeLayout.layoutCost || 0);
-      if (isNaN(layoutCost) || layoutCost < 0) {
-        return res.status(400).json({
-          success: false,
-          message: '排版费用必须是非负数'
-        });
-      }
       if (layoutCost > finalAmount * 0.05) {
         return res.status(400).json({
           success: false,
@@ -712,16 +591,8 @@ router.get('/', async (req, res) => {
     } else {
       // 向后兼容：如果没有提供 X-Role，使用旧逻辑
       if (!req.user.roles.includes('admin') && !req.user.roles.includes('finance')) {
-        // 获取作为成员参与的项目
-        const memberProjects = await ProjectMember.find({ userId: req.user._id })
-          .distinct('projectId');
-        
-        // 获取自己创建的项目
-        const createdProjects = await Project.find({ createdBy: req.user._id })
-          .distinct('_id');
-        
-        // 合并两个列表
-        const allProjectIds = [...new Set([...memberProjects.map(id => id.toString()), ...createdProjects.map(id => id.toString())])];
+        // 使用优化后的工具函数，避免重复查询
+        const allProjectIds = await getUserProjectIds(req.user._id);
         
         if (allProjectIds.length > 0) {
           query._id = { $in: allProjectIds };

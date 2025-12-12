@@ -63,6 +63,8 @@ kpiRecordSchema.index({ userId: 1, projectId: 1, month: 1, role: 1 }, { unique: 
 kpiRecordSchema.index({ month: 1 });
 // 项目索引（用于查询项目相关KPI）
 kpiRecordSchema.index({ projectId: 1 });
+// 用户和月份索引（用于查询用户KPI）
+kpiRecordSchema.index({ userId: 1, month: -1, role: 1 });
 
 module.exports = mongoose.model('KpiRecord', kpiRecordSchema);
 

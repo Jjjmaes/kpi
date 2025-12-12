@@ -205,12 +205,27 @@ async function generateMonthlyKPIRecords(month, force = false) {
     let updatedCount = 0;
     const errors = [];
 
+    // 优化：批量获取所有项目的成员，避免N+1查询
+    const projectIds = projects.map(p => p._id);
+    const allMembers = await ProjectMember.find({
+      projectId: { $in: projectIds }
+    }).populate('userId');
+    
+    // 按项目ID分组成员
+    const membersByProject = new Map();
+    allMembers.forEach(member => {
+      const projectId = member.projectId.toString();
+      if (!membersByProject.has(projectId)) {
+        membersByProject.set(projectId, []);
+      }
+      membersByProject.get(projectId).push(member);
+    });
+
     // 遍历每个项目
     for (const project of projects) {
       try {
-        // 获取项目成员
-        const members = await ProjectMember.find({ projectId: project._id })
-          .populate('userId');
+        // 从预加载的Map中获取项目成员
+        const members = membersByProject.get(project._id.toString()) || [];
 
         if (members.length === 0) {
           continue;
