@@ -6,7 +6,7 @@ const Customer = require('../models/Customer');
 const KpiConfig = require('../models/KpiConfig');
 
 /**
- * 导出月度KPI工资表
+ * 导出月度KPI分值表
  * @param {String} month - 月份，格式：YYYY-MM
  * @returns {Promise<Buffer>} Excel文件Buffer
  */
@@ -14,7 +14,7 @@ async function exportMonthlyKPISheet(month) {
   const workbook = new ExcelJS.Workbook();
   // 设置默认字体以支持中文
   workbook.creator = 'KPI系统';
-  const worksheet = workbook.addWorksheet(`KPI工资表-${month}`);
+  const worksheet = workbook.addWorksheet(`KPI分值表-${month}`);
   // 设置默认字体为支持中文的字体
   worksheet.properties.defaultRowHeight = 20;
 
@@ -55,12 +55,12 @@ async function exportMonthlyKPISheet(month) {
     { header: '用户名', key: 'username', width: 15 },
     { header: '邮箱', key: 'email', width: 25 },
     { header: '角色', key: 'roles', width: 20 },
-    { header: '翻译KPI', key: 'translator', width: 12 },
-    { header: '审校KPI', key: 'reviewer', width: 12 },
-    { header: 'PM KPI', key: 'pm', width: 12 },
-    { header: '销售KPI', key: 'sales', width: 12 },
-    { header: '综合岗KPI', key: 'admin', width: 12 },
-    { header: 'KPI总计', key: 'total', width: 15 },
+    { header: '翻译KPI(分)', key: 'translator', width: 12 },
+    { header: '审校KPI(分)', key: 'reviewer', width: 12 },
+    { header: 'PM KPI(分)', key: 'pm', width: 12 },
+    { header: '销售KPI(分)', key: 'sales', width: 12 },
+    { header: '综合岗KPI(分)', key: 'admin', width: 12 },
+    { header: 'KPI总计(分)', key: 'total', width: 15 },
     { header: '参与项目数', key: 'projectCount', width: 12 }
   ];
 
@@ -141,7 +141,7 @@ async function exportMonthlyKPISheet(month) {
     { header: '项目名称', key: 'projectName', width: 30 },
     { header: '客户名称', key: 'clientName', width: 20 },
     { header: '项目金额', key: 'projectAmount', width: 15 },
-    { header: 'KPI数值', key: 'kpiValue', width: 15 },
+    { header: 'KPI分值', key: 'kpiValue', width: 15 },
     { header: '计算月份', key: 'month', width: 12 }
   ];
   
@@ -227,7 +227,7 @@ async function exportUserKPIDetail(userId, month = null, canViewAmount = true) {
   }
   
   columns.push(
-    { header: 'KPI数值', key: 'kpiValue', width: 15 },
+    { header: 'KPI分值', key: 'kpiValue', width: 15 },
     { header: '计算公式', key: 'formula', width: 50 }
   );
 

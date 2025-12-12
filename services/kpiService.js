@@ -110,8 +110,8 @@ function appendComplaintNote(formula, project) {
 }
 
 function calculateSalesCombined(project, completionFactor) {
-  const bonusRatio = project.locked_ratios.sales_bonus;
-  const commissionRatio = project.locked_ratios.sales_commission;
+  const bonusRatio = project.locked_ratios?.sales_bonus || 0;
+  const commissionRatio = project.locked_ratios?.sales_commission || 0;
   const projectAmount = project.projectAmount || 0;
   let receivedAmount = project.payment?.receivedAmount || 0;
   // 预估阶段：无回款金额则使用项目金额；若标记回款完成也同样以项目金额兜底
@@ -119,8 +119,8 @@ function calculateSalesCombined(project, completionFactor) {
     receivedAmount = projectAmount;
   }
 
-  const bonusPart = projectAmount * bonusRatio;
-  const commissionPart = receivedAmount * commissionRatio * completionFactor;
+  const bonusPart = projectAmount * (bonusRatio || 0);
+  const commissionPart = receivedAmount * (commissionRatio || 0) * (completionFactor || 1.0);
   const kpiValue = Math.round((bonusPart + commissionPart) * 100) / 100;
   
   // 计算回款周期信息（用于公式显示）
@@ -252,7 +252,7 @@ async function generateMonthlyKPIRecords(month, force = false) {
                 formula: `成交额(${totalAmount}) - 公司应收(${companyReceivable}) = 应收金额(${receivableAmount})；应收金额(${receivableAmount}) - 税费(${taxAmount.toFixed(2)}) = 返还佣金(${commission})`
               };
             } else if (member.role === 'layout') {
-              // 兼职排版：直接使用排版费用作为KPI
+              // 兼职排版：直接使用排版费用作为KPI（按金额计算）
               const layoutCost = project.partTimeLayout?.layoutCost || 0;
               kpiResult = {
                 kpiValue: layoutCost,

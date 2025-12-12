@@ -3439,7 +3439,7 @@ async function viewProject(projectId) {
 
                     <div class="detail-section" id="realtimeKpiSection">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                            <h4>预估KPI（金额）</h4>
+                            <h4>预估KPI（分值）</h4>
                             <button class="btn-small" onclick="loadRealtimeKPI('${projectId}')">刷新</button>
                         </div>
                         <div id="realtimeKpiContent"><div class="card-desc">加载中...</div></div>
@@ -4391,18 +4391,53 @@ async function loadKPI() {
                             </tr>
                         </thead>
                         <tbody>
-                            ${data.data.summary.map(user => `
+                            ${data.data.summary.map(user => {
+                                // 判断用户是否有兼职岗位和专职岗位
+                                const partTimeRoles = Object.keys(user.byRole).filter(role => {
+                                    const roleStr = String(role || '').trim();
+                                    return roleStr === 'part_time_sales' || roleStr === 'layout';
+                                });
+                                const fullTimeRoles = Object.keys(user.byRole).filter(role => {
+                                    const roleStr = String(role || '').trim();
+                                    return roleStr !== 'part_time_sales' && roleStr !== 'layout';
+                                });
+                                
+                                // 计算兼职岗位和专职岗位的KPI总和
+                                const partTimeTotal = partTimeRoles.reduce((sum, role) => sum + (user.byRole[role] || 0), 0);
+                                const fullTimeTotal = fullTimeRoles.reduce((sum, role) => sum + (user.byRole[role] || 0), 0);
+                                
+                                // 根据岗位类型显示总计
+                                let totalDisplay = '';
+                                if (partTimeRoles.length > 0 && fullTimeRoles.length === 0) {
+                                    // 只有兼职岗位
+                                    totalDisplay = `<strong>¥${user.totalKPI.toLocaleString()} 元</strong>`;
+                                } else if (partTimeRoles.length === 0 && fullTimeRoles.length > 0) {
+                                    // 只有专职岗位
+                                    totalDisplay = `<strong>${user.totalKPI.toLocaleString()} 分</strong>`;
+                                } else if (partTimeRoles.length > 0 && fullTimeRoles.length > 0) {
+                                    // 混合岗位
+                                    totalDisplay = `<strong>兼职: ¥${partTimeTotal.toLocaleString()} 元<br>专职: ${fullTimeTotal.toLocaleString()} 分</strong>`;
+                                } else {
+                                    totalDisplay = `<strong>${user.totalKPI.toLocaleString()} 分</strong>`;
+                                }
+                                
+                                return `
                                 <tr>
                                     <td>${user.userName}</td>
                                     <td>${user.roles.map(r => getRoleText(r)).join(', ')}</td>
                                     <td style="font-size: 12px;">
-                                        ${Object.entries(user.byRole).map(([role, value]) => 
-                                            `${getRoleText(role)}: ¥${value.toLocaleString()}`
-                                        ).join('<br>')}
+                                        ${Object.entries(user.byRole).map(([role, value]) => {
+                                            const roleStr = String(role || '').trim();
+                                            const isPartTimeRole = roleStr === 'part_time_sales' || roleStr === 'layout';
+                                            const unit = isPartTimeRole ? '元' : '分';
+                                            const prefix = isPartTimeRole ? '¥' : '';
+                                            return `${getRoleText(role)}: ${prefix}${value.toLocaleString()} ${unit}`;
+                                        }).join('<br>')}
                                     </td>
-                                    <td><strong>¥${user.totalKPI.toLocaleString()}</strong></td>
+                                    <td>${totalDisplay}</td>
                                 </tr>
-                            `).join('')}
+                            `;
+                            }).join('')}
                         </tbody>
                     </table>
                     ${data.data.monthlyRoleKPIs && data.data.monthlyRoleKPIs.length > 0 ? `
@@ -4416,7 +4451,7 @@ async function loadKPI() {
                                         <th>全公司当月项目总金额</th>
                                         <th>系数</th>
                                         <th>完成系数（评价）</th>
-                                        <th>KPI数值</th>
+                                        <th>KPI值</th>
                                         <th>计算公式</th>
                                         ${currentUser.roles.includes('admin') ? '<th>操作</th>' : ''}
                                     </tr>
@@ -4433,7 +4468,7 @@ async function loadKPI() {
                                                   r.evaluationLevel === 'poor' ? '<span style="color:#ef4444;">差 (0.8)</span>' : '<span>中 (1.0)</span>'}
                                                 ${r.evaluatedBy ? `<br><small style="color:#666;">评价人: ${r.evaluatedBy.name || '管理员'}</small>` : '<br><small style="color:#999;">未评价</small>'}
                                             </td>
-                                            <td>¥${r.kpiValue.toLocaleString()}</td>
+                                            <td>${r.kpiValue.toLocaleString()} 分</td>
                                             <td style="font-size: 12px;">${r.calculationDetails?.formula || ''}</td>
                                             ${currentUser.roles.includes('admin') ? `
                                                 <td>
@@ -4476,7 +4511,7 @@ async function loadKPI() {
                                         <th>全公司当月项目总金额</th>
                                         <th>系数</th>
                                         <th>完成系数（评价）</th>
-                                        <th>KPI数值</th>
+                                        <th>KPI值</th>
                                         <th>计算公式</th>
                                         ${currentUser.roles.includes('admin') ? '<th>操作</th>' : ''}
                                     </tr>
@@ -4492,7 +4527,7 @@ async function loadKPI() {
                                                   r.evaluationLevel === 'poor' ? '<span style="color:#ef4444;">差 (0.8)</span>' : '<span>中 (1.0)</span>'}
                                                 ${r.evaluatedBy ? `<br><small style="color:#666;">评价人: ${r.evaluatedBy.name || '管理员'}</small>` : '<br><small style="color:#999;">未评价</small>'}
                                             </td>
-                                            <td>¥${r.kpiValue.toLocaleString()}</td>
+                                            <td>${r.kpiValue.toLocaleString()} 分</td>
                                             <td style="font-size: 12px;">${r.calculationDetails?.formula || ''}</td>
                                             ${currentUser.roles.includes('admin') ? `
                                                 <td>
@@ -4511,7 +4546,7 @@ async function loadKPI() {
 
                 const html = `
                     <h3>${user.name} 的KPI - ${month}</h3>
-                    <p><strong>总计: ¥${data.data.total.toLocaleString()}</strong></p>
+                    <p><strong>总计: ${data.data.total.toLocaleString()} 分</strong> <small style="color:#666;">（兼职岗位按元计算，专职岗位按分计算）</small></p>
                     ${data.data.records.length === 0 && (!data.data.monthlyRoleKPIs || data.data.monthlyRoleKPIs.length === 0) ? '<p>该月暂无KPI记录</p>' : `
                         <table>
                             <thead>
@@ -4520,21 +4555,28 @@ async function loadKPI() {
                                     <th>客户名称</th>
                                     ${shouldHideAmount ? '' : '<th>项目金额</th>'}
                                     <th>角色</th>
-                                    <th>KPI数值</th>
+                                    <th>KPI值</th>
                                     <th>计算公式</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                ${data.data.records.map(r => `
+                                ${data.data.records.map(r => {
+                                    // 兼职销售和兼职排版按金额计算（元），其他角色按分值计算（分）
+                                    const roleStr = String(r.role || '').trim();
+                                    const isPartTimeRole = roleStr === 'part_time_sales' || roleStr === 'layout';
+                                    const unit = isPartTimeRole ? '元' : '分';
+                                    const prefix = isPartTimeRole ? '¥' : '';
+                                    return `
                                     <tr>
                                         <td>${r.projectId?.projectName || 'N/A'}</td>
                                         <td>${r.projectId?.clientName || 'N/A'}</td>
                                         ${shouldHideAmount ? '' : `<td>${r.projectId?.projectAmount ? '¥' + r.projectId.projectAmount.toLocaleString() : '-'}</td>`}
                                         <td>${getRoleText(r.role)}</td>
-                                        <td>¥${r.kpiValue.toLocaleString()}</td>
+                                        <td>${prefix}${r.kpiValue.toLocaleString()} ${unit}</td>
                                         <td style="font-size: 12px;">${r.calculationDetails?.formula || ''}</td>
                                     </tr>
-                                `).join('')}
+                                `;
+                                }).join('')}
                             </tbody>
                         </table>
                     `}
@@ -5055,20 +5097,24 @@ function renderDashboardCards(data) {
     const isSales = currentUser?.roles?.includes('sales') || currentUser?.roles?.includes('part_time_sales');
     const isAdmin = currentUser?.roles?.includes('admin');
     const isFinance = currentUser?.roles?.includes('finance');
+    const isPM = currentUser?.roles?.includes('pm');
+    const isAdminStaff = currentUser?.roles?.includes('admin_staff');
     const isWorker = currentUser?.roles?.includes('translator') || currentUser?.roles?.includes('reviewer') || currentUser?.roles?.includes('layout');
     
-    // 销售和兼职销售显示成交额，其他角色显示KPI
+    // 销售和兼职销售显示成交额，但所有角色都应该显示KPI
     const showSalesAmount = isSales && !isAdmin && !isFinance;
+    // 所有角色都可以查看KPI（只要后端返回了kpiTotal数据）
+    const showKPI = data.kpiTotal !== undefined || data.kpiByRole !== undefined;
     
     const cards = `
         <div class="card-grid">
             <div class="card stat-card stat-primary" onclick="navigateFromDashboardCard('projects')">
                 <div class="stat-icon">📊</div>
                 <div class="stat-content">
-                <div class="card-title">当月项目数</div>
-                <div class="card-value">${data.projectCount || 0}</div>
-                <div class="card-desc">月份：${data.month}</div>
-            </div>
+                    <div class="card-title">当月项目数</div>
+                    <div class="card-value">${data.projectCount || 0}</div>
+                    <div class="card-desc">月份：${data.month}</div>
+                </div>
             </div>
             ${showSalesAmount && data.totalProjectAmount !== undefined ? `
             <div class="card stat-card stat-success">
@@ -5080,107 +5126,107 @@ function renderDashboardCards(data) {
                 </div>
             </div>
             ` : ''}
-            ${!showSalesAmount ? `
-            ${data.totalProjectAmount !== undefined ? `
+            ${!showSalesAmount && data.totalProjectAmount !== undefined ? `
             <div class="card stat-card stat-success" onclick="navigateFromDashboardCard('projects')">
                 <div class="stat-icon">💰</div>
                 <div class="stat-content">
-                <div class="card-title">项目金额合计</div>
-                <div class="card-value">¥${(data.totalProjectAmount || 0).toLocaleString()}</div>
-                <div class="card-desc">可见范围内金额</div>
+                    <div class="card-title">项目金额合计</div>
+                    <div class="card-value">¥${(data.totalProjectAmount || 0).toLocaleString()}</div>
+                    <div class="card-desc">可见范围内金额</div>
                 </div>
             </div>
             ` : ''}
-            <div class="card stat-card stat-info" onclick="navigateFromDashboardCard('projects')">
+            ${showKPI ? `
+            <div class="card stat-card stat-info" onclick="navigateFromDashboardCard('kpi')">
                 <div class="stat-icon">📈</div>
                 <div class="stat-content">
-                <div class="card-title">KPI合计</div>
-                <div class="card-value">¥${(data.kpiTotal || 0).toLocaleString()}</div>
-                <div class="card-desc">根据角色权限汇总</div>
-            </div>
+                    <div class="card-title">KPI合计</div>
+                    <div class="card-value">${(data.kpiTotal || 0).toLocaleString()} 分</div>
+                    <div class="card-desc">根据角色权限汇总（兼职岗位按元，专职岗位按分）</div>
+                </div>
             </div>
             ` : ''}
             <div class="card stat-card stat-primary" onclick="navigateFromDashboardCard('projects', 'in_progress')">
                 <div class="stat-icon">✅</div>
                 <div class="stat-content">
-                <div class="card-title">完成率</div>
-                <div class="card-value">${completionRate}%</div>
-                <div class="subtext">完成/总项目：${completed}/${total}</div>
-            </div>
+                    <div class="card-title">完成率</div>
+                    <div class="card-value">${completionRate}%</div>
+                    <div class="subtext">完成/总项目：${completed}/${total}</div>
+                </div>
             </div>
             <div class="card stat-card stat-warning" onclick="navigateFromDashboardCard('projects', 'in_progress')">
                 <div class="stat-icon">🔄</div>
                 <div class="stat-content">
-                <div class="card-title">进行中</div>
-                <div class="card-value">${inProgress}</div>
-                <div class="subtext">当前执行的项目</div>
-            </div>
+                    <div class="card-title">进行中</div>
+                    <div class="card-value">${inProgress}</div>
+                    <div class="subtext">当前执行的项目</div>
+                </div>
             </div>
             <div class="card stat-card stat-success" onclick="navigateFromDashboardCard('projects', 'completed')">
                 <div class="stat-icon">✓</div>
                 <div class="stat-content">
-                <div class="card-title">已完成</div>
-                <div class="card-value">${completed}</div>
-                <div class="subtext">本月完成项目</div>
-            </div>
+                    <div class="card-title">已完成</div>
+                    <div class="card-value">${completed}</div>
+                    <div class="subtext">本月完成项目</div>
+                </div>
             </div>
             <div class="card stat-card stat-info" onclick="navigateFromDashboardCard('projects', 'pending')">
                 <div class="stat-icon">⏳</div>
                 <div class="stat-content">
-                <div class="card-title">待开始</div>
-                <div class="card-value">${pending}</div>
-                <div class="subtext">待排期项目</div>
-            </div>
+                    <div class="card-title">待开始</div>
+                    <div class="card-value">${pending}</div>
+                    <div class="subtext">待排期项目</div>
+                </div>
             </div>
             <div class="card stat-card stat-danger" onclick="navigateFromDashboardCard('paymentOverdue')">
                 <div class="stat-icon">⚠️</div>
                 <div class="stat-content">
-                <div class="card-title">回款预警</div>
-                <div class="card-value">${(data.paymentWarnings?.length || 0)}</div>
-                <div class="card-desc">逾期未回款项目</div>
-            </div>
+                    <div class="card-title">回款预警</div>
+                    <div class="card-value">${(data.paymentWarnings?.length || 0)}</div>
+                    <div class="card-desc">逾期未回款项目</div>
+                </div>
             </div>
             <div class="card stat-card stat-danger" onclick="navigateFromDashboardCard('deliveryOverdue')">
                 <div class="stat-icon">🚨</div>
                 <div class="stat-content">
-                <div class="card-title">交付逾期</div>
-                <div class="card-value">${(data.deliveryWarnings?.length || 0)}</div>
-                <div class="card-desc">截止已过未完成</div>
+                    <div class="card-title">交付逾期</div>
+                    <div class="card-value">${(data.deliveryWarnings?.length || 0)}</div>
+                    <div class="card-desc">截止已过未完成</div>
                 </div>
             </div>
             ${paymentRate !== null ? `
             <div class="card stat-card stat-success" onclick="navigateFromDashboardCard('receivables')">
                 <div class="stat-icon">💵</div>
                 <div class="stat-content">
-                <div class="card-title">回款完成率</div>
-                <div class="card-value">${paymentRate}%</div>
-                <div class="subtext">已回款/项目金额</div>
+                    <div class="card-title">回款完成率</div>
+                    <div class="card-value">${paymentRate}%</div>
+                    <div class="subtext">已回款/项目金额</div>
                 </div>
             </div>
             ` : ''}
             <div class="card stat-card stat-info" onclick="navigateFromDashboardCard('projects')">
                 <div class="stat-icon">📅</div>
                 <div class="stat-content">
-                <div class="card-title">近7天完成</div>
-                <div class="card-value">${recentCompleted}</div>
-                <div class="subtext">近7天完成项目数</div>
-            </div>
+                    <div class="card-title">近7天完成</div>
+                    <div class="card-value">${recentCompleted}</div>
+                    <div class="subtext">近7天完成项目数</div>
+                </div>
             </div>
             <div class="card stat-card stat-danger" onclick="navigateFromDashboardCard('paymentOverdue')">
                 <div class="stat-icon">⚠️</div>
                 <div class="stat-content">
-                <div class="card-title">近7天回款预警</div>
-                <div class="card-value">${recentPaymentOverdue}</div>
-                <div class="card-desc">近7天逾期回款项目</div>
-            </div>
+                    <div class="card-title">近7天回款预警</div>
+                    <div class="card-value">${recentPaymentOverdue}</div>
+                    <div class="card-desc">近7天逾期回款项目</div>
+                </div>
             </div>
             <div class="card stat-card stat-danger" onclick="navigateFromDashboardCard('deliveryOverdue')">
                 <div class="stat-icon">🚨</div>
                 <div class="stat-content">
-                <div class="card-title">近7天交付预警</div>
-                <div class="card-value">${recentDeliveryOverdue}</div>
-                <div class="card-desc">近7天交付逾期项目</div>
-            </div>
+                    <div class="card-title">近7天交付预警</div>
+                    <div class="card-value">${recentDeliveryOverdue}</div>
+                    <div class="card-desc">近7天交付逾期项目</div>
+                </div>
             </div>
         </div>
     `;
@@ -6517,15 +6563,22 @@ async function loadPendingKpi() {
         showAlert('pendingKpiList', data.message || '加载失败', 'error');
         return;
     }
-    const rows = data.data.map(r => `
+    const rows = data.data.map(r => {
+        // 兼职销售和兼职排版按金额计算（元），其他角色按分值计算（分）
+        const roleStr = String(r.role || '').trim();
+        const isPartTimeRole = roleStr === 'part_time_sales' || roleStr === 'layout';
+        const unit = isPartTimeRole ? '元' : '分';
+        const prefix = isPartTimeRole ? '¥' : '';
+        return `
         <tr>
             <td>${r.userId?.name || 'N/A'}</td>
             <td>${r.projectId?.projectName || 'N/A'}</td>
             <td>${r.role}</td>
-            <td>¥${(r.kpiValue || 0).toLocaleString()}</td>
+            <td>${prefix}${(r.kpiValue || 0).toLocaleString()} ${unit}</td>
             <td>${r.month}</td>
         </tr>
-    `).join('');
+    `;
+    }).join('');
     document.getElementById('pendingKpiList').innerHTML = `
         <table>
             <thead>
@@ -6621,9 +6674,14 @@ function renderDashboardCharts(data) {
                     const chart = new Chart(ctx, {
                         type: 'bar',
                         data: {
-                            labels: kpiEntries.map(([k]) => getRoleText(k)),
+                            labels: kpiEntries.map(([k]) => {
+                                const roleStr = String(k || '').trim();
+                                const isPartTimeRole = roleStr === 'part_time_sales' || roleStr === 'layout';
+                                const unit = isPartTimeRole ? '(元)' : '(分)';
+                                return getRoleText(k) + unit;
+                            }),
                             datasets: [{
-                                label: 'KPI金额',
+                                label: 'KPI值',
                                 data: kpiEntries.map(([, v]) => v || 0),
                                 backgroundColor: 'rgba(102, 126, 234, 0.8)',
                                 borderColor: 'rgba(102, 126, 234, 1)',
@@ -6637,7 +6695,13 @@ function renderDashboardCharts(data) {
                                 legend: { display: false },
                                 tooltip: {
                                     callbacks: {
-                                        label: (context) => `¥${(context.parsed.y || 0).toLocaleString()}`
+                                        label: (context) => {
+                                            const roleStr = String(kpiEntries[context.dataIndex][0] || '').trim();
+                                            const isPartTimeRole = roleStr === 'part_time_sales' || roleStr === 'layout';
+                                            const prefix = isPartTimeRole ? '¥' : '';
+                                            const unit = isPartTimeRole ? ' 元' : ' 分';
+                                            return prefix + (context.parsed.y || 0).toLocaleString() + unit;
+                                        }
                                     }
                                 }
                             },
@@ -6645,7 +6709,10 @@ function renderDashboardCharts(data) {
                                 y: {
                                     beginAtZero: true,
                                     ticks: {
-                                        callback: (value) => '¥' + value.toLocaleString()
+                                        callback: (value) => {
+                                            // 图表中显示数值，单位在tooltip中显示
+                                            return value.toLocaleString();
+                                        }
                                     }
                                 }
                             }
@@ -6915,21 +6982,30 @@ async function loadRealtimeKPI(projectId) {
                             <th>角色</th>
                             <th>金额奖励</th>
                             <th>回款奖励</th>
-                            <th>金额</th>
+                            <th>KPI值</th>
                             <th>公式</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${results.map(r => `
+                        ${results.map(r => {
+                            // 兼职销售和兼职排版按金额计算（元），其他角色按分值计算（分）
+                            const roleStr = String(r.role || '').trim();
+                            const isPartTimeRole = roleStr === 'part_time_sales' || roleStr === 'layout';
+                            const unit = isPartTimeRole ? '元' : '分';
+                            const prefix = isPartTimeRole ? '¥' : '';
+                            const salesBonusUnit = r.role === 'sales' ? '分' : (r.role === 'part_time_sales' ? '元' : '');
+                            const salesCommissionUnit = r.role === 'sales' ? '分' : (r.role === 'part_time_sales' ? '元' : '');
+                            return `
                             <tr>
                                 <td>${r.userName}</td>
                                 <td>${getRoleText(r.role)}</td>
-                                <td>${r.details?.salesBonus !== undefined ? '¥' + (r.details.salesBonus || 0).toLocaleString() : '-'}</td>
-                                <td>${r.details?.salesCommission !== undefined ? '¥' + (r.details.salesCommission || 0).toLocaleString() : '-'}</td>
-                                <td>¥${(r.kpiValue || 0).toLocaleString()}</td>
+                                <td>${r.details?.salesBonus !== undefined ? (r.role === 'sales' ? '' : '¥') + (r.details.salesBonus || 0).toLocaleString() + (salesBonusUnit ? ' ' + salesBonusUnit : '') : '-'}</td>
+                                <td>${r.details?.salesCommission !== undefined ? (r.role === 'sales' ? '' : '¥') + (r.details.salesCommission || 0).toLocaleString() + (salesCommissionUnit ? ' ' + salesCommissionUnit : '') : '-'}</td>
+                                <td>${prefix}${(r.kpiValue || 0).toLocaleString()} ${unit}</td>
                                 <td style="font-size:12px;">${r.formula || ''}</td>
                             </tr>
-                        `).join('')}
+                        `;
+                        }).join('')}
                     </tbody>
                 </table>
             </div>
