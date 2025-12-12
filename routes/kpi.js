@@ -140,7 +140,8 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
       memberQuery.role = currentRole;
     }
     
-    const userMemberProjects = await ProjectMember.find(memberQuery).populate('projectId');
+    const userMemberProjects = await ProjectMember.find(memberQuery)
+      .populate('projectId', 'projectName projectAmount deadline status');
     
     // 按项目和角色分组，避免重复计算
     const projectRoleMap = new Map(); // key: projectId_role, value: member

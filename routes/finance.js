@@ -469,7 +469,8 @@ router.post('/invoice/:projectId', allowManageFinance, async (req, res) => {
 router.put('/invoice/:invoiceId', allowManageFinance, async (req, res) => {
   try {
     const { invoiceId } = req.params;
-    const invoice = await Invoice.findById(invoiceId).populate('projectId');
+    const invoice = await Invoice.findById(invoiceId)
+      .populate('projectId', 'projectName projectNumber projectAmount customerId');
     if (!invoice) return res.status(404).json({ success: false, message: '发票不存在' });
     
     const project = invoice.projectId;

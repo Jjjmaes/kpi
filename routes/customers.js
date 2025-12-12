@@ -1,217 +1,63 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, authorize } = require('../middleware/auth');
-const Customer = require('../models/Customer');
+const { asyncHandler } = require('../middleware/errorHandler');
+const customerService = require('../services/customerService');
 
 // 所有客户路由需要认证
 router.use(authenticate);
 
 // 获取所有客户（销售、兼职销售、管理员、财务可见）
-router.get('/', authorize('admin', 'finance', 'sales', 'part_time_sales'), async (req, res) => {
-  try {
-    const { search, isActive } = req.query;
-    let query = {};
+router.get('/', authorize('admin', 'finance', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
+  const customers = await customerService.getAllCustomers(req.query, req.user);
 
-    // 权限过滤：销售和兼职销售只能看到自己创建的客户
-    const isAdmin = req.user.roles.includes('admin');
-    const isFinance = req.user.roles.includes('finance');
-    const isSales = req.user.roles.includes('sales') || req.user.roles.includes('part_time_sales');
-    
-    if (isSales && !isAdmin && !isFinance) {
-      // 销售只能看到自己创建的客户
-      query.createdBy = req.user._id;
-    }
-
-    // 搜索条件
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { shortName: { $regex: search, $options: 'i' } },
-        { contactPerson: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    // 激活状态过滤
-    if (isActive !== undefined) {
-      query.isActive = isActive === 'true';
-    } else {
-      query.isActive = true; // 默认只显示激活的
-    }
-
-    const customers = await Customer.find(query)
-      .populate('createdBy', 'name username')
-      .sort({ createdAt: -1 });
-
-    res.json({
-      success: true,
-      data: customers
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
+  res.json({
+    success: true,
+    data: customers
+  });
+}));
 
 // 获取单个客户详情
-router.get('/:id', authorize('admin', 'finance', 'sales', 'part_time_sales'), async (req, res) => {
-  try {
-    const customer = await Customer.findById(req.params.id)
-      .populate('createdBy', 'name username');
+router.get('/:id', authorize('admin', 'finance', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
+  const customer = await customerService.getCustomerById(req.params.id);
 
-    if (!customer) {
-      return res.status(404).json({
-        success: false,
-        message: '客户不存在'
-      });
-    }
-
-    res.json({
-      success: true,
-      data: customer
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
+  res.json({
+    success: true,
+    data: customer
+  });
+}));
 
 // 创建客户（销售、管理员）
-router.post('/', authorize('admin', 'sales', 'part_time_sales'), async (req, res) => {
-  try {
-    const { name, shortName, contactPerson, phone, email, address, notes } = req.body;
+router.post('/', authorize('admin', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
+  const customer = await customerService.createCustomer(req.body, req.user);
 
-    if (!name) {
-      return res.status(400).json({
-        success: false,
-        message: '客户名称不能为空'
-      });
-    }
-
-    // 检查是否已存在同名客户
-    const existingCustomer = await Customer.findOne({ name, isActive: true });
-    if (existingCustomer) {
-      return res.status(400).json({
-        success: false,
-        message: '客户名称已存在'
-      });
-    }
-
-    const customer = await Customer.create({
-      name,
-      shortName,
-      contactPerson,
-      phone,
-      email,
-      address,
-      notes,
-      createdBy: req.user._id
-    });
-
-    res.status(201).json({
-      success: true,
-      message: '客户创建成功',
-      data: customer
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
+  res.status(201).json({
+    success: true,
+    message: '客户创建成功',
+    data: customer
+  });
+}));
 
 // 更新客户（销售、管理员）
-router.put('/:id', authorize('admin', 'sales', 'part_time_sales'), async (req, res) => {
-  try {
-    const { name, shortName, contactPerson, phone, email, address, notes, isActive } = req.body;
-    const customer = await Customer.findById(req.params.id);
+router.put('/:id', authorize('admin', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
+  const customer = await customerService.updateCustomer(req.params.id, req.body, req.user);
 
-    if (!customer) {
-      return res.status(404).json({
-        success: false,
-        message: '客户不存在'
-      });
-    }
-
-    // 权限检查：销售只能编辑自己创建的客户
-    const isAdmin = req.user.roles.includes('admin');
-    const isSales = req.user.roles.includes('sales') || req.user.roles.includes('part_time_sales');
-    
-    if (isSales && !isAdmin) {
-      if (customer.createdBy.toString() !== req.user._id.toString()) {
-        return res.status(403).json({
-          success: false,
-          message: '只能编辑自己创建的客户'
-        });
-      }
-    }
-
-    // 如果修改名称，检查是否与其他客户重复
-    if (name && name !== customer.name) {
-      const existingCustomer = await Customer.findOne({ name, isActive: true, _id: { $ne: customer._id } });
-      if (existingCustomer) {
-        return res.status(400).json({
-          success: false,
-          message: '客户名称已存在'
-        });
-      }
-    }
-
-    if (name) customer.name = name;
-    if (shortName !== undefined) customer.shortName = shortName;
-    if (contactPerson !== undefined) customer.contactPerson = contactPerson;
-    if (phone !== undefined) customer.phone = phone;
-    if (email !== undefined) customer.email = email;
-    if (address !== undefined) customer.address = address;
-    if (notes !== undefined) customer.notes = notes;
-    if (typeof isActive === 'boolean') customer.isActive = isActive;
-
-    await customer.save();
-
-    res.json({
-      success: true,
-      message: '客户更新成功',
-      data: customer
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
+  res.json({
+    success: true,
+    message: '客户更新成功',
+    data: customer
+  });
+}));
 
 // 删除客户（软删除，仅管理员）
-router.delete('/:id', authorize('admin'), async (req, res) => {
-  try {
-    const customer = await Customer.findById(req.params.id);
+router.delete('/:id', authorize('admin'), asyncHandler(async (req, res) => {
+  await customerService.deleteCustomer(req.params.id);
 
-    if (!customer) {
-      return res.status(404).json({
-        success: false,
-        message: '客户不存在'
-      });
-    }
-
-    // 软删除
-    customer.isActive = false;
-    await customer.save();
-
-    res.json({
-      success: true,
-      message: '客户已删除'
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-});
+  res.json({
+    success: true,
+    message: '客户已删除'
+  });
+}));
 
 module.exports = router;
 
