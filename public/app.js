@@ -24,7 +24,10 @@ let allCustomers = []; // 缓存客户列表
 let currentProjectDetail = null; // 缓存当前项目详情
 let notifications = [];
 let unreadNotificationCount = 0;
+let previousUnreadCount = 0; // 上一次的未读数量，用于检测新通知
 let notificationPoller = null;
+let notificationPanelPoller = null; // 通知面板打开时的刷新定时器
+let notificationSoundEnabled = true; // 通知声音开关，默认开启
 const NOTIFICATION_POLL_INTERVAL = 60000;
 
 // 角色管理
@@ -268,13 +271,173 @@ function updateNotificationBadge() {
     }
 }
 
+// 全局AudioContext，延迟初始化
+let notificationAudioContext = null;
+
+// 初始化AudioContext（需要在用户交互后调用）
+function initNotificationAudioContext() {
+    if (!notificationAudioContext && notificationSoundEnabled) {
+        try {
+            notificationAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+        } catch (err) {
+            console.warn('[Notifications] 初始化AudioContext失败:', err);
+        }
+    }
+    return notificationAudioContext;
+}
+
+// 恢复AudioContext（如果被暂停）
+async function resumeNotificationAudioContext() {
+    if (notificationAudioContext && notificationAudioContext.state === 'suspended') {
+        try {
+            await notificationAudioContext.resume();
+        } catch (err) {
+            console.warn('[Notifications] 恢复AudioContext失败:', err);
+        }
+    }
+}
+
+// 播放通知声音
+async function playNotificationSound() {
+    if (!notificationSoundEnabled) return;
+    
+    try {
+        // 确保AudioContext已初始化
+        let audioContext = notificationAudioContext || initNotificationAudioContext();
+        
+        if (!audioContext) {
+            // 如果无法创建AudioContext，使用HTML5 Audio作为备用方案
+            playNotificationSoundFallback();
+            return;
+        }
+        
+        // 如果AudioContext被暂停，尝试恢复
+        if (audioContext.state === 'suspended') {
+            await resumeNotificationAudioContext();
+        }
+        
+        // 如果仍然无法使用，使用备用方案
+        if (audioContext.state === 'suspended') {
+            playNotificationSoundFallback();
+            return;
+        }
+        
+        // 创建两个音调，模拟常见的"叮"声（类似系统通知音）
+        const now = audioContext.currentTime;
+        
+        // 第一个音调：高音（800Hz）
+        const osc1 = audioContext.createOscillator();
+        const gain1 = audioContext.createGain();
+        osc1.connect(gain1);
+        gain1.connect(audioContext.destination);
+        osc1.frequency.value = 800;
+        osc1.type = 'sine';
+        
+        // 第二个音调：低音（600Hz），稍微延迟，形成"叮咚"效果
+        const osc2 = audioContext.createOscillator();
+        const gain2 = audioContext.createGain();
+        osc2.connect(gain2);
+        gain2.connect(audioContext.destination);
+        osc2.frequency.value = 600;
+        osc2.type = 'sine';
+        
+        // 设置音量包络（渐入渐出，更柔和）
+        // 第一个音调：0-0.05秒渐入，0.05-0.2秒保持，0.2-0.4秒渐出
+        gain1.gain.setValueAtTime(0, now);
+        gain1.gain.linearRampToValueAtTime(0.4, now + 0.05);
+        gain1.gain.setValueAtTime(0.4, now + 0.2);
+        gain1.gain.linearRampToValueAtTime(0, now + 0.4);
+        
+        // 第二个音调：0.1秒开始，0.1-0.15秒渐入，0.15-0.35秒保持，0.35-0.5秒渐出
+        gain2.gain.setValueAtTime(0, now + 0.1);
+        gain2.gain.linearRampToValueAtTime(0.35, now + 0.15);
+        gain2.gain.setValueAtTime(0.35, now + 0.35);
+        gain2.gain.linearRampToValueAtTime(0, now + 0.5);
+        
+        // 播放声音（总共500毫秒，形成"叮咚"效果）
+        osc1.start(now);
+        osc1.stop(now + 0.4);
+        osc2.start(now + 0.1);
+        osc2.stop(now + 0.5);
+    } catch (err) {
+        console.warn('[Notifications] 播放声音失败:', err);
+        // 使用备用方案
+        playNotificationSoundFallback();
+    }
+}
+
+// 备用声音播放方案（使用HTML5 Audio，生成简单的beep音）
+function playNotificationSoundFallback() {
+    try {
+        // 创建一个短暂的音频数据URL（440Hz的正弦波，100ms）
+        const sampleRate = 44100;
+        const duration = 0.1; // 100ms
+        const frequency = 800;
+        const numSamples = Math.floor(sampleRate * duration);
+        const buffer = new ArrayBuffer(44 + numSamples * 2);
+        const view = new DataView(buffer);
+        
+        // WAV文件头
+        const writeString = (offset, string) => {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        };
+        writeString(0, 'RIFF');
+        view.setUint32(4, 36 + numSamples * 2, true);
+        writeString(8, 'WAVE');
+        writeString(12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);
+        view.setUint16(22, 1, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2, true);
+        view.setUint16(34, 16, true);
+        writeString(36, 'data');
+        view.setUint32(40, numSamples * 2, true);
+        
+        // 生成音频数据
+        for (let i = 0; i < numSamples; i++) {
+            const sample = Math.sin(2 * Math.PI * frequency * i / sampleRate) * 0.3;
+            const intSample = Math.max(-32768, Math.min(32767, Math.floor(sample * 32768)));
+            view.setInt16(44 + i * 2, intSample, true);
+        }
+        
+        // 创建音频并播放
+        const blob = new Blob([buffer], { type: 'audio/wav' });
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.volume = 0.3;
+        audio.play().catch(err => {
+            console.warn('[Notifications] 备用声音播放失败:', err);
+        });
+        
+        // 清理
+        audio.onended = () => {
+            URL.revokeObjectURL(url);
+        };
+    } catch (err) {
+        console.warn('[Notifications] 备用声音方案失败:', err);
+    }
+}
+
 async function fetchUnreadNotificationsCount() {
     if (!token) return;
     try {
         const res = await apiFetch(`${API_BASE}/notifications/unread-count`);
         if (!res.ok) return;
         const data = await res.json();
-        unreadNotificationCount = data?.data?.count || 0;
+        const newCount = data?.data?.count || 0;
+        
+        // 检测是否有新通知（未读数量增加）
+        if (newCount > previousUnreadCount && previousUnreadCount >= 0) {
+            // 有新通知，播放声音
+            playNotificationSound();
+        }
+        
+        previousUnreadCount = unreadNotificationCount;
+        unreadNotificationCount = newCount;
         updateNotificationBadge();
     } catch (err) {
         console.error('[Notifications] unread count error', err);
@@ -288,7 +451,15 @@ async function loadNotifications(limit = 50) {
         if (!res.ok) return;
         const data = await res.json();
         notifications = data?.data || [];
-        unreadNotificationCount = notifications.filter(n => !n.read).length;
+        const newCount = notifications.filter(n => !n.read).length;
+        
+        // 如果打开通知面板时发现新通知，也播放声音
+        if (newCount > unreadNotificationCount) {
+            playNotificationSound();
+        }
+        
+        unreadNotificationCount = newCount;
+        previousUnreadCount = newCount; // 更新上一次的计数
         updateNotificationBadge();
         renderNotifications();
     } catch (err) {
@@ -328,10 +499,65 @@ function toggleNotificationPanel() {
     if (!panel) return;
     const isOpen = panel.style.display === 'block';
     if (isOpen) {
+        // 关闭面板时清除定时器
         panel.style.display = 'none';
+        if (notificationPanelPoller) {
+            clearInterval(notificationPanelPoller);
+            notificationPanelPoller = null;
+        }
     } else {
+        // 打开面板时初始化AudioContext（用户交互后可以播放声音）
+        initNotificationAudioContext();
+        
+        // 打开面板时加载通知并启动自动刷新
         panel.style.display = 'block';
         loadNotifications();
+        
+        // 清除之前的定时器（如果存在）
+        if (notificationPanelPoller) {
+            clearInterval(notificationPanelPoller);
+            notificationPanelPoller = null;
+        }
+        
+        // 启动自动刷新定时器（每5秒刷新一次，更及时）
+        console.log('[Notifications] 启动通知面板自动刷新定时器，间隔5秒');
+        
+        // 清除之前的定时器（如果存在）
+        if (notificationPanelPoller) {
+            clearInterval(notificationPanelPoller);
+            notificationPanelPoller = null;
+        }
+        
+        // 启动新的定时器
+        notificationPanelPoller = setInterval(() => {
+            const currentPanel = document.getElementById('notificationPanel');
+            if (!currentPanel) {
+                console.log('[Notifications] 面板元素不存在，停止自动刷新');
+                if (notificationPanelPoller) {
+                    clearInterval(notificationPanelPoller);
+                    notificationPanelPoller = null;
+                }
+                return;
+            }
+            
+            // 检查面板是否可见（简化检查逻辑）
+            const panelDisplay = currentPanel.style.display;
+            const isVisible = panelDisplay === 'block';
+            
+            if (isVisible) {
+                console.log('[Notifications] 自动刷新通知列表 - 面板可见，时间:', new Date().toLocaleTimeString());
+                loadNotifications();
+            } else {
+                // 如果面板已关闭，清除定时器
+                console.log('[Notifications] 面板已关闭，停止自动刷新');
+                if (notificationPanelPoller) {
+                    clearInterval(notificationPanelPoller);
+                    notificationPanelPoller = null;
+                }
+            }
+        }, 5000); // 5秒刷新一次，更及时
+        
+        console.log('[Notifications] 定时器已启动，ID:', notificationPanelPoller);
     }
 }
 
@@ -366,6 +592,8 @@ async function markAllNotificationsRead() {
 
 function startNotificationPolling() {
     stopNotificationPolling();
+    // 初始化时重置计数，避免首次加载时误触发声音
+    previousUnreadCount = -1;
     fetchUnreadNotificationsCount();
     notificationPoller = setInterval(fetchUnreadNotificationsCount, NOTIFICATION_POLL_INTERVAL);
 }
@@ -374,6 +602,10 @@ function stopNotificationPolling() {
     if (notificationPoller) {
         clearInterval(notificationPoller);
         notificationPoller = null;
+    }
+    if (notificationPanelPoller) {
+        clearInterval(notificationPanelPoller);
+        notificationPanelPoller = null;
     }
 }
 

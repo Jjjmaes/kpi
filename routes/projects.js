@@ -1418,7 +1418,45 @@ router.delete('/:id/member/:memberId', async (req, res) => {
       });
     }
 
+    // 在删除前获取成员信息，用于发送通知
+    const member = await ProjectMember.findById(req.params.memberId)
+      .populate('userId', '_id name');
+    
+    if (!member) {
+      return res.status(404).json({ 
+        success: false, 
+        message: '成员不存在' 
+      });
+    }
+
     await ProjectMember.findByIdAndDelete(req.params.memberId);
+
+    // 创建通知：通知被删除的成员
+    try {
+      const roleNames = {
+        'pm': '项目经理',
+        'translator': '翻译',
+        'reviewer': '审校',
+        'layout': '排版',
+        'sales': '销售',
+        'admin_staff': '综合岗',
+        'part_time_sales': '兼职销售'
+      };
+      const roleName = roleNames[member.role] || member.role;
+      
+      // 只通知被删除的成员（不是操作者自己）
+      if (member.userId._id.toString() !== req.user._id.toString()) {
+        await createNotification({
+          userId: member.userId._id.toString(),
+          type: NotificationTypes.PROJECT_MEMBER_REMOVED,
+          message: `您已从项目"${project.projectName}"中移除，角色：${roleName}`,
+          link: `#projects`
+        });
+      }
+    } catch (notifError) {
+      console.error('[Project] 创建通知失败:', notifError);
+      // 通知创建失败不影响成员删除
+    }
 
     res.json({
       success: true,
