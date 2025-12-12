@@ -35,6 +35,7 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
     const isAdmin = currentRole === 'admin';
     const isFinance = currentRole === 'finance';
     const isSales = currentRole === 'sales' || currentRole === 'part_time_sales';
+    const isPM = currentRole === 'pm';
     // 管理员、财务、销售和兼职销售可以查看项目金额（成交额）
     const canViewAmount = isAdmin || isFinance || isSales;
 
@@ -457,6 +458,30 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
         count: todayStartedProjects.length,
         amount: todayStartedProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0)
       };
+    } else if (isPM && !isAdmin && !isFinance) {
+      // 项目经理：今日待交付项目（deadline是今天，且项目经理是PM成员）
+      const todayDueQuery = {
+        deadline: { $gte: today, $lt: tomorrow },
+        status: { $nin: ['completed', 'cancelled'] }, // 未完成且未取消的项目
+        _id: { $in: [] } // 初始化为空，后面会填充
+      };
+
+      // 获取用户作为PM成员的项目ID
+      const pmMemberProjects = await ProjectMember.find({ 
+        userId: req.user._id, 
+        role: 'pm' 
+      }).distinct('projectId');
+      
+      if (pmMemberProjects.length > 0) {
+        todayDueQuery._id = { $in: pmMemberProjects };
+        const todayDueProjects = await Project.find(todayDueQuery);
+        todayDelivery = {
+          count: todayDueProjects.length,
+          amount: todayDueProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0)
+        };
+      } else {
+        todayDelivery = { count: 0, amount: 0 };
+      }
     } else {
       // 翻译、审校、排版：今日本人应完成项目
       const userRoles = req.user.roles || [];

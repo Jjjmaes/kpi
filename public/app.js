@@ -3338,9 +3338,9 @@ async function viewProject(projectId) {
             const canSetTranslationDone = isAdmin || isPM || isTranslatorMember; // PM可标记翻译完成
             const canSetReviewDone = isAdmin || isPM || isReviewerMember; // PM可标记审校完成
             const canSetLayoutDone = isAdmin || isPM || isLayoutMember; // PM可标记排版完成
-            const statusOrder = ['pending','in_progress','scheduled','translation_done','review_done','layout_done','completed'];
+            const statusOrder = ['pending','scheduled','in_progress','translation_done','review_done','layout_done','completed'];
             const currentStatusIdx = statusOrder.indexOf(project.status);
-            const startReached = currentStatusIdx >= statusOrder.indexOf('in_progress');
+            const startReached = currentStatusIdx >= statusOrder.indexOf('scheduled');
             const scheduledReached = currentStatusIdx >= statusOrder.indexOf('scheduled');
             const translationReached = currentStatusIdx >= statusOrder.indexOf('translation_done');
             const reviewReached = currentStatusIdx >= statusOrder.indexOf('review_done');
@@ -3610,8 +3610,8 @@ async function viewProject(projectId) {
                                 ${canStart ? `
                                     <button class="btn-small btn-success" ${startReached ? 'disabled' : ''} onclick="startProject('${projectId}')">开始项目</button>
                                 ` : ''}
-                                ${canSetScheduled ? `
-                                    <button class="btn-small" ${scheduledReached ? 'disabled' : ''} onclick="updateProjectStatus('${projectId}','scheduled','确认将项目标记为已安排？')">已安排</button>
+                                ${canSetScheduled && project.status === 'scheduled' ? `
+                                    <button class="btn-small" onclick="updateProjectStatus('${projectId}','in_progress','确认人员已安排完毕，项目开始执行？')">开始执行</button>
                                 ` : ''}
                                 ${canSetTranslationDone ? `
                                     <button class="btn-small" ${translationReached ? 'disabled' : ''} onclick="updateProjectStatus('${projectId}','translation_done','确认标记翻译完成？')">翻译完成</button>
@@ -5082,7 +5082,7 @@ function getStatusText(status) {
     const statusMap = {
         'pending': '待开始',
         'in_progress': '进行中',
-        'scheduled': '已安排',
+        'scheduled': '待安排',
         'translation_done': '翻译完成',
         'review_done': '审校完成',
         'layout_done': '排版完成',
@@ -5181,8 +5181,10 @@ function renderDashboardTodayInfo(data) {
     const isSales = currentUser?.roles?.includes('sales') || currentUser?.roles?.includes('part_time_sales');
     const isAdmin = currentUser?.roles?.includes('admin');
     const isFinance = currentUser?.roles?.includes('finance');
+    const isPM = currentUser?.roles?.includes('pm');
     const isWorker = currentUser?.roles?.includes('translator') || currentUser?.roles?.includes('reviewer') || currentUser?.roles?.includes('layout');
     const showSalesAmount = isSales && !isAdmin && !isFinance;
+    const showPMDelivery = isPM && !isAdmin && !isFinance;
     
     let todayInfoHtml = '';
     
@@ -5206,7 +5208,7 @@ function renderDashboardTodayInfo(data) {
                 <div class="card" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);">
                     <div style="display: flex; align-items: center; justify-content: space-between;">
                         <div>
-                            <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">今日进入交付</div>
+                            <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">今日待交付</div>
                             <div style="font-size: 36px; font-weight: bold; margin-bottom: 4px;">${data.todayDelivery.count || 0}</div>
                             <div style="font-size: 18px; opacity: 0.9;">¥${(data.todayDelivery.amount || 0).toLocaleString()}</div>
                         </div>
@@ -5214,6 +5216,24 @@ function renderDashboardTodayInfo(data) {
                     </div>
                 </div>
                 ` : ''}
+            </div>
+        `;
+    }
+    
+    // 项目经理：显示今日待交付项目
+    if (showPMDelivery && data.todayDelivery) {
+        todayInfoHtml = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px;">
+                <div class="card" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <div>
+                            <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">今日待交付</div>
+                            <div style="font-size: 36px; font-weight: bold; margin-bottom: 4px;">${data.todayDelivery.count || 0}</div>
+                            <div style="font-size: 18px; opacity: 0.9;">¥${(data.todayDelivery.amount || 0).toLocaleString()}</div>
+                        </div>
+                        <div style="font-size: 48px; opacity: 0.3;">🚀</div>
+                    </div>
+                </div>
             </div>
         `;
     }
@@ -7215,7 +7235,7 @@ async function loadRealtimeKPI(projectId) {
 }
 
 async function startProject(projectId) {
-    if (!confirm('确定要开始执行此项目吗？开始后项目状态将变为"进行中"。')) return;
+    if (!confirm('确定要开始执行此项目吗？开始后项目状态将变为"待安排"，等待项目经理安排人员。')) return;
 
     try {
         const response = await apiFetch(`${API_BASE}/projects/${projectId}/start`, {
@@ -7226,7 +7246,7 @@ async function startProject(projectId) {
         if (result.success) {
             closeModal();
             loadProjects();
-            showAlert('projectsList', '项目已开始执行', 'success');
+            showAlert('projectsList', '项目已通知项目经理，等待安排', 'success');
         } else {
             alert(result.message);
         }

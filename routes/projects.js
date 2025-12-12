@@ -931,9 +931,9 @@ router.post('/:id/add-member', async (req, res) => {
       ratio_locked: ratio
     });
 
-    // 如果项目状态是pending，添加成员后自动变为in_progress
+    // 如果项目状态是pending，添加成员后自动变为scheduled（已安排）
     if (project.status === 'pending') {
-      project.status = 'in_progress';
+      project.status = 'scheduled';
       project.startedAt = new Date();
       project.completionChecks.hasMembers = true;
       await project.save();
@@ -1008,23 +1008,25 @@ router.post('/:id/start', authorize('admin', 'sales', 'part_time_sales'), async 
       });
     }
 
-    // 检查是否有成员
+    // 检查是否有成员（至少需要项目经理）
     const members = await ProjectMember.find({ projectId: project._id });
-    if (members.length === 0) {
+    const hasPM = members.some(m => m.role === 'pm');
+    if (!hasPM) {
       return res.status(400).json({ 
         success: false, 
-        message: '请先添加项目成员' 
+        message: '请先指定项目经理' 
       });
     }
 
-    project.status = 'in_progress';
+    // 销售点击"开始项目"后，项目进入"待安排"状态，等待PM安排人员
+    project.status = 'scheduled';
     project.startedAt = new Date();
     project.completionChecks.hasMembers = true;
     await project.save();
 
     res.json({
       success: true,
-      message: '项目已开始执行',
+      message: '项目已通知项目经理，等待安排',
       data: project
     });
   } catch (error) {
@@ -1062,7 +1064,7 @@ router.post('/:id/status', authorize('admin', 'pm', 'translator', 'reviewer', 'l
       });
     }
 
-    const allowedStatuses = ['scheduled', 'translation_done', 'review_done', 'layout_done'];
+    const allowedStatuses = ['scheduled', 'in_progress', 'translation_done', 'review_done', 'layout_done'];
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -1078,7 +1080,8 @@ router.post('/:id/status', authorize('admin', 'pm', 'translator', 'reviewer', 'l
     const memberRole = member?.role;
 
     const roleAllowed = {
-      scheduled: isAdmin || isPM, // 管理员、PM可设已安排
+      scheduled: isAdmin || isPM, // 管理员、PM可设待安排
+      in_progress: isAdmin || isPM, // 管理员、PM可设进行中（PM安排完人员后）
       translation_done: isAdmin || isPM || memberRole === 'translator', // PM可标记翻译完成
       review_done: isAdmin || isPM || memberRole === 'reviewer', // PM可标记审校完成
       layout_done: isAdmin || isPM || memberRole === 'layout' // PM可标记排版完成
@@ -1092,7 +1095,7 @@ router.post('/:id/status', authorize('admin', 'pm', 'translator', 'reviewer', 'l
     }
 
     // 仅允许向前推进
-    const order = ['pending', 'in_progress', 'scheduled', 'translation_done', 'review_done', 'layout_done', 'completed'];
+    const order = ['pending', 'scheduled', 'in_progress', 'translation_done', 'review_done', 'layout_done', 'completed'];
     const currentIdx = order.indexOf(project.status);
     const targetIdx = order.indexOf(status);
     if (targetIdx === -1 || currentIdx === -1) {

@@ -121,7 +121,7 @@ const projectSchema = new mongoose.Schema({
     enum: [
       'pending',            // 待开始
       'in_progress',        // 进行中
-      'scheduled',          // 已安排（PM完成人员安排）
+      'scheduled',          // 待安排（销售已通知PM，等待PM安排翻译、审校、排版等人员）
       'translation_done',   // 翻译完成
       'review_done',        // 审校完成
       'layout_done',        // 排版完成
