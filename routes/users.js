@@ -170,6 +170,64 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// 重置用户密码（仅管理员）
+router.post('/:id/reset-password', authorize('admin'), async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: '用户不存在' 
+      });
+    }
+
+    // 生成随机密码（符合密码复杂度要求）
+    // 包含：大写字母、小写字母、数字、特殊字符
+    const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+    const numbers = '0123456789';
+    const special = '!@#$%^&*';
+    const allChars = uppercase + lowercase + numbers + special;
+    
+    // 确保至少包含每种类型的字符
+    let newPassword = '';
+    newPassword += uppercase[Math.floor(Math.random() * uppercase.length)];
+    newPassword += lowercase[Math.floor(Math.random() * lowercase.length)];
+    newPassword += numbers[Math.floor(Math.random() * numbers.length)];
+    newPassword += special[Math.floor(Math.random() * special.length)];
+    
+    // 补充到12位（8位最小要求 + 4位额外）
+    for (let i = newPassword.length; i < 12; i++) {
+      newPassword += allChars[Math.floor(Math.random() * allChars.length)];
+    }
+    
+    // 打乱字符顺序
+    newPassword = newPassword.split('').sort(() => Math.random() - 0.5).join('');
+
+    // 重置密码并设置必须修改标志
+    user.password = newPassword;
+    user.passwordMustChange = true;
+    user.passwordUpdatedAt = null; // 清除之前的密码更新时间
+    user.updatedAt = Date.now();
+    await user.save();
+
+    res.json({
+      success: true,
+      message: '密码已重置',
+      data: {
+        newPassword: newPassword, // 返回新密码，管理员可以告知用户
+        passwordMustChange: true
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+});
+
 // 删除用户（仅管理员，软删除）
 router.delete('/:id', authorize('admin'), async (req, res) => {
   try {

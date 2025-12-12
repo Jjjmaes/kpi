@@ -258,6 +258,7 @@ function updateNotificationBadge() {
     const area = document.getElementById('notificationArea');
     const badge = document.getElementById('notificationBadge');
     if (!area || !badge) return;
+    // 确保通知区域始终显示（即使没有未读通知）
     area.style.display = 'inline-block';
     if (unreadNotificationCount > 0) {
         badge.style.display = 'inline-block';
@@ -1226,6 +1227,7 @@ async function loadUsers() {
                                 <td><span class="badge ${u.isActive ? 'badge-success' : 'badge-danger'}">${u.isActive ? '激活' : '禁用'}</span></td>
                                 <td>
                                     <button class="btn-small" onclick="editUser('${u._id}')">编辑</button>
+                                    <button class="btn-small" onclick="resetUserPassword('${u._id}', '${u.name}')" style="background: #f59e0b; color: white;">重置密码</button>
                                     <button class="btn-small btn-danger" onclick="deleteUser('${u._id}')">删除</button>
                                 </td>
                             </tr>
@@ -1435,6 +1437,77 @@ async function updateUser(e, userId) {
     } catch (error) {
         alert('更新失败: ' + error.message);
     }
+}
+
+async function resetUserPassword(userId, userName) {
+    if (!confirm(`确定要重置用户 "${userName}" 的密码吗？\n\n重置后，系统将生成一个新密码，用户首次登录时需要修改密码。`)) {
+        return;
+    }
+
+    try {
+        const response = await apiFetch(`${API_BASE}/users/${userId}/reset-password`, {
+            method: 'POST'
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            // 显示新密码（管理员可以复制给用户）
+            const newPassword = result.data.newPassword;
+            const content = `
+                <div style="padding: 20px;">
+                    <p style="margin-bottom: 16px; color: #10b981; font-weight: 600;">密码重置成功！</p>
+                    <div style="background: #f3f4f6; padding: 12px; border-radius: 6px; margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">新密码：</label>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <input type="text" id="newPasswordDisplay" value="${newPassword}" readonly 
+                                   style="flex: 1; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; font-family: monospace; font-size: 14px; background: white;">
+                            <button type="button" onclick="copyPasswordToClipboard('${newPassword}')" 
+                                    style="padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                                复制
+                            </button>
+                        </div>
+                    </div>
+                    <p style="font-size: 13px; color: #6b7280; margin-bottom: 16px;">
+                        ⚠️ 请妥善保存并告知用户。用户首次登录时需要修改密码。
+                    </p>
+                    <div style="text-align: right;">
+                        <button type="button" onclick="closeModal()" style="padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                            确定
+                        </button>
+                    </div>
+                </div>
+            `;
+            showModal('密码重置成功', content);
+            
+            loadUsers();
+            showAlert('usersList', '密码重置成功', 'success');
+        } else {
+            alert(result.message || '重置密码失败');
+        }
+    } catch (error) {
+        alert('重置密码失败: ' + error.message);
+    }
+}
+
+function copyPasswordToClipboard(password) {
+    navigator.clipboard.writeText(password).then(() => {
+        const btn = event.target;
+        const originalText = btn.textContent;
+        btn.textContent = '已复制';
+        btn.style.background = '#10b981';
+        setTimeout(() => {
+            btn.textContent = originalText;
+            btn.style.background = '#667eea';
+        }, 2000);
+    }).catch(() => {
+        // 如果复制失败，选中输入框内容让用户手动复制
+        const input = document.getElementById('newPasswordDisplay');
+        if (input) {
+            input.select();
+            input.setSelectionRange(0, 99999);
+            alert('请手动复制密码（已选中）');
+        }
+    });
 }
 
 async function deleteUser(userId) {
@@ -4752,12 +4825,79 @@ async function exportKPI() {
         new Date().toISOString().slice(0, 7);
     const userId = document.getElementById('kpiUserSelect').value;
 
-    if (userId) {
-        // 导出单个用户
-        window.open(`${API_BASE}/kpi/export/user/${userId}?month=${month}`, '_blank');
-    } else {
-        // 导出月度汇总
-        window.open(`${API_BASE}/kpi/export/month/${month}`, '_blank');
+    try {
+        let url;
+        let filename;
+        
+        if (userId) {
+            // 导出单个用户
+            url = `${API_BASE}/kpi/export/user/${userId}?month=${month}`;
+            filename = `KPI明细-${month}.xlsx`;
+        } else {
+            // 导出月度汇总
+            url = `${API_BASE}/kpi/export/month/${month}`;
+            filename = `KPI工资表-${month}.xlsx`;
+        }
+
+        // 使用fetch下载文件，确保携带认证token
+        // 注意：下载文件时不需要设置Content-Type
+        const headers = {};
+        
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+        
+        if (currentRole) {
+            headers['X-Role'] = currentRole;
+        }
+        
+        const response = await fetch(url, {
+            headers: headers
+        });
+        
+        if (!response.ok) {
+            // 尝试解析错误信息
+            let errorMessage = '导出失败';
+            try {
+                const errorData = await response.json();
+                errorMessage = errorData.message || errorMessage;
+            } catch (e) {
+                errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+            }
+            throw new Error(errorMessage);
+        }
+
+        // 获取文件名（从Content-Disposition header）
+        const contentDisposition = response.headers.get('Content-Disposition');
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename\*=UTF-8''(.+)/);
+            if (filenameMatch) {
+                filename = decodeURIComponent(filenameMatch[1]);
+            } else {
+                const filenameMatch2 = contentDisposition.match(/filename="(.+)"/);
+                if (filenameMatch2) {
+                    filename = filenameMatch2[1];
+                }
+            }
+        }
+
+        // 将响应转换为blob
+        const blob = await response.blob();
+        
+        // 创建下载链接
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        
+        // 清理
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(downloadUrl);
+    } catch (error) {
+        console.error('导出Excel失败:', error);
+        alert('导出失败: ' + (error.message || '未知错误'));
     }
 }
 

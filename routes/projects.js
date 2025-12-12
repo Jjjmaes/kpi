@@ -5,7 +5,9 @@ const Project = require('../models/Project');
 const ProjectMember = require('../models/ProjectMember');
 const KpiConfig = require('../models/KpiConfig');
 const Customer = require('../models/Customer');
+const User = require('../models/User');
 const { exportProjectQuotation } = require('../services/excelService');
+const { createNotification, createNotificationsForUsers, NotificationTypes } = require('../services/notificationService');
 
 // 判断是否为仅交付角色（翻译/审校/排版），无查看客户信息权限
 function isDeliveryOnlyUser(user, currentRole) {
@@ -488,6 +490,36 @@ router.post('/create', authorize('sales', 'admin', 'part_time_sales'), async (re
       // 如果创建时添加了成员，更新完成检查
       project.completionChecks.hasMembers = true;
       await project.save();
+      
+      // 创建通知：通知所有被添加的成员
+      try {
+        const roleNames = {
+          'pm': '项目经理',
+          'translator': '翻译',
+          'reviewer': '审校',
+          'layout': '排版'
+        };
+        
+        const notificationPromises = members
+          .filter(member => member.userId.toString() !== req.user._id.toString()) // 不通知自己
+          .map(member => {
+            const { userId, role } = member;
+            const roleName = roleNames[role] || role;
+            return createNotification({
+              userId: userId.toString(),
+              type: NotificationTypes.PROJECT_ASSIGNED,
+              message: `您已被分配到新项目"${project.projectName}"，角色：${roleName}`,
+              link: `#projects`
+            });
+          });
+        
+        if (notificationPromises.length > 0) {
+          await Promise.all(notificationPromises);
+        }
+      } catch (notifError) {
+        console.error('[Project] 创建通知失败:', notifError);
+        // 通知创建失败不影响项目创建
+      }
     }
 
     res.status(201).json({
@@ -907,6 +939,27 @@ router.post('/:id/add-member', async (req, res) => {
       await project.save();
     }
 
+    // 创建通知：通知被分配的用户
+    try {
+      const assignedUser = await User.findById(userId);
+      const roleNames = {
+        'pm': '项目经理',
+        'translator': '翻译',
+        'reviewer': '审校',
+        'layout': '排版'
+      };
+      const roleName = roleNames[role] || role;
+      await createNotification({
+        userId: userId,
+        type: NotificationTypes.PROJECT_ASSIGNED,
+        message: `您已被分配到项目"${project.projectName}"，角色：${roleName}`,
+        link: `#projects`
+      });
+    } catch (notifError) {
+      console.error('[Project] 创建通知失败:', notifError);
+      // 通知创建失败不影响成员添加
+    }
+
     res.status(201).json({
       success: true,
       message: '成员添加成功',
@@ -1055,8 +1108,45 @@ router.post('/:id/status', authorize('admin', 'pm', 'translator', 'reviewer', 'l
       });
     }
 
+    const oldStatus = project.status;
     project.status = status;
     await project.save();
+
+    // 创建通知：通知项目相关成员状态变更
+    try {
+      const statusNames = {
+        'scheduled': '已安排',
+        'translation_done': '翻译完成',
+        'review_done': '审校完成',
+        'layout_done': '排版完成'
+      };
+      const statusName = statusNames[status] || status;
+      
+      // 获取项目所有成员（除了当前操作者）
+      const members = await ProjectMember.find({ projectId: project._id })
+        .populate('userId', '_id');
+      const memberUserIds = members
+        .filter(m => m.userId._id.toString() !== req.user._id.toString())
+        .map(m => m.userId._id.toString());
+      
+      // 也通知项目创建者（如果不是当前操作者）
+      const creatorId = project.createdBy.toString();
+      if (creatorId !== req.user._id.toString() && !memberUserIds.includes(creatorId)) {
+        memberUserIds.push(creatorId);
+      }
+      
+      if (memberUserIds.length > 0) {
+        await createNotificationsForUsers(
+          memberUserIds,
+          NotificationTypes.PROJECT_STATUS_CHANGED,
+          `项目"${project.projectName}"状态已更新为：${statusName}`,
+          `#projects`
+        );
+      }
+    } catch (notifError) {
+      console.error('[Project] 创建通知失败:', notifError);
+      // 通知创建失败不影响状态更新
+    }
 
     res.json({
       success: true,
@@ -1244,6 +1334,33 @@ router.post('/:id/finish', authorize('admin', 'sales', 'part_time_sales'), async
     }
 
     await project.save();
+
+    // 创建通知：通知项目成员项目已完成
+    try {
+      const members = await ProjectMember.find({ projectId: project._id })
+        .populate('userId', '_id');
+      const memberUserIds = members
+        .filter(m => m.userId._id.toString() !== req.user._id.toString())
+        .map(m => m.userId._id.toString());
+      
+      // 也通知项目创建者（如果不是当前操作者）
+      const creatorId = project.createdBy.toString();
+      if (creatorId !== req.user._id.toString() && !memberUserIds.includes(creatorId)) {
+        memberUserIds.push(creatorId);
+      }
+      
+      if (memberUserIds.length > 0) {
+        await createNotificationsForUsers(
+          memberUserIds,
+          NotificationTypes.PROJECT_COMPLETED,
+          `项目"${project.projectName}"已完成，KPI已生成`,
+          `#kpi`
+        );
+      }
+    } catch (notifError) {
+      console.error('[Project] 创建通知失败:', notifError);
+      // 通知创建失败不影响项目完成
+    }
 
     // 实时计算并生成KPI记录
     try {

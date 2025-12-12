@@ -5,6 +5,7 @@ const MonthlyRoleKPI = require('../models/MonthlyRoleKPI');
 const User = require('../models/User');
 const KpiConfig = require('../models/KpiConfig');
 const { calculateKPIByRole, calculateAdminStaff, calculateFinance } = require('../utils/kpiCalculator');
+const { createNotificationsForUsers, NotificationTypes } = require('./notificationService');
 
 /**
  * 计算销售的完成系数（基于回款周期）
@@ -463,6 +464,22 @@ async function generateMonthlyKPIRecords(month, force = false) {
         type: 'monthly_role_kpi',
         error: monthlyError.message
       });
+    }
+
+    // 创建通知：通知所有有KPI记录的用户
+    try {
+      const userIdsWithKPI = await KpiRecord.distinct('userId', { month });
+      if (userIdsWithKPI.length > 0) {
+        await createNotificationsForUsers(
+          userIdsWithKPI.map(id => id.toString()),
+          NotificationTypes.KPI_GENERATED,
+          `${month} 的月度KPI已生成，请查看KPI查询页面`,
+          `#kpi`
+        );
+      }
+    } catch (notifError) {
+      console.error('[KPI] 创建通知失败:', notifError);
+      // 通知创建失败不影响KPI生成
     }
 
     return {
