@@ -4353,55 +4353,195 @@ async function updatePayment(e, projectId) {
 async function loadKPI() {
     const month = document.getElementById('kpiMonth').value || 
         new Date().toISOString().slice(0, 7);
-    const userId = document.getElementById('kpiUserSelect').value || currentUser._id;
+    const userId = document.getElementById('kpiUserSelect').value;
 
     try {
-        const response = await apiFetch(`${API_BASE}/kpi/user/${userId}?month=${month}`);
-        const data = await response.json();
+        let response;
+        let data;
+        
+        // 如果选择了"全部用户"，调用月度汇总接口
+        if (!userId || userId === '') {
+            if (!currentUser.roles.includes('admin') && !currentUser.roles.includes('finance')) {
+                // 非管理员/财务不能查看全部用户，回退到查看自己的
+                response = await apiFetch(`${API_BASE}/kpi/user/${currentUser._id}?month=${month}`);
+            } else {
+                response = await apiFetch(`${API_BASE}/kpi/month/${month}`);
+            }
+        } else {
+            response = await apiFetch(`${API_BASE}/kpi/user/${userId}?month=${month}`);
+        }
+        
+        data = await response.json();
 
         if (data.success) {
-            const user = allUsers.find(u => u._id === userId) || currentUser;
+            // 判断是全部用户汇总还是单个用户查询
+            const isAllUsers = !userId || userId === '';
             
-            // 使用后端返回的canViewAmount字段，如果后端没有返回，则根据角色判断
-            const canViewAmount = data.data.canViewAmount !== false;
-            const userRoles = currentUser.roles || [];
-            const isSensitiveRole = userRoles.includes('pm') || 
-                                   userRoles.includes('translator') || 
-                                   userRoles.includes('reviewer');
-            // 如果后端明确返回false，或者用户是敏感角色且不是管理员/财务，则隐藏金额
-            const shouldHideAmount = !canViewAmount || (isSensitiveRole && !userRoles.includes('admin') && !userRoles.includes('finance'));
-            
-            const html = `
-                <h3>${user.name} 的KPI - ${month}</h3>
-                <p><strong>总计: ¥${data.data.total.toLocaleString()}</strong></p>
-                ${data.data.records.length === 0 ? '<p>该月暂无KPI记录</p>' : `
+            if (isAllUsers && data.data.summary) {
+                // 全部用户汇总视图
+                const html = `
+                    <h3>全部用户KPI汇总 - ${month}</h3>
                     <table>
                         <thead>
                             <tr>
-                                <th>项目名称</th>
-                                <th>客户名称</th>
-                                ${shouldHideAmount ? '' : '<th>项目金额</th>'}
+                                <th>用户</th>
                                 <th>角色</th>
-                                <th>KPI数值</th>
-                                <th>计算公式</th>
+                                <th>各角色KPI</th>
+                                <th>总计</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${data.data.records.map(r => `
+                            ${data.data.summary.map(user => `
                                 <tr>
-                                    <td>${r.projectId?.projectName || 'N/A'}</td>
-                                    <td>${r.projectId?.clientName || 'N/A'}</td>
-                                    ${shouldHideAmount ? '' : `<td>${r.projectId?.projectAmount ? '¥' + r.projectId.projectAmount.toLocaleString() : '-'}</td>`}
-                                    <td>${getRoleText(r.role)}</td>
-                                    <td>¥${r.kpiValue.toLocaleString()}</td>
-                                    <td style="font-size: 12px;">${r.calculationDetails?.formula || ''}</td>
+                                    <td>${user.userName}</td>
+                                    <td>${user.roles.map(r => getRoleText(r)).join(', ')}</td>
+                                    <td style="font-size: 12px;">
+                                        ${Object.entries(user.byRole).map(([role, value]) => 
+                                            `${getRoleText(role)}: ¥${value.toLocaleString()}`
+                                        ).join('<br>')}
+                                    </td>
+                                    <td><strong>¥${user.totalKPI.toLocaleString()}</strong></td>
                                 </tr>
                             `).join('')}
                         </tbody>
                     </table>
-                `}
-            `;
-            document.getElementById('kpiResults').innerHTML = html;
+                    ${data.data.monthlyRoleKPIs && data.data.monthlyRoleKPIs.length > 0 ? `
+                        <div style="margin-top: 20px;">
+                            <h4>月度汇总KPI（综合岗/财务岗）</h4>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>用户</th>
+                                        <th>角色</th>
+                                        <th>全公司当月项目总金额</th>
+                                        <th>系数</th>
+                                        <th>完成系数（评价）</th>
+                                        <th>KPI数值</th>
+                                        <th>计算公式</th>
+                                        ${currentUser.roles.includes('admin') ? '<th>操作</th>' : ''}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${data.data.monthlyRoleKPIs.map(r => `
+                                        <tr>
+                                            <td>${r.userId?.name || 'N/A'}</td>
+                                            <td>${getRoleText(r.role)}</td>
+                                            <td>¥${r.totalCompanyAmount.toLocaleString()}</td>
+                                            <td>${r.ratio}</td>
+                                            <td>
+                                                ${r.evaluationLevel === 'good' ? '<span style="color:#10b981;">好 (1.1)</span>' : 
+                                                  r.evaluationLevel === 'poor' ? '<span style="color:#ef4444;">差 (0.8)</span>' : '<span>中 (1.0)</span>'}
+                                                ${r.evaluatedBy ? `<br><small style="color:#666;">评价人: ${r.evaluatedBy.name || '管理员'}</small>` : '<br><small style="color:#999;">未评价</small>'}
+                                            </td>
+                                            <td>¥${r.kpiValue.toLocaleString()}</td>
+                                            <td style="font-size: 12px;">${r.calculationDetails?.formula || ''}</td>
+                                            ${currentUser.roles.includes('admin') ? `
+                                                <td>
+                                                    <button class="btn-small" onclick="showEvaluateModal('${r._id}', '${r.role}', '${r.evaluationLevel || 'medium'}')">
+                                                        ${r.evaluatedBy ? '修改评价' : '评价'}
+                                                    </button>
+                                                </td>
+                                            ` : ''}
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    ` : ''}
+                `;
+                document.getElementById('kpiResults').innerHTML = html;
+            } else {
+                // 单个用户查询视图
+                const user = allUsers.find(u => u._id === userId) || currentUser;
+                
+                // 使用后端返回的canViewAmount字段，如果后端没有返回，则根据角色判断
+                const canViewAmount = data.data.canViewAmount !== false;
+                const userRoles = currentUser.roles || [];
+                const isSensitiveRole = userRoles.includes('pm') || 
+                                       userRoles.includes('translator') || 
+                                       userRoles.includes('reviewer');
+                // 如果后端明确返回false，或者用户是敏感角色且不是管理员/财务，则隐藏金额
+                const shouldHideAmount = !canViewAmount || (isSensitiveRole && !userRoles.includes('admin') && !userRoles.includes('finance'));
+                
+                // 显示月度角色KPI（综合岗和财务岗）
+                let monthlyRoleKPIHtml = '';
+                if (data.data.monthlyRoleKPIs && data.data.monthlyRoleKPIs.length > 0) {
+                    monthlyRoleKPIHtml = `
+                        <div style="margin-top: 20px;">
+                            <h4>月度汇总KPI（综合岗/财务岗）</h4>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>角色</th>
+                                        <th>全公司当月项目总金额</th>
+                                        <th>系数</th>
+                                        <th>完成系数（评价）</th>
+                                        <th>KPI数值</th>
+                                        <th>计算公式</th>
+                                        ${currentUser.roles.includes('admin') ? '<th>操作</th>' : ''}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${data.data.monthlyRoleKPIs.map(r => `
+                                        <tr>
+                                            <td>${getRoleText(r.role)}</td>
+                                            <td>¥${r.totalCompanyAmount.toLocaleString()}</td>
+                                            <td>${r.ratio}</td>
+                                            <td>
+                                                ${r.evaluationLevel === 'good' ? '<span style="color:#10b981;">好 (1.1)</span>' : 
+                                                  r.evaluationLevel === 'poor' ? '<span style="color:#ef4444;">差 (0.8)</span>' : '<span>中 (1.0)</span>'}
+                                                ${r.evaluatedBy ? `<br><small style="color:#666;">评价人: ${r.evaluatedBy.name || '管理员'}</small>` : '<br><small style="color:#999;">未评价</small>'}
+                                            </td>
+                                            <td>¥${r.kpiValue.toLocaleString()}</td>
+                                            <td style="font-size: 12px;">${r.calculationDetails?.formula || ''}</td>
+                                            ${currentUser.roles.includes('admin') ? `
+                                                <td>
+                                                    <button class="btn-small" onclick="showEvaluateModal('${r._id}', '${r.role}', '${r.evaluationLevel || 'medium'}')">
+                                                        ${r.evaluatedBy ? '修改评价' : '评价'}
+                                                    </button>
+                                                </td>
+                                            ` : ''}
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+                }
+
+                const html = `
+                    <h3>${user.name} 的KPI - ${month}</h3>
+                    <p><strong>总计: ¥${data.data.total.toLocaleString()}</strong></p>
+                    ${data.data.records.length === 0 && (!data.data.monthlyRoleKPIs || data.data.monthlyRoleKPIs.length === 0) ? '<p>该月暂无KPI记录</p>' : `
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>项目名称</th>
+                                    <th>客户名称</th>
+                                    ${shouldHideAmount ? '' : '<th>项目金额</th>'}
+                                    <th>角色</th>
+                                    <th>KPI数值</th>
+                                    <th>计算公式</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.data.records.map(r => `
+                                    <tr>
+                                        <td>${r.projectId?.projectName || 'N/A'}</td>
+                                        <td>${r.projectId?.clientName || 'N/A'}</td>
+                                        ${shouldHideAmount ? '' : `<td>${r.projectId?.projectAmount ? '¥' + r.projectId.projectAmount.toLocaleString() : '-'}</td>`}
+                                        <td>${getRoleText(r.role)}</td>
+                                        <td>¥${r.kpiValue.toLocaleString()}</td>
+                                        <td style="font-size: 12px;">${r.calculationDetails?.formula || ''}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `}
+                    ${monthlyRoleKPIHtml}
+                `;
+                document.getElementById('kpiResults').innerHTML = html;
+            }
         } else {
             // 如果查询失败，显示错误信息
             let errorMsg = data.message || '加载KPI失败';
@@ -4442,6 +4582,67 @@ async function generateMonthlyKPI() {
         }
     } catch (error) {
         alert('生成失败: ' + error.message);
+    }
+}
+
+// 显示评价完成系数模态框
+function showEvaluateModal(recordId, role, currentLevel) {
+    const roleText = role === 'admin_staff' ? '综合岗' : '财务岗';
+    const modalContent = `
+        <div style="padding: 20px;">
+            <h3>评价${roleText}完成系数</h3>
+            <div style="margin: 20px 0;">
+                <label style="display: block; margin-bottom: 10px;">选择评价等级：</label>
+                <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="radio" name="evaluationLevel" value="good" ${currentLevel === 'good' ? 'checked' : ''} style="margin-right: 5px;">
+                        <span>好 (1.1倍)</span>
+                    </label>
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="radio" name="evaluationLevel" value="medium" ${currentLevel === 'medium' ? 'checked' : ''} style="margin-right: 5px;">
+                        <span>中 (1.0倍)</span>
+                    </label>
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="radio" name="evaluationLevel" value="poor" ${currentLevel === 'poor' ? 'checked' : ''} style="margin-right: 5px;">
+                        <span>差 (0.8倍)</span>
+                    </label>
+                </div>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+                <button class="btn-small" onclick="closeModal()">取消</button>
+                <button class="btn-small btn-success" onclick="submitEvaluation('${recordId}')">确定</button>
+            </div>
+        </div>
+    `;
+    showModal('评价完成系数', modalContent);
+}
+
+// 提交评价
+async function submitEvaluation(recordId) {
+    const selectedLevel = document.querySelector('input[name="evaluationLevel"]:checked');
+    if (!selectedLevel) {
+        alert('请选择评价等级');
+        return;
+    }
+
+    try {
+        const response = await apiFetch(`${API_BASE}/kpi/monthly-role/${recordId}/evaluate`, {
+            method: 'POST',
+            body: JSON.stringify({
+                evaluationLevel: selectedLevel.value
+            })
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            closeModal();
+            loadKPI(); // 重新加载KPI数据
+            showAlert('kpiResults', '评价完成系数已更新', 'success');
+        } else {
+            alert(result.message);
+        }
+    } catch (error) {
+        alert('评价失败: ' + error.message);
     }
 }
 

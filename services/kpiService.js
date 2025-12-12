@@ -1,8 +1,10 @@
 const Project = require('../models/Project');
 const ProjectMember = require('../models/ProjectMember');
 const KpiRecord = require('../models/KpiRecord');
+const MonthlyRoleKPI = require('../models/MonthlyRoleKPI');
 const User = require('../models/User');
-const { calculateKPIByRole } = require('../utils/kpiCalculator');
+const KpiConfig = require('../models/KpiConfig');
+const { calculateKPIByRole, calculateAdminStaff, calculateFinance } = require('../utils/kpiCalculator');
 
 /**
  * 计算销售的完成系数
@@ -158,14 +160,9 @@ async function generateMonthlyKPIRecords(month, force = false) {
                 kpiValue: layoutCost,
                 formula: `排版费用：${layoutCost}元`
               };
-            } else if (member.role === 'admin_staff') {
-              // 综合岗：使用全公司总额
-              kpiResult = calculateKPIByRole({
-                role: member.role,
-                projectAmount: totalCompanyAmount,
-                ratio: effectiveRatio,
-                completionFactor
-              });
+            } else if (member.role === 'admin_staff' || member.role === 'finance') {
+              // 综合岗和财务岗：跳过项目级计算，将在最后按月汇总计算
+              continue;
             } else {
               // 其他角色
               kpiResult = calculateKPIByRole({
@@ -242,6 +239,132 @@ async function generateMonthlyKPIRecords(month, force = false) {
       }
     }
 
+    // 为综合岗和财务岗生成月度汇总KPI（使用管理员评价完成系数，默认1.0）
+    try {
+      // 获取当前配置的admin_ratio
+      const config = await KpiConfig.findOne().sort({ createdAt: -1 });
+      const adminRatio = config?.admin_ratio || 0;
+
+      if (adminRatio > 0 && totalCompanyAmount > 0) {
+        // 查找所有综合岗和财务岗用户
+        const adminStaffUsers = await User.find({ roles: 'admin_staff' });
+        const financeUsers = await User.find({ roles: 'finance' });
+
+        // 为综合岗用户生成月度KPI
+        for (const user of adminStaffUsers) {
+          try {
+            // 查找是否已有记录（可能已有管理员评价）
+            const existing = await MonthlyRoleKPI.findOne({
+              userId: user._id,
+              month,
+              role: 'admin_staff'
+            });
+
+            if (existing) {
+              if (force) {
+                // 强制重新计算（但保留评价系数）
+                const evaluationFactor = existing.evaluationFactor || 1.0;
+                const kpiValue = calculateAdminStaff(totalCompanyAmount, adminRatio, evaluationFactor);
+                existing.totalCompanyAmount = totalCompanyAmount;
+                existing.ratio = adminRatio;
+                existing.kpiValue = kpiValue;
+                existing.calculationDetails = {
+                  formula: `全公司当月项目总金额(${totalCompanyAmount}) × 综合岗系数(${adminRatio}) × 完成系数(${evaluationFactor})`
+                };
+                await existing.save();
+                updatedCount++;
+              }
+              // 如果不强制，保留原有评价
+            } else {
+              // 创建新记录（默认评价为"中"，系数1.0）
+              const kpiValue = calculateAdminStaff(totalCompanyAmount, adminRatio, 1.0);
+              await MonthlyRoleKPI.create({
+                userId: user._id,
+                role: 'admin_staff',
+                month,
+                totalCompanyAmount,
+                ratio: adminRatio,
+                evaluationFactor: 1.0,
+                evaluationLevel: 'medium',
+                kpiValue,
+                calculationDetails: {
+                  formula: `全公司当月项目总金额(${totalCompanyAmount}) × 综合岗系数(${adminRatio}) × 完成系数(1.0)`
+                }
+              });
+              recordCount++;
+            }
+          } catch (error) {
+            if (error.code !== 11000) { // 忽略唯一约束冲突
+              errors.push({
+                user: user.name,
+                role: 'admin_staff',
+                error: error.message
+              });
+            }
+          }
+        }
+
+        // 为财务岗用户生成月度KPI
+        for (const user of financeUsers) {
+          try {
+            // 查找是否已有记录（可能已有管理员评价）
+            const existing = await MonthlyRoleKPI.findOne({
+              userId: user._id,
+              month,
+              role: 'finance'
+            });
+
+            if (existing) {
+              if (force) {
+                // 强制重新计算（但保留评价系数）
+                const evaluationFactor = existing.evaluationFactor || 1.0;
+                const kpiValue = calculateFinance(totalCompanyAmount, adminRatio, evaluationFactor);
+                existing.totalCompanyAmount = totalCompanyAmount;
+                existing.ratio = adminRatio;
+                existing.kpiValue = kpiValue;
+                existing.calculationDetails = {
+                  formula: `全公司当月项目总金额(${totalCompanyAmount}) × 财务岗系数(${adminRatio}) × 完成系数(${evaluationFactor})`
+                };
+                await existing.save();
+                updatedCount++;
+              }
+              // 如果不强制，保留原有评价
+            } else {
+              // 创建新记录（默认评价为"中"，系数1.0）
+              const kpiValue = calculateFinance(totalCompanyAmount, adminRatio, 1.0);
+              await MonthlyRoleKPI.create({
+                userId: user._id,
+                role: 'finance',
+                month,
+                totalCompanyAmount,
+                ratio: adminRatio,
+                evaluationFactor: 1.0,
+                evaluationLevel: 'medium',
+                kpiValue,
+                calculationDetails: {
+                  formula: `全公司当月项目总金额(${totalCompanyAmount}) × 财务岗系数(${adminRatio}) × 完成系数(1.0)`
+                }
+              });
+              recordCount++;
+            }
+          } catch (error) {
+            if (error.code !== 11000) { // 忽略唯一约束冲突
+              errors.push({
+                user: user.name,
+                role: 'finance',
+                error: error.message
+              });
+            }
+          }
+        }
+      }
+    } catch (monthlyError) {
+      errors.push({
+        type: 'monthly_role_kpi',
+        error: monthlyError.message
+      });
+    }
+
     return {
       count: recordCount,
       updated: updatedCount,
@@ -263,10 +386,22 @@ async function getUserMonthlyKPI(userId, month) {
   const records = await KpiRecord.find({ userId, month })
     .populate('projectId', 'projectName clientName');
 
-  const total = records.reduce((sum, r) => sum + r.kpiValue, 0);
+  // 获取月度角色KPI（综合岗和财务岗）
+  const monthlyRoleKPIs = await MonthlyRoleKPI.find({ userId, month })
+    .populate('evaluatedBy', 'name username');
+
+  const total = records.reduce((sum, r) => sum + r.kpiValue, 0) + 
+                monthlyRoleKPIs.reduce((sum, r) => sum + r.kpiValue, 0);
   const byRole = {};
 
   records.forEach(record => {
+    if (!byRole[record.role]) {
+      byRole[record.role] = 0;
+    }
+    byRole[record.role] += record.kpiValue;
+  });
+
+  monthlyRoleKPIs.forEach(record => {
     if (!byRole[record.role]) {
       byRole[record.role] = 0;
     }
@@ -279,7 +414,8 @@ async function getUserMonthlyKPI(userId, month) {
       acc[role] = Math.round(value * 100) / 100;
       return acc;
     }, {}),
-    records
+    records,
+    monthlyRoleKPIs
   };
 }
 

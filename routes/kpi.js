@@ -2,10 +2,12 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, authorize, getCurrentPermission } = require('../middleware/auth');
 const KpiRecord = require('../models/KpiRecord');
+const MonthlyRoleKPI = require('../models/MonthlyRoleKPI');
 const Project = require('../models/Project');
 const ProjectMember = require('../models/ProjectMember');
 const User = require('../models/User');
 const { calculateKPIByRole } = require('../utils/kpiCalculator');
+const { calculateAdminStaff, calculateFinance } = require('../utils/kpiCalculator');
 const { generateMonthlyKPIRecords, generateProjectKPI, calculateProjectRealtime } = require('../services/kpiService');
 const { exportMonthlyKPISheet, exportUserKPIDetail } = require('../services/excelService');
 
@@ -414,13 +416,21 @@ router.get('/user/:userId', async (req, res) => {
       });
     }
 
-    // 计算总计
-    const total = records.reduce((sum, record) => sum + record.kpiValue, 0);
+    // 获取月度角色KPI（综合岗和财务岗）
+    const monthlyRoleKPIs = await MonthlyRoleKPI.find(query)
+      .populate('evaluatedBy', 'name username')
+      .sort({ month: -1, createdAt: -1 });
+
+    // 计算总计（包含项目KPI和月度角色KPI）
+    const projectTotal = records.reduce((sum, record) => sum + record.kpiValue, 0);
+    const monthlyRoleTotal = monthlyRoleKPIs.reduce((sum, record) => sum + record.kpiValue, 0);
+    const total = projectTotal + monthlyRoleTotal;
 
     res.json({
       success: true,
       data: {
         records,
+        monthlyRoleKPIs,
         total: Math.round(total * 100) / 100,
         canViewAmount // 前端根据此字段决定是否显示金额
       }
@@ -444,9 +454,39 @@ router.get('/month/:month', authorize('admin', 'finance'), async (req, res) => {
       .populate('projectId', 'projectName clientName projectAmount')
       .sort({ userId: 1, role: 1 });
 
+    // 获取月度角色KPI（综合岗和财务岗）
+    const monthlyRoleKPIs = await MonthlyRoleKPI.find({ month })
+      .populate('userId', 'name username email roles')
+      .populate('evaluatedBy', 'name username')
+      .sort({ userId: 1, role: 1 });
+
     // 按用户和角色汇总
     const summary = {};
     records.forEach(record => {
+      const userId = record.userId._id.toString();
+      const userName = record.userId.name;
+      const role = record.role;
+
+      if (!summary[userId]) {
+        summary[userId] = {
+          userId,
+          userName,
+          roles: record.userId.roles,
+          totalKPI: 0,
+          byRole: {}
+        };
+      }
+
+      if (!summary[userId].byRole[role]) {
+        summary[userId].byRole[role] = 0;
+      }
+
+      summary[userId].byRole[role] += record.kpiValue;
+      summary[userId].totalKPI += record.kpiValue;
+    });
+
+    // 将月度角色KPI也加入汇总
+    monthlyRoleKPIs.forEach(record => {
       const userId = record.userId._id.toString();
       const userName = record.userId.name;
       const role = record.role;
@@ -485,6 +525,7 @@ router.get('/month/:month', authorize('admin', 'finance'), async (req, res) => {
         month,
         summary: summaryArray,
         records,
+        monthlyRoleKPIs,
         totalRecords: records.length
       }
     });
@@ -708,6 +749,98 @@ router.get('/export/user/:userId', async (req, res) => {
     const encodedFilename = encodeURIComponent(filename);
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedFilename}`);
     res.send(buffer);
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+});
+
+// 获取指定月份的月度角色KPI（综合岗和财务岗）- 管理员可查看
+router.get('/monthly-role/:month', authorize('admin'), async (req, res) => {
+  try {
+    const { month } = req.params;
+
+    const records = await MonthlyRoleKPI.find({ month })
+      .populate('userId', 'name username email roles')
+      .populate('evaluatedBy', 'name username')
+      .sort({ role: 1, userId: 1 });
+
+    res.json({
+      success: true,
+      data: {
+        month,
+        records
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+});
+
+// 管理员评价完成系数（综合岗和财务岗）
+router.post('/monthly-role/:id/evaluate', authorize('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { evaluationLevel } = req.body;
+
+    if (!evaluationLevel || !['good', 'medium', 'poor'].includes(evaluationLevel)) {
+      return res.status(400).json({
+        success: false,
+        message: '评价等级无效，必须是 good（好）、medium（中）或 poor（差）'
+      });
+    }
+
+    const record = await MonthlyRoleKPI.findById(id);
+    if (!record) {
+      return res.status(404).json({
+        success: false,
+        message: 'KPI记录不存在'
+      });
+    }
+
+    // 根据评价等级设置完成系数
+    const evaluationFactorMap = {
+      good: 1.1,
+      medium: 1.0,
+      poor: 0.8
+    };
+    const evaluationFactor = evaluationFactorMap[evaluationLevel];
+
+    // 重新计算KPI值
+    let kpiValue;
+    if (record.role === 'admin_staff') {
+      kpiValue = calculateAdminStaff(record.totalCompanyAmount, record.ratio, evaluationFactor);
+    } else if (record.role === 'finance') {
+      kpiValue = calculateFinance(record.totalCompanyAmount, record.ratio, evaluationFactor);
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: '该记录不是综合岗或财务岗的KPI'
+      });
+    }
+
+    // 更新记录
+    record.evaluationFactor = evaluationFactor;
+    record.evaluationLevel = evaluationLevel;
+    record.kpiValue = kpiValue;
+    record.evaluatedBy = req.user._id;
+    record.evaluatedAt = new Date();
+    record.calculationDetails = {
+      formula: `全公司当月项目总金额(${record.totalCompanyAmount}) × ${record.role === 'admin_staff' ? '综合岗' : '财务岗'}系数(${record.ratio}) × 完成系数(${evaluationFactor})`
+    };
+
+    await record.save();
+
+    res.json({
+      success: true,
+      message: '评价完成系数已更新',
+      data: record
+    });
   } catch (error) {
     res.status(500).json({ 
       success: false, 

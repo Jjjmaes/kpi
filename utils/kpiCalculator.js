@@ -68,9 +68,19 @@ function calculateSalesCommission(receivedAmount, ratio, completionFactor) {
  * 计算综合岗KPI
  * @param {Number} totalCompanyAmount - 全公司项目金额合计
  * @param {Number} ratio - 综合岗系数
- * @param {Number} completionFactor - 完成系数
+ * @param {Number} completionFactor - 完成系数（管理员评价）
  */
 function calculateAdminStaff(totalCompanyAmount, ratio, completionFactor) {
+  return totalCompanyAmount * ratio * completionFactor;
+}
+
+/**
+ * 计算财务岗KPI
+ * @param {Number} totalCompanyAmount - 全公司项目金额合计
+ * @param {Number} ratio - 财务岗系数
+ * @param {Number} completionFactor - 完成系数（管理员评价）
+ */
+function calculateFinance(totalCompanyAmount, ratio, completionFactor) {
   return totalCompanyAmount * ratio * completionFactor;
 }
 
@@ -140,6 +150,7 @@ module.exports = {
   calculateSalesBonus,
   calculateSalesCommission,
   calculateAdminStaff,
+  calculateFinance,
   calculateKPIByRole
 };
 
