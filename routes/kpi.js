@@ -448,15 +448,15 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
         amount: todayCreatedProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0)
       };
 
-      // 今日进入交付：今天开始执行的项目（startedAt在今天）
-      const todayStartedQuery = { ...projectQuery };
-      todayStartedQuery.startedAt = { $gte: today, $lt: tomorrow };
-      todayStartedQuery.status = 'in_progress';
-      delete todayStartedQuery.$or; // 移除月份查询条件
-      const todayStartedProjects = await Project.find(todayStartedQuery);
+      // 今日待交付：交付日期（deadline）是今天的项目
+      const todayDueQuery = { ...projectQuery };
+      todayDueQuery.deadline = { $gte: today, $lt: tomorrow };
+      todayDueQuery.status = { $nin: ['completed', 'cancelled'] }; // 未完成且未取消的项目
+      delete todayDueQuery.$or; // 移除月份查询条件
+      const todayDueProjects = await Project.find(todayDueQuery);
       todayDelivery = {
-        count: todayStartedProjects.length,
-        amount: todayStartedProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0)
+        count: todayDueProjects.length,
+        amount: todayDueProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0)
       };
     } else if (isPM && !isAdmin && !isFinance) {
       // 项目经理：今日待交付项目（deadline是今天，且项目经理是PM成员）

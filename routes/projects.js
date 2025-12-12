@@ -998,13 +998,14 @@ router.post('/:id/start', authorize('admin', 'sales', 'part_time_sales'), async 
       });
     }
 
-    // 仅允许PM、管理员或项目创建人操作
+    // 仅允许项目创建人（销售）或管理员操作
+    // 注意：PM不应该通过此路由开始项目，因为"开始项目"是销售通知PM的操作
     const isCreator = project.createdBy.toString() === req.user._id.toString();
-    const isAllowedRole = req.user.roles.includes('pm') || req.user.roles.includes('admin');
-    if (!isCreator && !isAllowedRole) {
+    const isAdmin = req.user.roles.includes('admin');
+    if (!isCreator && !isAdmin) {
       return res.status(403).json({
         success: false,
-        message: '仅PM、管理员或项目创建人可开始项目'
+        message: '仅项目创建人或管理员可开始项目'
       });
     }
 
@@ -1118,7 +1119,8 @@ router.post('/:id/status', authorize('admin', 'pm', 'translator', 'reviewer', 'l
     // 创建通知：通知项目相关成员状态变更
     try {
       const statusNames = {
-        'scheduled': '已安排',
+        'scheduled': '待安排',
+        'in_progress': '进行中',
         'translation_done': '翻译完成',
         'review_done': '审校完成',
         'layout_done': '排版完成'
