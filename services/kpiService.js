@@ -7,7 +7,7 @@ const KpiConfig = require('../models/KpiConfig');
 const { calculateKPIByRole, calculateAdminStaff, calculateFinance } = require('../utils/kpiCalculator');
 
 /**
- * 计算销售的完成系数
+ * 计算销售的完成系数（基于回款周期）
  * 
  * 业务规则说明：
  * - 返修可能是PM人员安排不当、翻译/审校/排版质量问题，或销售在项目初期沟通、需求理解、客户管理等方面的问题
@@ -16,15 +16,92 @@ const { calculateKPIByRole, calculateAdminStaff, calculateFinance } = require('.
  * - 返修会影响PM的KPI（因为PM负责人员安排和质量管控），通过完成系数扣减
  * - 延期和客诉同样不影响销售KPI，但会影响生产人员（翻译、审校、排版、PM）的KPI
  * 
- * 因此，销售最终考核仅与回款相关，完成系数固定为1，不受返修/延期/客诉影响。
+ * 销售完成系数根据回款周期计算：
+ * - 3个月以内：1.0
+ * - 3-6个月：0.9
+ * - 6-9个月：0.8
+ * - 9-12个月：0.7
+ * - 12个月以上：0.6
+ * 
+ * 回款周期计算：从项目完成时间（completedAt）到回款时间（receivedAt）的月数
+ * 如果项目未完成或未回款，使用项目创建时间（createdAt）到当前时间的月数作为参考
  * 
  * @param {Object} project - 项目对象
- * @returns {Number} 完成系数，始终返回1
+ * @returns {Number} 完成系数，根据回款周期返回0.6-1.0之间的值
  */
 function calculateCompletionFactorForSales(project) {
-  // 销售最终考核仅与回款相关，不受返修/延期/客诉影响
-  // 统一返回1，确保批量计算和单项目重算结果一致
-  return 1;
+  // 如果没有回款信息，返回默认值1.0（待回款项目暂不扣减）
+  if (!project.payment || !project.payment.receivedAt || project.payment.receivedAmount <= 0) {
+    return 1.0;
+  }
+
+  // 确定起始时间：优先使用项目完成时间，如果未完成则使用项目创建时间
+  const startDate = project.completedAt || project.createdAt;
+  if (!startDate) {
+    return 1.0; // 如果没有起始时间，返回默认值
+  }
+
+  // 回款时间
+  const receivedDate = new Date(project.payment.receivedAt);
+  
+  // 计算回款周期（月数）
+  const monthsDiff = calculateMonthsDifference(startDate, receivedDate);
+  
+  // 根据回款周期返回对应的完成系数
+  if (monthsDiff <= 3) {
+    return 1.0; // 3个月以内
+  } else if (monthsDiff <= 6) {
+    return 0.9; // 3-6个月
+  } else if (monthsDiff <= 9) {
+    return 0.8; // 6-9个月
+  } else if (monthsDiff <= 12) {
+    return 0.7; // 9-12个月
+  } else {
+    return 0.6; // 12个月以上（用户说的-1可能是笔误，这里用0.6）
+  }
+}
+
+/**
+ * 计算两个日期之间的月数差
+ * @param {Date|String} startDate - 开始日期
+ * @param {Date|String} endDate - 结束日期
+ * @returns {Number} 月数差（向上取整）
+ */
+function calculateMonthsDifference(startDate, endDate) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+    return 0;
+  }
+  
+  // 如果结束日期早于开始日期，返回0
+  if (end < start) {
+    return 0;
+  }
+  
+  // 计算年份差和月份差
+  const yearDiff = end.getFullYear() - start.getFullYear();
+  const monthDiff = end.getMonth() - start.getMonth();
+  const dayDiff = end.getDate() - start.getDate();
+  
+  // 总月数 = 年份差 * 12 + 月份差
+  let totalMonths = yearDiff * 12 + monthDiff;
+  
+  // 如果结束日期的天数大于等于开始日期的天数，则算作完整的一个月
+  // 例如：1月15日到2月15日算1个月，1月15日到2月14日也算1个月（向上取整）
+  if (dayDiff >= 0) {
+    totalMonths += 1;
+  } else {
+    // 如果结束日期的天数小于开始日期的天数，需要判断是否满一个月
+    // 例如：1月15日到2月10日，虽然天数差为负，但已经跨月了，应该算1个月
+    // 这里我们简单处理：只要跨月了就算1个月
+    if (monthDiff > 0 || yearDiff > 0) {
+      totalMonths += 1;
+    }
+  }
+  
+  return Math.max(0, totalMonths);
 }
 
 function appendComplaintNote(formula, project) {
@@ -45,7 +122,28 @@ function calculateSalesCombined(project, completionFactor) {
   const bonusPart = projectAmount * bonusRatio;
   const commissionPart = receivedAmount * commissionRatio * completionFactor;
   const kpiValue = Math.round((bonusPart + commissionPart) * 100) / 100;
-  const formula = `成交金额(${projectAmount})×销售金额系数(${bonusRatio}) + 回款金额(${receivedAmount})×回款系数(${commissionRatio})×完成系数(${completionFactor})`;
+  
+  // 计算回款周期信息（用于公式显示）
+  let paymentCycleInfo = '';
+  if (project.payment && project.payment.receivedAt && project.payment.receivedAmount > 0) {
+    const startDate = project.completedAt || project.createdAt;
+    if (startDate) {
+      const monthsDiff = calculateMonthsDifference(startDate, project.payment.receivedAt);
+      if (monthsDiff <= 3) {
+        paymentCycleInfo = '（回款周期≤3月）';
+      } else if (monthsDiff <= 6) {
+        paymentCycleInfo = '（回款周期3-6月）';
+      } else if (monthsDiff <= 9) {
+        paymentCycleInfo = '（回款周期6-9月）';
+      } else if (monthsDiff <= 12) {
+        paymentCycleInfo = '（回款周期9-12月）';
+      } else {
+        paymentCycleInfo = '（回款周期>12月）';
+      }
+    }
+  }
+  
+  const formula = `成交金额(${projectAmount})×销售金额系数(${bonusRatio}) + 回款金额(${receivedAmount})×回款系数(${commissionRatio})×完成系数(${completionFactor})${paymentCycleInfo}`;
 
   return { kpiValue, formula, bonusPart, commissionPart, bonusRatio, commissionRatio, receivedAmount };
 }
@@ -496,14 +594,9 @@ async function generateProjectKPI(projectId) {
           kpiValue: salesResult.kpiValue,
           formula: salesResult.formula
         };
-      } else if (member.role === 'admin_staff') {
-        // 综合岗：使用全公司总额
-        kpiResult = calculateKPIByRole({
-          role: member.role,
-          projectAmount: totalCompanyAmount,
-          ratio: effectiveRatio,
-          completionFactor
-        });
+      } else if (member.role === 'admin_staff' || member.role === 'finance') {
+        // 综合岗和财务岗：跳过项目级计算，将在月度汇总时使用管理员评价的完成系数
+        continue;
       } else {
         // 其他角色
         kpiResult = calculateKPIByRole({
@@ -650,14 +743,13 @@ async function calculateProjectRealtime(projectId) {
           kpiValue: layoutCost,
           formula: `排版费用：${layoutCost}元`
         };
-    } else if (member.role === 'admin_staff') {
-      // 综合岗：使用全公司总额
-      kpiResult = calculateKPIByRole({
-        role: member.role,
-        projectAmount: totalCompanyAmount,
-        ratio: effectiveRatio,
-        completionFactor
-      });
+    } else if (member.role === 'admin_staff' || member.role === 'finance') {
+      // 综合岗和财务岗：需要按月汇总计算，使用管理员评价的完成系数
+      // 实时计算时，提示需要按月汇总
+      kpiResult = {
+        kpiValue: 0,
+        formula: '综合岗/财务岗KPI需要按月汇总计算，使用管理员评价的完成系数'
+      };
     } else {
       // 其他角色
       kpiResult = calculateKPIByRole({
