@@ -542,7 +542,18 @@ function showForcePasswordChangeModal(fromAuthCheck = false, defaultOldPwd = '')
     forcePasswordChangeRequired = true;
     const content = `
         <div id="forcePwdAlert"></div>
-        <p style="margin:8px 0;">首次登录需修改密码。密码至少 8 位，需包含大写、小写、数字和特殊字符。</p>
+        <div style="background: #f0f9ff; border-left: 4px solid #3b82f6; padding: 12px; margin-bottom: 16px; border-radius: 4px;">
+            <p style="margin: 0 0 8px 0; font-weight: 600; color: #1e40af;">首次登录需修改密码</p>
+            <p style="margin: 0 0 8px 0; font-size: 14px; color: #1e3a8a;">为了账户安全，请设置一个强密码。密码要求如下：</p>
+            <ul style="margin: 8px 0 0 0; padding-left: 20px; font-size: 14px; color: #1e3a8a;">
+                <li>长度要求：至少 8 位，最多 64 位</li>
+                <li>必须包含：<strong>大写字母</strong>（A-Z）</li>
+                <li>必须包含：<strong>小写字母</strong>（a-z）</li>
+                <li>必须包含：<strong>数字</strong>（0-9）</li>
+                <li>必须包含：<strong>特殊字符</strong>（如 !@#$%^&* 等）</li>
+            </ul>
+            <p style="margin: 8px 0 0 0; font-size: 13px; color: #64748b;">示例：MyP@ssw0rd、Abc123!@#</p>
+        </div>
         <form id="forcePwdForm">
             <div class="form-group">
                 <label>旧密码</label>
@@ -550,11 +561,12 @@ function showForcePasswordChangeModal(fromAuthCheck = false, defaultOldPwd = '')
             </div>
             <div class="form-group">
                 <label>新密码</label>
-                <input type="password" id="forceNewPwd" required>
+                <input type="password" id="forceNewPwd" required placeholder="请输入符合要求的新密码">
+                <div id="forcePwdHint" style="font-size: 12px; color: #64748b; margin-top: 4px;"></div>
             </div>
             <div class="form-group">
                 <label>确认新密码</label>
-                <input type="password" id="forceNewPwdConfirm" required>
+                <input type="password" id="forceNewPwdConfirm" required placeholder="请再次输入新密码">
             </div>
             <div class="action-buttons">
                 <button type="submit">提交</button>
@@ -562,6 +574,39 @@ function showForcePasswordChangeModal(fromAuthCheck = false, defaultOldPwd = '')
         </form>
     `;
     showModal('修改密码', content);
+    
+    // 实时验证密码强度
+    const newPwdInput = document.getElementById('forceNewPwd');
+    const hintDiv = document.getElementById('forcePwdHint');
+    if (newPwdInput && hintDiv) {
+        newPwdInput.addEventListener('input', function() {
+            const pwd = this.value;
+            if (!pwd) {
+                hintDiv.innerHTML = '';
+                return;
+            }
+            
+            const checks = {
+                length: pwd.length >= 8 && pwd.length <= 64,
+                upper: /[A-Z]/.test(pwd),
+                lower: /[a-z]/.test(pwd),
+                digit: /\d/.test(pwd),
+                special: /[^A-Za-z0-9]/.test(pwd)
+            };
+            
+            let hintHtml = '<div style="margin-top: 4px;">';
+            hintHtml += checks.length ? '✓ 长度符合要求' : '✗ 长度需8-64位';
+            hintHtml += checks.upper ? ' ✓ 含大写字母' : ' ✗ 需含大写字母';
+            hintHtml += checks.lower ? ' ✓ 含小写字母' : ' ✗ 需含小写字母';
+            hintHtml += checks.digit ? ' ✓ 含数字' : ' ✗ 需含数字';
+            hintHtml += checks.special ? ' ✓ 含特殊字符' : ' ✗ 需含特殊字符';
+            hintHtml += '</div>';
+            
+            const allPass = Object.values(checks).every(v => v);
+            hintDiv.innerHTML = hintHtml;
+            hintDiv.style.color = allPass ? '#10b981' : '#64748b';
+        });
+    }
     const form = document.getElementById('forcePwdForm');
     form.addEventListener('submit', async (ev) => {
         ev.preventDefault();
@@ -804,6 +849,11 @@ function showSection(sectionId, triggerBtn) {
     // 如果是数据备份section，加载备份列表
     if (sectionId === 'backup') {
         loadBackups();
+    }
+    
+    // 如果是个人中心section，加载个人信息
+    if (sectionId === 'profile') {
+        loadProfile();
     }
     
     if (sectionId === 'finance') {
@@ -4607,20 +4657,27 @@ async function generateMonthlyKPI() {
         return;
     }
 
-    if (!confirm(`确定要生成 ${month} 的月度KPI吗？`)) return;
+    // 询问是否强制更新已存在的记录
+    const forceUpdate = confirm(
+        `确定要生成 ${month} 的月度KPI吗？\n\n` +
+        `点击"确定"：强制更新已存在的记录（适用于修改KPI参数后重新计算）\n` +
+        `点击"取消"：跳过已存在的记录（仅生成新记录，不更新已有数据）`
+    );
+    
+    const force = forceUpdate; // 用户点击确定表示强制更新
 
     try {
         const response = await apiFetch(`${API_BASE}/kpi/generate-monthly`, {
             method: 'POST',
-            body: JSON.stringify({ month })
+            body: JSON.stringify({ month, force })
         });
         const result = await response.json();
         
         if (result.success) {
-            alert(`月度KPI生成成功！共生成 ${result.data.count} 条记录`);
+            alert(result.message || `月度KPI生成成功！共生成 ${result.data.count} 条记录`);
             loadKPI();
         } else {
-            alert(result.message);
+            alert(result.message || '生成失败');
         }
     } catch (error) {
         alert('生成失败: ' + error.message);
@@ -7648,5 +7705,233 @@ async function cleanupOldBackups() {
     } catch (error) {
         console.error('清理旧备份失败:', error);
         showAlert('backupAlert', '清理旧备份失败: ' + error.message, 'error');
+    }
+}
+
+// ==================== 个人中心 ====================
+async function loadProfile() {
+    const contentEl = document.getElementById('profileContent');
+    const alertEl = document.getElementById('profileAlert');
+    
+    if (!contentEl) return;
+    
+    try {
+        // 获取当前用户信息
+        const response = await apiFetch(`${API_BASE}/auth/me`);
+        const data = await response.json();
+        
+        if (!data.success) {
+            showAlert('profileAlert', '加载个人信息失败: ' + (data.message || '未知错误'), 'error');
+            return;
+        }
+        
+        const user = data.user;
+        
+        contentEl.innerHTML = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
+                <!-- 基本信息卡片 -->
+                <div class="card">
+                    <div class="card-title">基本信息</div>
+                    <form id="profileInfoForm">
+                        <div class="form-group">
+                            <label>用户名</label>
+                            <input type="text" value="${user.username || ''}" disabled style="background: #f5f5f5;">
+                            <small style="color: #999;">用户名不可修改</small>
+                        </div>
+                        <div class="form-group">
+                            <label>姓名</label>
+                            <input type="text" value="${user.name || ''}" disabled style="background: #f5f5f5;">
+                            <small style="color: #999;">姓名由管理员修改</small>
+                        </div>
+                        <div class="form-group">
+                            <label>邮箱 <span style="color: #e74c3c;">*</span></label>
+                            <input type="email" id="profileEmail" value="${user.email || ''}" required>
+                        </div>
+                        <div class="form-group">
+                            <label>电话</label>
+                            <input type="text" id="profilePhone" value="${user.phone || ''}" placeholder="请输入联系电话">
+                        </div>
+                        <div class="form-group">
+                            <label>角色</label>
+                            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">
+                                ${(user.roles || []).map(role => `
+                                    <span style="background: #667eea; color: white; padding: 4px 12px; border-radius: 12px; font-size: 13px;">
+                                        ${roleNames[role] || role}
+                                    </span>
+                                `).join('')}
+                            </div>
+                            <small style="color: #999;">角色由管理员分配</small>
+                        </div>
+                        <div class="action-buttons">
+                            <button type="submit" class="btn-primary">保存信息</button>
+                        </div>
+                    </form>
+                </div>
+                
+                <!-- 修改密码卡片 -->
+                <div class="card">
+                    <div class="card-title">修改密码</div>
+                    <div style="background: #f0f9ff; border-left: 4px solid #3b82f6; padding: 12px; margin-bottom: 16px; border-radius: 4px;">
+                        <p style="margin: 0 0 8px 0; font-weight: 600; color: #1e40af;">密码要求</p>
+                        <ul style="margin: 8px 0 0 0; padding-left: 20px; font-size: 14px; color: #1e3a8a;">
+                            <li>长度要求：至少 8 位，最多 64 位</li>
+                            <li>必须包含：<strong>大写字母</strong>（A-Z）</li>
+                            <li>必须包含：<strong>小写字母</strong>（a-z）</li>
+                            <li>必须包含：<strong>数字</strong>（0-9）</li>
+                            <li>必须包含：<strong>特殊字符</strong>（如 !@#$%^&* 等）</li>
+                        </ul>
+                    </div>
+                    <form id="profilePasswordForm">
+                        <div class="form-group">
+                            <label>当前密码 <span style="color: #e74c3c;">*</span></label>
+                            <input type="password" id="profileOldPassword" required>
+                        </div>
+                        <div class="form-group">
+                            <label>新密码 <span style="color: #e74c3c;">*</span></label>
+                            <input type="password" id="profileNewPassword" required placeholder="请输入符合要求的新密码">
+                            <div id="profilePwdHint" style="font-size: 12px; color: #64748b; margin-top: 4px;"></div>
+                        </div>
+                        <div class="form-group">
+                            <label>确认新密码 <span style="color: #e74c3c;">*</span></label>
+                            <input type="password" id="profileNewPasswordConfirm" required placeholder="请再次输入新密码">
+                        </div>
+                        <div class="action-buttons">
+                            <button type="submit" class="btn-primary">修改密码</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        `;
+        
+        // 绑定表单提交事件
+        const infoForm = document.getElementById('profileInfoForm');
+        if (infoForm) {
+            infoForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await updateProfileInfo();
+            });
+        }
+        
+        const passwordForm = document.getElementById('profilePasswordForm');
+        if (passwordForm) {
+            passwordForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await updateProfilePassword();
+            });
+        }
+        
+        // 实时验证密码强度
+        const newPwdInput = document.getElementById('profileNewPassword');
+        const hintDiv = document.getElementById('profilePwdHint');
+        if (newPwdInput && hintDiv) {
+            newPwdInput.addEventListener('input', function() {
+                const pwd = this.value;
+                if (!pwd) {
+                    hintDiv.innerHTML = '';
+                    return;
+                }
+                
+                const checks = {
+                    length: pwd.length >= 8 && pwd.length <= 64,
+                    upper: /[A-Z]/.test(pwd),
+                    lower: /[a-z]/.test(pwd),
+                    digit: /\d/.test(pwd),
+                    special: /[^A-Za-z0-9]/.test(pwd)
+                };
+                
+                let hintHtml = '<div style="margin-top: 4px;">';
+                hintHtml += checks.length ? '✓ 长度符合要求' : '✗ 长度需8-64位';
+                hintHtml += checks.upper ? ' ✓ 含大写字母' : ' ✗ 需含大写字母';
+                hintHtml += checks.lower ? ' ✓ 含小写字母' : ' ✗ 需含小写字母';
+                hintHtml += checks.digit ? ' ✓ 含数字' : ' ✗ 需含数字';
+                hintHtml += checks.special ? ' ✓ 含特殊字符' : ' ✗ 需含特殊字符';
+                hintHtml += '</div>';
+                
+                const allPass = Object.values(checks).every(v => v);
+                hintDiv.innerHTML = hintHtml;
+                hintDiv.style.color = allPass ? '#10b981' : '#64748b';
+            });
+        }
+        
+    } catch (error) {
+        showAlert('profileAlert', '加载个人信息失败: ' + error.message, 'error');
+    }
+}
+
+// 更新个人信息（邮箱、电话）
+async function updateProfileInfo() {
+    const alertEl = document.getElementById('profileAlert');
+    const email = document.getElementById('profileEmail')?.value;
+    const phone = document.getElementById('profilePhone')?.value;
+    
+    if (!email) {
+        showAlert('profileAlert', '邮箱不能为空', 'error');
+        return;
+    }
+    
+    try {
+        const response = await apiFetch(`${API_BASE}/auth/profile`, {
+            method: 'PUT',
+            body: JSON.stringify({ email, phone })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showAlert('profileAlert', '个人信息已更新', 'success');
+            // 更新当前用户信息
+            if (currentUser) {
+                currentUser.email = data.data.email;
+                currentUser.phone = data.data.phone;
+            }
+        } else {
+            showAlert('profileAlert', data.message || '更新失败', 'error');
+        }
+    } catch (error) {
+        showAlert('profileAlert', '更新失败: ' + error.message, 'error');
+    }
+}
+
+// 更新密码
+async function updateProfilePassword() {
+    const alertEl = document.getElementById('profileAlert');
+    const oldPassword = document.getElementById('profileOldPassword')?.value;
+    const newPassword = document.getElementById('profileNewPassword')?.value;
+    const newPasswordConfirm = document.getElementById('profileNewPasswordConfirm')?.value;
+    
+    if (!oldPassword || !newPassword || !newPasswordConfirm) {
+        showAlert('profileAlert', '请填写所有密码字段', 'error');
+        return;
+    }
+    
+    if (newPassword !== newPasswordConfirm) {
+        showAlert('profileAlert', '两次输入的新密码不一致', 'error');
+        return;
+    }
+    
+    const msg = passwordValidationMessage(newPassword);
+    if (msg) {
+        showAlert('profileAlert', msg, 'error');
+        return;
+    }
+    
+    try {
+        const response = await apiFetch(`${API_BASE}/auth/change-password`, {
+            method: 'POST',
+            body: JSON.stringify({ oldPassword, newPassword })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showAlert('profileAlert', '密码已更新', 'success');
+            // 清空表单
+            document.getElementById('profilePasswordForm').reset();
+            document.getElementById('profilePwdHint').innerHTML = '';
+        } else {
+            showAlert('profileAlert', data.message || '修改失败', 'error');
+        }
+    } catch (error) {
+        showAlert('profileAlert', '修改失败: ' + error.message, 'error');
     }
 }

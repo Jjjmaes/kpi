@@ -348,7 +348,7 @@ async function generateMonthlyKPIRecords(month, force = false) {
         const adminStaffUsers = await User.find({ roles: 'admin_staff' });
         const financeUsers = await User.find({ roles: 'finance' });
 
-        // 为综合岗用户生成月度KPI
+        // 为综合岗用户生成月度KPI（使用与财务岗相同的计算公式）
         for (const user of adminStaffUsers) {
           try {
             // 查找是否已有记录（可能已有管理员评价）
@@ -362,7 +362,8 @@ async function generateMonthlyKPIRecords(month, force = false) {
               if (force) {
                 // 强制重新计算（但保留评价系数）
                 const evaluationFactor = existing.evaluationFactor || 1.0;
-                const kpiValue = calculateAdminStaff(totalCompanyAmount, adminRatio, evaluationFactor);
+                // 使用与财务岗相同的计算公式：calculateFinance
+                const kpiValue = calculateFinance(totalCompanyAmount, adminRatio, evaluationFactor);
                 existing.totalCompanyAmount = totalCompanyAmount;
                 existing.ratio = adminRatio;
                 existing.kpiValue = kpiValue;
@@ -375,7 +376,8 @@ async function generateMonthlyKPIRecords(month, force = false) {
               // 如果不强制，保留原有评价
             } else {
               // 创建新记录（默认评价为"中"，系数1.0）
-              const kpiValue = calculateAdminStaff(totalCompanyAmount, adminRatio, 1.0);
+              // 使用与财务岗相同的计算公式：calculateFinance
+              const kpiValue = calculateFinance(totalCompanyAmount, adminRatio, 1.0);
               await MonthlyRoleKPI.create({
                 userId: user._id,
                 role: 'admin_staff',

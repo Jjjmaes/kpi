@@ -68,6 +68,7 @@
                 <button onclick="showSection('languages')" id="languagesBtn" style="display:none;">语种管理</button>
                 <button onclick="showSection('permissions')" id="permissionsBtn" style="display:none;">权限配置</button>
                 <button onclick="showSection('backup')" id="backupBtn" style="display:none;">数据备份</button>
+                <button onclick="showSection('profile')" id="profileBtn">个人中心</button>
             </nav>
 
             <!-- 业务看板 -->
@@ -505,6 +506,13 @@
                     <button onclick="showCreateLanguageModal()" id="createLanguageBtn" style="display:none;">新增语种</button>
                 </div>
                 <div id="languagesList"></div>
+            </div>
+
+            <!-- 个人中心 -->
+            <div id="profile" class="section">
+                <h2>个人中心</h2>
+                <div id="profileAlert"></div>
+                <div id="profileContent"></div>
             </div>
         </div>
     </div>

@@ -171,11 +171,17 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
     }
     
     // 4. 实时计算KPI（按项目和角色分别计算）
+    // 注意：综合岗和财务岗跳过项目级计算，将在步骤5中按月汇总计算
     for (const [key, member] of projectRoleMap) {
       const [projectId, role] = key.split('_');
       
       // 如果当前选择了特定角色，只计算该角色的KPI
       if (currentRole && currentRole !== 'admin' && role !== currentRole) {
+        continue;
+      }
+      
+      // 综合岗和财务岗跳过项目级实时计算，将在步骤5中按月汇总计算
+      if (role === 'admin_staff' || role === 'finance') {
         continue;
       }
       
@@ -237,6 +243,60 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
       }
       kpiByRole[record.role] += record.kpiValue;
     });
+    
+    // 5.1 如果用户是综合岗或财务岗，但没有月度KPI记录，实时计算预估KPI
+    const userRoles = req.user.roles || [];
+    const hasAdminStaffRole = userRoles.includes('admin_staff');
+    const hasFinanceRole = userRoles.includes('finance');
+    
+    // 计算当月全公司项目总金额（用于综合岗和财务岗的实时计算）
+    // 注意：这里应该使用全公司所有项目，而不是当前用户可见的项目
+    const [year, monthNum] = monthStr.split('-').map(Number);
+    const monthStartDate = new Date(year, monthNum - 1, 1);
+    const monthEndDate = new Date(year, monthNum, 0, 23, 59, 59);
+    
+    const allMonthlyProjects = await Project.find({
+      createdAt: {
+        $gte: monthStartDate,
+        $lte: monthEndDate
+      }
+    });
+    const totalCompanyAmount = allMonthlyProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0);
+    
+    // 获取KPI配置
+    const KpiConfig = require('../models/KpiConfig');
+    const config = await KpiConfig.findOne().sort({ createdAt: -1 });
+    const adminRatio = config?.admin_ratio || 0;
+    
+    // 如果用户有综合岗角色，但没有月度KPI记录，实时计算预估KPI
+    if (hasAdminStaffRole && adminRatio > 0 && totalCompanyAmount > 0) {
+      const hasAdminStaffKPI = monthlyRoleKPIs.some(r => r.role === 'admin_staff');
+      if (!hasAdminStaffKPI) {
+        // 如果没有月度KPI记录，实时计算预估KPI（使用默认完成系数1.0）
+        const { calculateFinance } = require('../utils/kpiCalculator');
+        const estimatedKPI = calculateFinance(totalCompanyAmount, adminRatio, 1.0);
+        if (!kpiByRole['admin_staff']) {
+          kpiByRole['admin_staff'] = 0;
+        }
+        // 只有在没有月度KPI记录时才累加实时计算的预估KPI
+        kpiByRole['admin_staff'] += estimatedKPI;
+      }
+    }
+    
+    // 如果用户有财务岗角色，但没有月度KPI记录，实时计算预估KPI
+    if (hasFinanceRole && adminRatio > 0 && totalCompanyAmount > 0) {
+      const hasFinanceKPI = monthlyRoleKPIs.some(r => r.role === 'finance');
+      if (!hasFinanceKPI) {
+        // 如果没有月度KPI记录，实时计算预估KPI（使用默认完成系数1.0）
+        const { calculateFinance } = require('../utils/kpiCalculator');
+        const estimatedKPI = calculateFinance(totalCompanyAmount, adminRatio, 1.0);
+        if (!kpiByRole['finance']) {
+          kpiByRole['finance'] = 0;
+        }
+        // 只有在没有月度KPI记录时才累加实时计算的预估KPI
+        kpiByRole['finance'] += estimatedKPI;
+      }
+    }
     
     // 6. 根据当前选择的角色，只显示该角色的KPI
     // 如果用户选择了特定角色，只返回该角色的KPI；否则返回所有角色的总和
@@ -491,7 +551,7 @@ router.post('/generate-project/:projectId', authorize('admin', 'finance', 'pm'),
 // 手动生成月度KPI（管理员和财务）
 router.post('/generate-monthly', authorize('admin', 'finance'), async (req, res) => {
   try {
-    const { month } = req.body; // 格式：YYYY-MM
+    const { month, force = false } = req.body; // 格式：YYYY-MM, force: 是否强制更新已存在的记录
 
     if (!month) {
       return res.status(400).json({ 
@@ -500,11 +560,22 @@ router.post('/generate-monthly', authorize('admin', 'finance'), async (req, res)
       });
     }
 
-    const result = await generateMonthlyKPIRecords(month);
+    const result = await generateMonthlyKPIRecords(month, force);
+
+    let message = `月度KPI生成成功，共生成 ${result.count} 条新记录`;
+    if (result.updated && result.updated > 0) {
+      message += `，更新 ${result.updated} 条已存在记录`;
+    }
+    if (result.inProgress) {
+      return res.status(409).json({
+        success: false,
+        message: result.message
+      });
+    }
 
     res.json({
       success: true,
-      message: `月度KPI生成成功，共生成 ${result.count} 条记录`,
+      message,
       data: result
     });
   } catch (error) {

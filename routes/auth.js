@@ -131,6 +131,61 @@ router.post('/change-password', authenticate, async (req, res) => {
   }
 });
 
+// 更新个人信息（电话、邮箱）
+router.put('/profile', authenticate, async (req, res) => {
+  try {
+    const { email, phone } = req.body;
+    const user = await User.findById(req.user._id);
+    
+    if (!user) {
+      return res.status(404).json({ success: false, message: '用户不存在' });
+    }
+
+    // 验证邮箱格式
+    if (email !== undefined) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (email && !emailRegex.test(email)) {
+        return res.status(400).json({ success: false, message: '邮箱格式不正确' });
+      }
+      // 检查邮箱是否已被其他用户使用
+      const existingUser = await User.findOne({ email: email.toLowerCase(), _id: { $ne: user._id } });
+      if (existingUser) {
+        return res.status(400).json({ success: false, message: '该邮箱已被其他用户使用' });
+      }
+      user.email = email.toLowerCase();
+    }
+
+    // 验证电话格式（可选，如果提供则验证）
+    if (phone !== undefined) {
+      if (phone && phone.trim()) {
+        // 简单的电话格式验证（可根据需要调整）
+        const phoneRegex = /^[\d\s\-\+\(\)]+$/;
+        if (!phoneRegex.test(phone)) {
+          return res.status(400).json({ success: false, message: '电话格式不正确' });
+        }
+      }
+      user.phone = phone || '';
+    }
+
+    user.updatedAt = Date.now();
+    await user.save();
+
+    res.json({
+      success: true,
+      message: '个人信息已更新',
+      data: {
+        id: user._id,
+        username: user.username,
+        name: user.name,
+        email: user.email,
+        phone: user.phone
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;
 
 
