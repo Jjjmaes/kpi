@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, authorize, getCurrentPermission } = require('../middleware/auth');
+const { asyncHandler, AppError } = require('../middleware/errorHandler');
 const Project = require('../models/Project');
 const ProjectMember = require('../models/ProjectMember');
 const KpiConfig = require('../models/KpiConfig');
@@ -10,6 +11,7 @@ const { exportProjectQuotation } = require('../services/excelService');
 const { createNotification, createNotificationsForUsers, NotificationTypes } = require('../services/notificationService');
 const { getUserProjectIds } = require('../utils/projectUtils');
 const { createProjectValidation, handleValidationErrors } = require('../validators/projectValidator');
+const { checkProjectAccess, canModifyProject, canAddMember, canRemoveMember } = require('../utils/projectAccess');
 
 // 判断是否为仅交付角色（翻译/审校/排版），无查看客户信息权限
 function isDeliveryOnlyUser(user, currentRole) {
@@ -92,8 +94,7 @@ router.post('/create',
   authorize('sales', 'admin', 'part_time_sales'),
   createProjectValidation,
   handleValidationErrors,
-  async (req, res) => {
-  try {
+  asyncHandler(async (req, res) => {
     const { 
       projectName, 
       customerId, 
@@ -406,13 +407,7 @@ router.post('/create',
       message: '项目创建成功',
       data: project
     });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
-  }
-});
+}));
 
 // 更新项目（管理员、销售、兼职销售；含PM身份的销售也不可编辑）
 router.put('/:id', authorize('admin', 'sales', 'part_time_sales'), async (req, res) => {
@@ -564,8 +559,7 @@ router.delete('/:id', authorize('admin', 'sales', 'part_time_sales'), async (req
 });
 
 // 获取项目列表
-router.get('/', async (req, res) => {
-  try {
+router.get('/', asyncHandler(async (req, res) => {
     let query = {};
     
     // 基于当前角色的权限进行数据过滤
@@ -615,100 +609,54 @@ router.get('/', async (req, res) => {
       success: true,
       data
     });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
-  }
-});
+}));
 
 // 获取单个项目详情
-router.get('/:id', async (req, res) => {
-  try {
-    const project = await Project.findById(req.params.id)
-      .populate('createdBy', 'name username')
-      .populate('customerId', 'name shortName contactPerson phone email address')
-      .populate('partTimeLayout.layoutAssignedTo', 'name username');
+router.get('/:id', asyncHandler(async (req, res) => {
+  // 使用公共函数检查项目访问权限
+  const project = await checkProjectAccess(
+    req.params.id,
+    req.user,
+    req.user.roles
+  );
+  
+  // 填充关联数据
+  await project.populate('createdBy', 'name username');
+  await project.populate('customerId', 'name shortName contactPerson phone email address');
+  await project.populate('partTimeLayout.layoutAssignedTo', 'name username');
 
-    if (!project) {
-      return res.status(404).json({ 
-        success: false, 
-        message: '项目不存在' 
-      });
+  // 获取项目成员
+  const members = await ProjectMember.find({ projectId: project._id })
+    .populate('userId', 'name username email roles');
+
+  const isDeliveryOnly = isDeliveryOnlyUser(req.user, req.currentRole);
+  const projectData = isDeliveryOnly ? scrubCustomerInfo(project) : project.toObject();
+
+  res.json({
+    success: true,
+    data: {
+      ...projectData,
+      members
     }
-
-    // 检查权限
-    const isMember = await ProjectMember.findOne({ 
-      projectId: project._id, 
-      userId: req.user._id 
-    });
-    const canView = req.user.roles.includes('admin') || 
-                    req.user.roles.includes('finance') || 
-                    project.createdBy._id.toString() === req.user._id.toString() ||
-                    isMember;
-
-    if (!canView) {
-      return res.status(403).json({ 
-        success: false, 
-        message: '无权查看此项目' 
-      });
-    }
-
-    // 获取项目成员
-    const members = await ProjectMember.find({ projectId: project._id })
-      .populate('userId', 'name username email roles');
-
-    const isDeliveryOnly = isDeliveryOnlyUser(req.user, req.currentRole);
-    const projectData = isDeliveryOnly ? scrubCustomerInfo(project) : project.toObject();
-
-    res.json({
-      success: true,
-      data: {
-        ...projectData,
-        members
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
-  }
-});
+  });
+}));
 
 // 添加项目成员
-router.post('/:id/add-member', async (req, res) => {
-  try {
-    const { userId, role, translatorType, wordRatio, layoutCost } = req.body;
-    const projectId = req.params.id;
+router.post('/:id/add-member', asyncHandler(async (req, res) => {
+  const { userId, role, translatorType, wordRatio, layoutCost } = req.body;
+  const projectId = req.params.id;
 
-    if (!userId || !role) {
-      return res.status(400).json({ 
-        success: false, 
-        message: '用户ID和角色不能为空' 
-      });
-    }
+  if (!userId || !role) {
+    throw new AppError('用户ID和角色不能为空', 400, 'INVALID_INPUT');
+  }
 
-    const project = await Project.findById(projectId);
-    if (!project) {
-      return res.status(404).json({ 
-        success: false, 
-        message: '项目不存在' 
-      });
-    }
+  // 使用公共函数检查项目访问权限
+  const project = await checkProjectAccess(projectId, req.user, req.user.roles);
 
-    // 权限检查：创建者、PM或管理员可以添加成员
-    const canAdd = project.createdBy.toString() === req.user._id.toString() ||
-                   req.user.roles.includes('admin') ||
-                   req.user.roles.includes('pm');
-
-    if (!canAdd) {
-      return res.status(403).json({ 
-        success: false, 
-        message: '无权添加成员' 
-      });
-    }
+  // 使用公共函数检查添加成员权限
+  if (!canAddMember(project, req.user, req.user.roles)) {
+    throw new AppError('无权添加成员', 403, 'PERMISSION_DENIED');
+  }
 
     // 校验1：如果当前用户是PM，并且同时有翻译或审校角色，则不能将翻译或审校分配给自己
     const isPM = req.user.roles.includes('pm');
@@ -793,62 +741,58 @@ router.post('/:id/add-member', async (req, res) => {
       ratio = 0;
     }
 
-    const member = await ProjectMember.create({
-      projectId,
-      userId,
-      role,
-      translatorType: role === 'translator' ? (translatorType || 'mtpe') : undefined,
-      wordRatio: role === 'translator' ? (wordRatio || 1.0) : 1.0,
-      ratio_locked: ratio
-    });
-
-    // 如果项目状态是pending，添加成员后自动变为scheduled（已安排）
-    if (project.status === 'pending') {
-      project.status = 'scheduled';
-      project.startedAt = new Date();
-      project.completionChecks.hasMembers = true;
-      await project.save();
-    }
-
-    // 创建通知：通知被分配的用户
     try {
-      const assignedUser = await User.findById(userId);
-      const roleNames = {
-        'pm': '项目经理',
-        'translator': '翻译',
-        'reviewer': '审校',
-        'layout': '排版'
-      };
-      const roleName = roleNames[role] || role;
-      await createNotification({
-        userId: userId,
-        type: NotificationTypes.PROJECT_ASSIGNED,
-        message: `您已被分配到项目"${project.projectName}"，角色：${roleName}`,
-        link: `#projects`
+      const member = await ProjectMember.create({
+        projectId,
+        userId,
+        role,
+        translatorType: role === 'translator' ? (translatorType || 'mtpe') : undefined,
+        wordRatio: role === 'translator' ? (wordRatio || 1.0) : 1.0,
+        ratio_locked: ratio
       });
-    } catch (notifError) {
-      console.error('[Project] 创建通知失败:', notifError);
-      // 通知创建失败不影响成员添加
-    }
 
-    res.status(201).json({
-      success: true,
-      message: '成员添加成功',
-      data: member
-    });
-  } catch (error) {
-    if (error.code === 11000) {
-      return res.status(400).json({ 
-        success: false, 
-        message: '该用户在此项目中已存在相同角色' 
+      // 如果项目状态是pending，添加成员后自动变为scheduled（已安排）
+      if (project.status === 'pending') {
+        project.status = 'scheduled';
+        project.startedAt = new Date();
+        project.completionChecks.hasMembers = true;
+        await project.save();
+      }
+
+      // 创建通知：通知被分配的用户
+      try {
+        const assignedUser = await User.findById(userId);
+        const roleNames = {
+          'pm': '项目经理',
+          'translator': '翻译',
+          'reviewer': '审校',
+          'layout': '排版'
+        };
+        const roleName = roleNames[role] || role;
+        await createNotification({
+          userId: userId,
+          type: NotificationTypes.PROJECT_ASSIGNED,
+          message: `您已被分配到项目"${project.projectName}"，角色：${roleName}`,
+          link: `#projects`
+        });
+      } catch (notifError) {
+        console.error('[Project] 创建通知失败:', notifError);
+        // 通知创建失败不影响成员添加
+      }
+
+      res.status(201).json({
+        success: true,
+        message: '成员添加成功',
+        data: member
       });
+    } catch (error) {
+      // 处理唯一约束冲突（MongoDB duplicate key error）
+      if (error.code === 11000) {
+        throw new AppError('该用户在此项目中已存在相同角色', 400, 'DUPLICATE_MEMBER');
+      }
+      throw error; // 其他错误继续向上抛出
     }
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
-  }
-});
+}));
 
 // 项目开始执行（管理员、销售、兼职销售）
 router.post('/:id/start', authorize('admin', 'sales', 'part_time_sales'), async (req, res) => {

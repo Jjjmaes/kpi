@@ -172,14 +172,12 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/kpi_syste
   process.exit(1);
 });
 
-// 错误处理中间件
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ 
-    success: false, 
-    message: err.message || 'Internal server error' 
-  });
-});
+// 404 处理（必须在所有路由之后，错误处理之前）
+const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
+app.use(notFoundHandler);
+
+// 统一错误处理中间件（必须在最后）
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0'; // 监听所有网络接口，允许局域网和域名访问
