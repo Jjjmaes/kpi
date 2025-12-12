@@ -39,6 +39,9 @@
                     </div>
                     <div class="user-actions">
                         <span id="roleSwitcherContainer" style="display: none;"></span>
+                        <button id="profileHeaderBtn" class="profile-btn" onclick="showSection('profile')" style="display:none;" title="个人中心">
+                            <span style="margin-right: 4px;">👤</span>个人中心
+                        </button>
                         <div id="notificationArea" class="notification-area" style="display:none;">
                             <button id="notificationBtn" class="notification-btn" onclick="toggleNotificationPanel()">
                                 通知
@@ -68,7 +71,6 @@
                 <button onclick="showSection('languages')" id="languagesBtn" style="display:none;">语种管理</button>
                 <button onclick="showSection('permissions')" id="permissionsBtn" style="display:none;">权限配置</button>
                 <button onclick="showSection('backup')" id="backupBtn" style="display:none;">数据备份</button>
-                <button onclick="showSection('profile')" id="profileBtn">个人中心</button>
             </nav>
 
             <!-- 业务看板 -->

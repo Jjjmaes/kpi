@@ -710,12 +710,8 @@ function initRoleSwitcher() {
         select.appendChild(option);
     });
     
-    // 清空容器并添加新元素
+    // 清空容器并添加新元素（去掉"当前角色:"标签，因为已经有currentRoleTag显示了）
     roleSwitcherContainer.innerHTML = '';
-    const label = document.createElement('span');
-    label.textContent = '当前角色: ';
-    label.style.marginRight = '5px';
-    roleSwitcherContainer.appendChild(label);
     roleSwitcherContainer.appendChild(select);
 }
 
@@ -778,6 +774,12 @@ function showMainApp() {
 
     // 初始化角色切换器
     initRoleSwitcher();
+    
+    // 显示个人中心按钮（所有登录用户都可以访问）
+    const profileHeaderBtn = document.getElementById('profileHeaderBtn');
+    if (profileHeaderBtn) {
+        profileHeaderBtn.style.display = 'inline-flex';
+    }
     
     // 刷新菜单显示
     refreshMenu();
