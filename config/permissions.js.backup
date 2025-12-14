@@ -1,13 +1,13 @@
 // 权限表配置
 // 定义每个角色可以访问的功能和权限范围
-// 最后更新：2025-12-14T04:00:28.922Z
-// 更新原因：管理员全部权限
+// 最后更新：2025-12-14T03:59:59.028Z
+// 更新原因：综合岗无客户权限
 // 更新人：系统管理员
 
 const PERMISSIONS = {
   'admin': {
     'project.view': "all",
-    'project.edit': "all",
+    'project.edit': false,
     'project.create': true,
     'project.delete': true,
     'project.member.manage': true,
@@ -43,7 +43,7 @@ const PERMISSIONS = {
     'project.create': true,
     'project.delete': false,
     'project.member.manage': true,
-    'kpi.view': "self",
+    'kpi.view': "all",
     'kpi.view.self': true,
     'kpi.config': false,
     'finance.view': false,
@@ -139,7 +139,7 @@ const PERMISSIONS = {
     'project.create': true,
     'project.delete': false,
     'project.member.manage': true,
-    'kpi.view': "self",
+    'kpi.view': "all",
     'kpi.view.self': true,
     'kpi.config': false,
     'finance.view': false,

@@ -39,6 +39,8 @@ class ProjectService {
     const {
       projectName,
       customerId,
+      contactId,
+      contactInfo,
       businessType,
       projectType,
       sourceLanguage,
@@ -115,6 +117,33 @@ class ProjectService {
       throw new AppError('客户不存在或已被禁用', 400, 'CUSTOMER_NOT_FOUND');
     }
 
+    // 处理联系人信息
+    let finalContactId = null;
+    let finalContactInfo = null;
+    
+    if (contactId !== null && contactId !== undefined && !isNaN(contactId)) {
+      // 验证联系人索引是否有效
+      const contacts = customer.contacts && customer.contacts.length > 0 
+        ? customer.contacts 
+        : (customer.contactPerson ? [{
+            name: customer.contactPerson || '',
+            phone: customer.phone || '',
+            email: customer.email || '',
+            position: '',
+            isPrimary: true
+          }] : []);
+      
+      if (contacts[contactId]) {
+        finalContactId = contactId;
+        finalContactInfo = contactInfo || {
+          name: contacts[contactId].name || '',
+          phone: contacts[contactId].phone || '',
+          email: contacts[contactId].email || '',
+          position: contacts[contactId].position || ''
+        };
+      }
+    }
+
     // 协议付款日，默认创建日起 3 个月
     let hasExpectedInput = !!expectedAt;
     let expectedPaymentDate = hasExpectedInput ? new Date(expectedAt) : null;
@@ -178,6 +207,8 @@ class ProjectService {
         projectName,
         customerId,
         clientName: customer.name,
+        contactId: finalContactId,
+        contactInfo: finalContactInfo,
         businessType: businessType || 'translation',
         projectType: projectType || 'mtpe',
         sourceLanguage: sourceLanguage.trim(),

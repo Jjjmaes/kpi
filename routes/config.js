@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { authenticate, authorize } = require('../middleware/auth');
 const KpiConfig = require('../models/KpiConfig');
+const fs = require('fs').promises;
+const path = require('path');
 
 // 公共接口：获取机构信息（无需登录）
 router.get('/public', async (req, res) => {
@@ -162,6 +164,164 @@ router.get('/history', async (req, res) => {
     res.json({
       success: true,
       data: historyWithUsers.reverse() // 最新的在前
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+});
+
+// 获取权限配置
+router.get('/permissions', async (req, res) => {
+  try {
+    const { PERMISSIONS, ROLE_NAMES } = require('../config/permissions');
+    res.json({
+      success: true,
+      data: {
+        permissions: PERMISSIONS,
+        roleNames: ROLE_NAMES
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+});
+
+// 更新权限配置
+router.put('/permissions', async (req, res) => {
+  try {
+    const { permissions, reason } = req.body;
+    
+    if (!permissions || typeof permissions !== 'object') {
+      return res.status(400).json({
+        success: false,
+        message: '权限数据格式错误'
+      });
+    }
+
+    // 读取当前权限配置文件
+    const configPath = path.join(__dirname, '../config/permissions.js');
+    let configContent = await fs.readFile(configPath, 'utf-8');
+
+    // 验证权限数据格式
+    const { PERMISSIONS: currentPermissions, ROLE_NAMES } = require('../config/permissions');
+    const validRoles = Object.keys(currentPermissions);
+    const validPermissionKeys = new Set();
+    validRoles.forEach(role => {
+      Object.keys(currentPermissions[role] || {}).forEach(key => validPermissionKeys.add(key));
+    });
+
+    // 验证并更新权限
+    const updatedPermissions = {};
+    for (const role of validRoles) {
+      if (!permissions[role]) {
+        updatedPermissions[role] = currentPermissions[role];
+        continue;
+      }
+      
+      updatedPermissions[role] = {};
+      for (const permKey of validPermissionKeys) {
+        const newValue = permissions[role][permKey];
+        // 验证值类型：true, false, 'all', 'sales', 'assigned', 'self'
+        if (newValue === true || newValue === false || 
+            newValue === 'all' || newValue === 'sales' || 
+            newValue === 'assigned' || newValue === 'self') {
+          updatedPermissions[role][permKey] = newValue;
+        } else {
+          // 保持原值
+          updatedPermissions[role][permKey] = currentPermissions[role]?.[permKey] || false;
+        }
+      }
+    }
+
+    // 生成新的配置文件内容
+    let newConfigContent = `// 权限表配置
+// 定义每个角色可以访问的功能和权限范围
+// 最后更新：${new Date().toISOString()}
+// 更新原因：${reason || '未提供原因'}
+// 更新人：${req.user.name || req.user.username}
+
+const PERMISSIONS = ${JSON.stringify(updatedPermissions, null, 2).replace(/"([^"]+)":/g, "'$1':")};
+
+// 角色优先级（用于默认角色选择）
+const ROLE_PRIORITY = {
+  'admin': 100,
+  'finance': 90,
+  'pm': 80,
+  'admin_staff': 75,
+  'sales': 70,
+  'part_time_sales': 65,
+  'reviewer': 50,
+  'translator': 40,
+  'layout': 30
+};
+
+// 角色显示名称
+const ROLE_NAMES = ${JSON.stringify(ROLE_NAMES, null, 2).replace(/"([^"]+)":/g, "'$1':")};
+
+// 检查权限
+function hasPermission(role, permission) {
+  if (!role || !PERMISSIONS[role]) {
+    return false;
+  }
+  return PERMISSIONS[role][permission] !== undefined && PERMISSIONS[role][permission] !== false;
+}
+
+// 获取权限值
+function getPermission(role, permission) {
+  if (!role || !PERMISSIONS[role]) {
+    return false;
+  }
+  return PERMISSIONS[role][permission] || false;
+}
+
+// 根据优先级选择默认角色
+function getDefaultRole(userRoles) {
+  if (!userRoles || userRoles.length === 0) {
+    return null;
+  }
+  
+  // 按优先级排序
+  const sortedRoles = userRoles.sort((a, b) => {
+    const priorityA = ROLE_PRIORITY[a] || 0;
+    const priorityB = ROLE_PRIORITY[b] || 0;
+    return priorityB - priorityA;
+  });
+  
+  return sortedRoles[0];
+}
+
+module.exports = {
+  PERMISSIONS,
+  ROLE_PRIORITY,
+  ROLE_NAMES,
+  hasPermission,
+  getPermission,
+  getDefaultRole
+};
+`;
+
+    // 备份原文件
+    const backupPath = path.join(__dirname, '../config/permissions.js.backup');
+    await fs.copyFile(configPath, backupPath);
+
+    // 写入新配置
+    await fs.writeFile(configPath, newConfigContent, 'utf-8');
+
+    // 清除 require 缓存，使新配置生效
+    delete require.cache[require.resolve('../config/permissions')];
+
+    res.json({
+      success: true,
+      message: '权限配置更新成功，已备份原配置文件',
+      data: {
+        permissions: updatedPermissions
+      }
     });
   } catch (error) {
     res.status(500).json({ 

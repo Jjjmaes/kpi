@@ -543,13 +543,32 @@ router.put('/invoice/:invoiceId', allowManageFinance, async (req, res) => {
 });
 
 // 发票列表（支持状态、类型筛选）
-router.get('/invoice', allowManageFinance, async (req, res) => {
+router.get('/invoice', allowViewFinance, async (req, res) => {
   try {
     const { projectId, status, type } = req.query;
     const query = {};
     if (projectId) query.projectId = projectId;
     if (status) query.status = status;
     if (type) query.type = type;
+    
+    // 权限控制：sale只能查看自己项目的发票
+    const roles = req.user.roles || [];
+    const isAdminOrFinance = roles.includes('admin') || roles.includes('finance');
+    if (!isAdminOrFinance) {
+      // sale角色：只能查看自己创建的项目
+      const projects = await Project.find({ createdBy: req.user._id }).select('_id');
+      const projectIds = projects.map(p => p._id);
+      if (projectId) {
+        // 如果指定了projectId，检查是否属于该用户
+        if (!projectIds.some(id => id.toString() === projectId)) {
+          return res.status(403).json({ success: false, message: '无权查看该项目发票' });
+        }
+      } else {
+        // 如果没有指定projectId，只查询该用户的项目
+        query.projectId = { $in: projectIds };
+      }
+    }
+    
     const list = await Invoice.find(query)
       .populate('projectId', 'projectName projectNumber')
       .sort({ issueDate: -1 });
@@ -596,17 +615,41 @@ router.get('/reports/summary', allowManageFinance, async (req, res) => {
     const projects = await Project.find(q).populate('customerId', 'name').populate('createdBy', 'name');
     const byCustomer = {};
     const bySales = {};
+    const byBusinessType = {};
+    const byStatus = {};
+    let totalAmount = 0;
+    let totalProjects = projects.length;
+    
     projects.forEach(p => {
+      const amount = p.projectAmount || 0;
+      totalAmount += amount;
+      
+      // 按客户汇总
       const cust = p.customerId ? p.customerId.name : '未分配';
-      byCustomer[cust] = (byCustomer[cust] || 0) + (p.projectAmount || 0);
+      byCustomer[cust] = (byCustomer[cust] || 0) + amount;
+      
+      // 按销售汇总
       const sales = p.createdBy ? p.createdBy.name : '未知销售';
-      bySales[sales] = (bySales[sales] || 0) + (p.projectAmount || 0);
+      bySales[sales] = (bySales[sales] || 0) + amount;
+      
+      // 按业务类型汇总
+      const businessType = p.businessType || '其他';
+      byBusinessType[businessType] = (byBusinessType[businessType] || 0) + amount;
+      
+      // 按状态汇总
+      const status = p.status || 'pending';
+      byStatus[status] = (byStatus[status] || 0) + amount;
     });
+    
     res.json({
       success: true,
       data: {
         byCustomer,
-        bySales
+        bySales,
+        byBusinessType,
+        byStatus,
+        totalAmount,
+        totalProjects
       }
     });
   } catch (error) {

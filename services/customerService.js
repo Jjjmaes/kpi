@@ -27,7 +27,8 @@ class CustomerService {
       filter.$or = [
         { name: { $regex: search, $options: 'i' } },
         { shortName: { $regex: search, $options: 'i' } },
-        { contactPerson: { $regex: search, $options: 'i' } }
+        { contactPerson: { $regex: search, $options: 'i' } },
+        { 'contacts.name': { $regex: search, $options: 'i' } }
       ];
     }
 
@@ -61,7 +62,7 @@ class CustomerService {
    * 创建客户
    */
   async createCustomer(customerData, creator) {
-    const { name, shortName, contactPerson, phone, email, address, notes } = customerData;
+    const { name, shortName, contacts, contactPerson, phone, email, address, notes } = customerData;
 
     // 验证必填字段
     if (!name) {
@@ -74,10 +75,49 @@ class CustomerService {
       throw new AppError('客户名称已存在', 400, 'DUPLICATE_CUSTOMER');
     }
 
+    // 处理联系人：优先使用 contacts 数组，如果没有则兼容旧的单个联系人字段
+    let contactsArray = [];
+    if (contacts && Array.isArray(contacts) && contacts.length > 0) {
+      contactsArray = contacts.map((contact, index) => ({
+        name: (contact.name || '').trim(),
+        phone: (contact.phone || '').trim(),
+        email: (contact.email || '').trim(),
+        position: (contact.position || '').trim(),
+        isPrimary: contact.isPrimary === true || (index === 0 && !contacts.some(c => c.isPrimary === true)) // 第一个联系人默认为主要联系人
+      })).filter(c => c.name); // 过滤掉没有姓名的联系人
+      
+      // 确保至少有一个联系人
+      if (contactsArray.length === 0) {
+        throw new AppError('至少需要添加一个联系人', 400, 'VALIDATION_ERROR');
+      }
+      
+      // 确保至少有一个主要联系人
+      if (!contactsArray.some(c => c.isPrimary)) {
+        contactsArray[0].isPrimary = true;
+      }
+    } else if (contactPerson) {
+      // 兼容旧数据：将单个联系人转换为数组
+      contactsArray = [{
+        name: (contactPerson || '').trim(),
+        phone: (phone || '').trim(),
+        email: (email || '').trim(),
+        position: '',
+        isPrimary: true
+      }].filter(c => c.name);
+      
+      if (contactsArray.length === 0) {
+        throw new AppError('联系人姓名不能为空', 400, 'VALIDATION_ERROR');
+      }
+    } else {
+      throw new AppError('至少需要添加一个联系人', 400, 'VALIDATION_ERROR');
+    }
+
     // 创建客户
     const customer = await Customer.create({
       name,
       shortName: shortName || '',
+      contacts: contactsArray,
+      // 兼容旧字段
       contactPerson: contactPerson || '',
       phone: phone || '',
       email: email || '',
@@ -96,7 +136,7 @@ class CustomerService {
    * 更新客户
    */
   async updateCustomer(customerId, updateData, requester) {
-    const { name, shortName, contactPerson, phone, email, address, notes, isActive } = updateData;
+    const { name, shortName, contacts, contactPerson, phone, email, address, notes, isActive } = updateData;
 
     const customer = await Customer.findById(customerId);
     if (!customer) {
@@ -128,6 +168,19 @@ class CustomerService {
     // 更新字段
     if (name) customer.name = name;
     if (shortName !== undefined) customer.shortName = shortName || '';
+    
+    // 处理联系人：优先使用 contacts 数组
+    if (contacts !== undefined && Array.isArray(contacts)) {
+      customer.contacts = contacts.map((contact, index) => ({
+        name: contact.name || '',
+        phone: contact.phone || '',
+        email: contact.email || '',
+        position: contact.position || '',
+        isPrimary: contact.isPrimary || (index === 0 && customer.contacts.length === 0)
+      }));
+    }
+    
+    // 兼容旧字段
     if (contactPerson !== undefined) customer.contactPerson = contactPerson || '';
     if (phone !== undefined) customer.phone = phone || '';
     if (email !== undefined) customer.email = email || '';

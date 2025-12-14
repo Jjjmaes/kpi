@@ -13,17 +13,42 @@ const customerSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
-  // 联系人
+  // 联系人列表（支持多个联系人）
+  contacts: [{
+    name: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    phone: {
+      type: String,
+      trim: true
+    },
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true
+    },
+    position: {
+      type: String,
+      trim: true
+    },
+    isPrimary: {
+      type: Boolean,
+      default: false
+    }
+  }],
+  // 兼容旧数据：保留单个联系人字段（已废弃，仅用于向后兼容）
   contactPerson: {
     type: String,
     trim: true
   },
-  // 联系电话
+  // 兼容旧数据：保留单个电话字段（已废弃，仅用于向后兼容）
   phone: {
     type: String,
     trim: true
   },
-  // 邮箱
+  // 兼容旧数据：保留单个邮箱字段（已废弃，仅用于向后兼容）
   email: {
     type: String,
     trim: true,
@@ -71,6 +96,23 @@ customerSchema.index({ name: 1 });
 customerSchema.index({ isActive: 1 });
 
 module.exports = mongoose.model('Customer', customerSchema);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

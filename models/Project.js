@@ -27,6 +27,18 @@ const projectSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  // 选中的联系人ID（关联到Customer.contacts数组中的索引）
+  contactId: {
+    type: Number,
+    default: null
+  },
+  // 联系人信息（冗余字段，便于查询和显示）
+  contactInfo: {
+    name: String,
+    phone: String,
+    email: String,
+    position: String
+  },
   // 业务类型
   businessType: {
     type: String,

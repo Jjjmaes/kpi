@@ -479,7 +479,7 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
         todayDelivery = {
           count: todayDueProjects.length,
           amount: todayDueProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0)
-        };
+      };
       } else {
         todayDelivery = { count: 0, amount: 0 };
       }
@@ -618,13 +618,18 @@ router.get('/user/:userId', async (req, res) => {
     let { userId } = req.params;
     const { month, role } = req.query;
 
-    // 权限检查
+    // 权限检查：只有管理员和财务可以查看所有用户的KPI
     const canViewAll = req.user.roles.includes('admin') || req.user.roles.includes('finance');
+    
+    // 处理userId参数
     if (!userId || userId === 'undefined' || userId === 'null') {
       userId = req.user._id.toString();
     }
+    
+    // 如果不是管理员/财务，强制只能查看自己的KPI
     const targetUserId = canViewAll ? userId : req.user._id.toString();
 
+    // 双重检查：如果尝试查看其他用户的KPI，直接拒绝
     if (!canViewAll && userId !== req.user._id.toString()) {
       return res.status(403).json({ 
         success: false, 
@@ -929,6 +934,69 @@ router.post('/review/:recordId', authorize('admin', 'finance'), async (req, res)
       success: true,
       message: 'KPI记录已审核',
       data: record
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+});
+
+// 拒绝KPI记录（财务和管理员）
+router.post('/reject/:recordId', authorize('admin', 'finance'), async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const record = await KpiRecord.findById(req.params.recordId);
+    
+    if (!record) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'KPI记录不存在' 
+      });
+    }
+
+    // 拒绝时删除记录（因为拒绝的记录不应该出现在工资表中）
+    await KpiRecord.findByIdAndDelete(req.params.recordId);
+
+    res.json({
+      success: true,
+      message: 'KPI记录已拒绝并删除',
+      data: { recordId: req.params.recordId, reason }
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+});
+
+// 批量审核KPI记录（财务和管理员）
+router.post('/review/batch', authorize('admin', 'finance'), async (req, res) => {
+  try {
+    const { recordIds } = req.body;
+    
+    if (!Array.isArray(recordIds) || recordIds.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: '请选择要审核的记录' 
+      });
+    }
+
+    const result = await KpiRecord.updateMany(
+      { _id: { $in: recordIds } },
+      { 
+        isReviewed: true,
+        reviewedBy: req.user._id,
+        reviewedAt: new Date()
+      }
+    );
+
+    res.json({
+      success: true,
+      message: `已批量审核 ${result.modifiedCount} 条记录`,
+      data: { count: result.modifiedCount }
     });
   } catch (error) {
     res.status(500).json({ 
