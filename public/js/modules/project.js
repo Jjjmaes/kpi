@@ -34,17 +34,23 @@ export function addTargetLanguageRow() {
     const container = document.getElementById('targetLanguagesContainer');
     if (!container) return;
     const rowId = `targetLangRow-${targetLanguageRowIndex++}`;
-    const languageSelect = document.getElementById('sourceLanguageSelect');
-    const options = languageSelect ? languageSelect.innerHTML : '';
+    
+    // 使用语言缓存生成目标语种选项，而不是源语种选项
+    const languageOptions = (state.languagesCache || [])
+        .filter(lang => lang.isActive)
+        .map(lang => `<option value="${lang.name}">${lang.name}${lang.code ? ' (' + lang.code + ')' : ''}${lang.nativeName ? ' - ' + lang.nativeName : ''}</option>`)
+        .join('');
+    
     const row = document.createElement('div');
     row.className = 'target-language-row';
     row.id = rowId;
     row.innerHTML = `
         <div style="display:flex;gap:8px;align-items:center;">
             <select class="target-language-select" required style="flex:1;">
-                ${options}
+                <option value="">请选择目标语种</option>
+                ${languageOptions}
             </select>
-            <button type="button" class="btn-small" onclick="removeTargetLanguageRow('${rowId}')">删除</button>
+            <button type="button" class="btn-small" data-click="removeTargetLanguageRow('${rowId}')">删除</button>
         </div>
     `;
     container.appendChild(row);
@@ -80,10 +86,27 @@ export function calculateAmount() {
     validateLayoutCost();
 }
 
+export function togglePartTimeSalesFields() {
+    const checkbox = document.getElementById('partTimeSalesCheckbox');
+    const fields = document.getElementById('partTimeSalesFields');
+    if (checkbox && fields) {
+        fields.style.display = checkbox.checked ? 'flex' : 'none';
+        if (checkbox.checked) {
+            calculatePartTimeSalesCommission();
+        } else {
+            const companyReceivableInput = document.getElementById('partTimeCompanyReceivable');
+            if (companyReceivableInput) companyReceivableInput.value = '';
+        }
+    }
+}
+
 export function calculatePartTimeSalesCommission() {
     const isPartTimeSales = document.querySelector('input[name="partTimeSales.isPartTime"]')?.checked;
     const companyReceivableInput = document.getElementById('partTimeCompanyReceivable');
-    if (!isPartTimeSales || !companyReceivableInput) return;
+    if (!isPartTimeSales || !companyReceivableInput) {
+        if (companyReceivableInput) companyReceivableInput.value = '';
+        return;
+    }
     const amount = parseFloat(document.getElementById('projectAmount')?.value || 0);
     const taxRate = parseFloat(document.getElementById('partTimeTaxRate')?.value || 0) / 100;
     const commission = amount - (amount * taxRate);
@@ -165,7 +188,7 @@ export async function showCreateProjectModal() {
             </div>
             <div class="form-group">
                 <label>业务类型 *</label>
-                <select name="businessType" id="businessType" required onchange="toggleProjectFields()">
+                <select name="businessType" id="businessType" required data-change="toggleProjectFields()">
                     <option value="translation">笔译</option>
                     <option value="interpretation">口译</option>
                     <option value="transcription">转录</option>
@@ -192,7 +215,7 @@ export async function showCreateProjectModal() {
             <div class="form-group">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <label style="margin-bottom: 0;">目标语言 *</label>
-                    <button type="button" class="btn-small" onclick="addTargetLanguageRow()">+ 添加目标语种</button>
+                    <button type="button" class="btn-small" data-click="addTargetLanguageRow()">+ 添加目标语种</button>
                 </div>
                 <div id="targetLanguagesContainer" style="display: flex; flex-direction: column; gap: 8px;">
                     <!-- 目标语种行将动态添加到这里 -->
@@ -204,15 +227,15 @@ export async function showCreateProjectModal() {
             </div>
             <div class="form-group" id="wordCountGroup">
                 <label>字数（笔译项目）</label>
-                <input type="number" name="wordCount" id="wordCount" min="0" step="1" onchange="calculateAmount()">
+                <input type="number" name="wordCount" id="wordCount" min="0" step="1" data-change="calculateAmount()">
             </div>
             <div class="form-group" id="unitPriceGroup">
                 <label>单价（每千字，元）</label>
-                <input type="number" name="unitPrice" id="unitPrice" min="0" step="0.01" onchange="calculateAmount()">
+                <input type="number" name="unitPrice" id="unitPrice" min="0" step="0.01" data-change="calculateAmount()">
             </div>
             <div class="form-group">
                 <label>项目总金额 *</label>
-                <input type="number" name="projectAmount" id="projectAmount" step="0.01" min="0" required onchange="calculatePartTimeSalesCommission(); validateLayoutCost();">
+                <input type="number" name="projectAmount" id="projectAmount" step="0.01" min="0" required data-change="calculatePartTimeSalesCommission(); validateLayoutCost()">
                 <small style="color: #666; font-size: 12px;">笔译项目：字数×单价/1000；其他项目：手动输入</small>
             </div>
             <div class="form-group">
@@ -262,32 +285,35 @@ export async function showCreateProjectModal() {
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
                 <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">兼职销售</h4>
                 <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
-                    <input type="checkbox" name="partTimeSales.isPartTime" onchange="calculatePartTimeSalesCommission()">
+                    <input type="checkbox" name="partTimeSales.isPartTime" id="partTimeSalesCheckbox" data-change="togglePartTimeSalesFields()">
                     启用兼职销售
                 </label>
-                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
-                    <div style="flex:1;min-width:220px;">
-                        <label>公司应收（含税）</label>
-                        <input type="number" id="partTimeCompanyReceivable" name="partTimeSales.companyReceivable" step="0.01" min="0" placeholder="自动计算" readonly>
+                <div id="partTimeSalesFields" style="display:none;flex-direction:column;gap:8px;margin-top:8px;">
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                        <div style="flex:1;min-width:220px;">
+                            <label>公司应收（含税）</label>
+                            <input type="number" id="partTimeCompanyReceivable" name="partTimeSales.companyReceivable" step="0.01" min="0" placeholder="自动计算" readonly>
+                        </div>
+                        <div style="flex:1;min-width:220px;">
+                            <label>税率(%)</label>
+                            <input type="number" id="partTimeTaxRate" name="partTimeSales.taxRate" step="0.01" min="0" max="100" value="0" data-change="calculatePartTimeSalesCommission()">
+                        </div>
                     </div>
-                    <div style="flex:1;min-width:220px;">
-                        <label>税率(%)</label>
-                        <input type="number" id="partTimeTaxRate" name="partTimeSales.taxRate" step="0.01" min="0" max="100" value="0" onchange="calculatePartTimeSalesCommission()">
-                    </div>
+                    <small style="color:#666;font-size:12px;">佣金 = 项目金额 - (项目金额 * 税率)。仅在勾选兼职销售时计算。</small>
                 </div>
-                <small style="color:#666;font-size:12px;">佣金 = 项目金额 - (项目金额 * 税率)。仅在勾选兼职销售时计算。</small>
             </div>
 
+            ${!(state.currentUser?.roles || []).some(r => r === 'sales' || r === 'part_time_sales') ? `
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
                 <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">兼职排版</h4>
                 <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
-                    <input type="checkbox" name="partTimeLayout.isPartTime" onchange="validateLayoutCost()">
+                    <input type="checkbox" name="partTimeLayout.isPartTime" data-change="validateLayoutCost()">
                     启用兼职排版
                 </label>
                 <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;">
                     <div style="flex:1;min-width:220px;">
                         <label>排版费用 *</label>
-                        <input type="number" id="layoutCost" name="partTimeLayout.layoutCost" step="0.01" min="0" onchange="validateLayoutCost()">
+                        <input type="number" id="layoutCost" name="partTimeLayout.layoutCost" step="0.01" min="0" data-change="validateLayoutCost()">
                         <div id="layoutCostValidation" style="margin-top: 5px;"></div>
                     </div>
                     <div style="flex:1;min-width:220px;">
@@ -300,10 +326,11 @@ export async function showCreateProjectModal() {
                 </div>
                 <small style="color:#666;font-size:12px;">排版费用不得超过项目总金额的 5%。</small>
             </div>
+            ` : ''}
 
             <div class="form-group" style="text-align:right; margin-top: 20px; display:flex; gap:10px; justify-content:flex-end;">
                 <button type="submit">创建项目</button>
-                <button type="button" class="btn-secondary" onclick="closeModal()">取消</button>
+                <button type="button" class="btn-secondary" data-click="closeModal()">取消</button>
             </div>
         </form>
     `;
