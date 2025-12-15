@@ -1181,16 +1181,16 @@ export async function viewProject(projectId) {
                         <h4>项目管理</h4>
                         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                             ${canStart ? `<button class="btn-small btn-success" ${startReached ? 'disabled' : ''} onclick="startProject('${projectId}')">开始项目</button>` : ''}
-                            ${canSetScheduled && project.status === 'scheduled' ? `<button class="btn-small" onclick="updateProjectStatus('${projectId}','in_progress','确认人员已安排完毕，项目开始执行？')">开始执行</button>` : ''}
-                            ${canSetTranslationDone ? `<button class="btn-small" ${translationReached ? 'disabled' : ''} onclick="updateProjectStatus('${projectId}','translation_done','确认标记翻译完成？')">翻译完成</button>` : ''}
-                            ${canSetReviewDone ? `<button class="btn-small" ${reviewReached ? 'disabled' : ''} onclick="updateProjectStatus('${projectId}','review_done','确认标记审校完成？')">审校完成</button>` : ''}
-                            ${canSetLayoutDone ? `<button class="btn-small" ${layoutReached ? 'disabled' : ''} onclick="updateProjectStatus('${projectId}','layout_done','确认标记排版完成？')">排版完成</button>` : ''}
+                            ${canSetScheduled && project.status === 'scheduled' ? `<button class="btn-small" data-click="updateProjectStatus('${projectId}','in_progress','确认人员已安排完毕，项目开始执行？')">开始执行</button>` : ''}
+                            ${canSetTranslationDone ? `<button class="btn-small" ${translationReached ? 'disabled' : ''} data-click="updateProjectStatus('${projectId}','translation_done','确认标记翻译完成？')">翻译完成</button>` : ''}
+                            ${canSetReviewDone ? `<button class="btn-small" ${reviewReached ? 'disabled' : ''} data-click="updateProjectStatus('${projectId}','review_done','确认标记审校完成？')">审校完成</button>` : ''}
+                            ${canSetLayoutDone ? `<button class="btn-small" ${layoutReached ? 'disabled' : ''} data-click="updateProjectStatus('${projectId}','layout_done','确认标记排版完成？')">排版完成</button>` : ''}
                             ${(project.status === 'in_progress' || project.status === 'scheduled' || project.status === 'translation_done' || project.status === 'review_done' || project.status === 'layout_done') && canQualityOps ? `
-                                <button class="btn-small" onclick="setRevision('${projectId}', ${project.revisionCount})">标记返修</button>
-                                <button class="btn-small" onclick="setDelay('${projectId}')">标记延期</button>
-                                <button class="btn-small" onclick="setComplaint('${projectId}')">标记客诉</button>
+                                <button class="btn-small" data-click="setRevision('${projectId}', ${project.revisionCount})">标记返修</button>
+                                <button class="btn-small" data-click="setDelay('${projectId}')">标记延期</button>
+                                <button class="btn-small" data-click="setComplaint('${projectId}')">标记客诉</button>
                             ` : ''}
-                            ${(project.status === 'in_progress' || project.status === 'scheduled' || project.status === 'translation_done' || project.status === 'review_done' || project.status === 'layout_done') && canDeliver ? `<button class="btn-small btn-success" onclick="finishProject('${projectId}')">交付项目</button>` : ''}
+                            ${(project.status === 'in_progress' || project.status === 'scheduled' || project.status === 'translation_done' || project.status === 'review_done' || project.status === 'layout_done') && canDeliver ? `<button class="btn-small btn-success" data-click="finishProject('${projectId}')">交付项目</button>` : ''}
                             ${canEditDeleteExport ? `
                               <button class="btn-small" onclick="exportProjectQuotation('${projectId}')" style="background: #10b981;">📄 导出报价单</button>
                               <button class="btn-small" onclick="showEditProjectModal()">编辑项目</button>
