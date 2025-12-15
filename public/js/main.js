@@ -8,7 +8,7 @@ import { showSection, closeModal } from './core/ui.js';
 // 导入业务模块
 import { initAuth, checkAuth, showLogin, showMainApp, logout, bindAuthEvents, submitForcePasswordChange } from './modules/auth.js';
 import { loadDashboard, navigateFromDashboardCard } from './modules/dashboard.js';
-import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, createProject, updateProject, setLayoutCost, addMember, showAddMemberModal, showPaymentModalForProject, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter, showAddMemberModalForCreate, addMemberForCreate, removeCreateProjectMember, toggleCreateTranslatorFields, filterCreateUsersByRole, validateCreateMemberLayoutCost, updateCreateProjectMembersList, onMemberRoleChange, toggleTranslatorFields, filterUsersByRole, validateAddMemberLayoutCost } from './modules/project.js';
+import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, createProject, updateProject, setLayoutCost, addMember, showAddMemberModal, showPaymentModalForProject, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter, showAddMemberModalForCreate, addMemberForCreate, removeCreateProjectMember, toggleCreateTranslatorFields, filterCreateUsersByRole, validateCreateMemberLayoutCost, updateCreateProjectMembersList, onMemberRoleChange, onCreateMemberRoleChange, toggleTranslatorFields, filterUsersByRole, validateAddMemberLayoutCost, closeAddMemberModalAndReturnToCreate } from './modules/project.js';
 import { loadCustomers, searchCustomers, showCreateCustomerModal, showCreateCustomerModalFromProject, editCustomer, deleteCustomer, createCustomer, updateCustomer, updateCustomerInfo, addCustomerContactRow, removeCustomerContactRow } from './modules/customer.js';
 import { loadKPI, exportKPI, generateMonthlyKPI, showEvaluateModal, submitEvaluation } from './modules/kpi.js';
 import { loadReceivables, renderReceivables, exportReceivables, loadInvoiceProjects, renderInvoiceProjects, addInvoice, addInvoiceForProject, loadPaymentRecordsProjects, renderPaymentRecordsProjects, addPaymentRecord, addPaymentRecordForProject, loadPaymentRecords, clearPaymentRecordFilter, showFinanceSection, loadFinanceSummary, exportFinanceSummary, loadPendingKpi, reviewKpiRecord, rejectKpiRecord, batchReviewKpiRecords, selectAllPendingKpi, deselectAllPendingKpi, toggleSelectAllPendingKpi, loadReconciliation, exportReconciliation, togglePaymentRecords, toggleInvoiceRecords, clearPaymentRecordsFilters, removePaymentRecord, jumpReceivablePage, prevReceivablePage, nextReceivablePage, jumpPaymentRecordsProjectsPage, prevPaymentRecordsProjectsPage, nextPaymentRecordsProjectsPage, jumpInvoiceProjectsPage, prevInvoiceProjectsPage, nextInvoiceProjectsPage, backToFinanceNav, showProjectSelector, filterProjectSelector, selectProject } from './modules/finance.js';
@@ -16,7 +16,7 @@ import { loadUsers, loadUsersForSelect, showCreateUserModal, editUser, deleteUse
 import { loadLanguages, showCreateLanguageModal, showEditLanguageModal, createLanguage, updateLanguage } from './modules/language.js';
 import { loadBackups, createBackup, cleanupOldBackups, restoreBackup, deleteBackupFile } from './modules/backup.js';
 import { loadConfig, loadConfigHistory, loadPermissionsConfig, savePermissionsConfig, loadOrgInfo, viewConfigChange } from './modules/system.js';
-import { startNotificationPolling, stopNotificationPolling, toggleNotificationPanel, markAllNotificationsRead } from './modules/notification.js';
+import { startNotificationPolling, stopNotificationPolling, toggleNotificationPanel, markAllNotificationsRead, initNotificationAudio } from './modules/notification.js';
 
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', async () => {
@@ -393,7 +393,9 @@ const ACTIONS = Object.freeze({
     removeCreateProjectMember: (index) => removeCreateProjectMember(index),
     toggleCreateTranslatorFields: () => toggleCreateTranslatorFields(),
     filterCreateUsersByRole: () => filterCreateUsersByRole(),
+    onCreateMemberRoleChange: () => onCreateMemberRoleChange(),
     validateCreateMemberLayoutCost: () => validateCreateMemberLayoutCost(),
+    closeAddMemberModalAndReturnToCreate: () => closeAddMemberModalAndReturnToCreate(),
     updateCreateProjectMembersList: () => updateCreateProjectMembersList(),
     toggleProjectFields: () => toggleProjectFields(),
     calculateAmount: () => calculateAmount(),
@@ -656,7 +658,10 @@ async function dispatchAction(expr, event, element) {
 
 function bindDeclarativeHandlers() {
     // click - 支持 data-click 和 onclick（自动转换）
-    document.addEventListener('click', (e) => {
+    document.addEventListener('click', async (e) => {
+        // 在用户首次点击时初始化通知音频（浏览器要求用户交互后才能播放声音）
+        await initNotificationAudio();
+        
         let el = e.target?.closest?.('[data-click]');
         if (el) {
             const expr = el.getAttribute('data-click');

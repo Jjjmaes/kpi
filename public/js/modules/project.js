@@ -140,10 +140,115 @@ export function validateLayoutCost() {
 // 用于存储创建项目时的临时成员列表
 let createProjectMembers = [];
 
+// 保存创建项目表单的状态
+let createProjectFormState = null;
+
+function saveCreateProjectFormState() {
+    const form = document.getElementById('createProjectForm');
+    if (!form) return;
+    
+    const formData = new FormData(form);
+    createProjectFormState = {};
+    
+    // 保存所有表单字段
+    for (const [key, value] of formData.entries()) {
+        createProjectFormState[key] = value;
+    }
+    
+    // 保存复选框状态
+    form.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+        createProjectFormState[checkbox.name] = checkbox.checked;
+    });
+    
+    // 保存目标语言
+    const targetLanguages = [];
+    form.querySelectorAll('[name^="targetLanguages"]').forEach(input => {
+        if (input.value) targetLanguages.push(input.value);
+    });
+    createProjectFormState._targetLanguages = targetLanguages;
+    
+    // 保存成员列表（已经在 createProjectMembers 中）
+    createProjectFormState._members = [...createProjectMembers];
+}
+
+function restoreCreateProjectFormState() {
+    if (!createProjectFormState) return;
+    
+    const form = document.getElementById('createProjectForm');
+    if (!form) {
+        console.warn('表单不存在，无法恢复状态');
+        return;
+    }
+    
+    console.log('恢复表单状态:', createProjectFormState);
+    
+    // 恢复表单字段
+    Object.keys(createProjectFormState).forEach(key => {
+        if (key.startsWith('_')) return; // 跳过内部状态
+        
+        // 处理嵌套字段（如 specialRequirements.xxx）
+        const selector = `[name="${key}"]`;
+        const element = form.querySelector(selector);
+        if (element) {
+            if (element.type === 'checkbox') {
+                element.checked = createProjectFormState[key] === true || createProjectFormState[key] === 'true';
+            } else if (element.tagName === 'TEXTAREA') {
+                element.value = createProjectFormState[key] || '';
+            } else if (element.tagName === 'SELECT') {
+                element.value = createProjectFormState[key] || '';
+            } else {
+                element.value = createProjectFormState[key] || '';
+            }
+        }
+    });
+    
+    // 恢复目标语言
+    if (createProjectFormState._targetLanguages && createProjectFormState._targetLanguages.length > 0) {
+        const container = document.getElementById('targetLanguagesContainer');
+        if (container) {
+            container.innerHTML = '';
+            createProjectFormState._targetLanguages.forEach((lang) => {
+                addTargetLanguageRow();
+                // 等待 DOM 更新
+                setTimeout(() => {
+                    const selects = container.querySelectorAll('select[name^="targetLanguages"]');
+                    const lastSelect = selects[selects.length - 1];
+                    if (lastSelect) {
+                        lastSelect.value = lang;
+                    }
+                }, 10);
+            });
+        }
+    } else {
+        // 如果没有保存的目标语言，添加一个默认行
+        addTargetLanguageRow();
+    }
+    
+    // 恢复成员列表
+    if (createProjectFormState._members) {
+        createProjectMembers = [...createProjectFormState._members];
+        updateCreateProjectMembersList();
+    }
+    
+    // 触发相关计算和UI更新
+    setTimeout(() => {
+        calculateAmount();
+        toggleProjectFields();
+        // 触发客户信息更新（如果有选择客户）
+        const customerSelect = document.getElementById('projectCustomerSelect');
+        if (customerSelect && customerSelect.value) {
+            updateCustomerInfo();
+        }
+    }, 50);
+}
+
 export async function showCreateProjectModal() {
     console.log('showCreateProjectModal called');
-    // 重置成员列表
-    createProjectMembers = [];
+    
+    // 如果没有保存的状态，重置成员列表
+    if (!createProjectFormState) {
+        createProjectMembers = [];
+    }
     
     if ((state.allCustomers || []).length === 0) {
         await loadCustomers();
@@ -352,15 +457,27 @@ export async function showCreateProjectModal() {
     `;
 
     showModal({ title: '创建项目', body: content });
+    
+    // 等待 DOM 更新后恢复状态
     setTimeout(() => {
-        addTargetLanguageRow();
-        updateCreateProjectMembersList();
-    }, 0);
-    toggleProjectFields();
+        // 如果之前有保存的状态，恢复它
+        if (createProjectFormState) {
+            restoreCreateProjectFormState();
+            createProjectFormState = null; // 恢复后清空
+        } else {
+            // 否则初始化默认值
+            addTargetLanguageRow();
+            updateCreateProjectMembersList();
+        }
+        toggleProjectFields();
+    }, 100);
 }
 
 export async function createProject(e) {
     e.preventDefault();
+    
+    // 清空保存的表单状态
+    createProjectFormState = null;
     const formData = new FormData(e.target);
     
     // 使用临时成员列表
@@ -1434,6 +1551,9 @@ export function updateCreateProjectMembersList() {
 
 // 显示添加成员模态框（用于创建项目时）
 export async function showAddMemberModalForCreate() {
+    // 保存当前创建项目表单的状态
+    saveCreateProjectFormState();
+    
     if ((state.allUsers || []).length === 0) {
         try {
             const response = await apiFetch('/users');
@@ -1478,7 +1598,7 @@ export async function showAddMemberModalForCreate() {
         <form id="addMemberFormForCreate" data-project-amount="${projectAmount}" data-submit="addMemberForCreate(event)">
             <div class="form-group">
                 <label>角色 *</label>
-                <select name="role" id="createMemberRole" data-change="toggleCreateTranslatorFields(); filterCreateUsersByRole()" required>
+                <select name="role" id="createMemberRole" data-change="onCreateMemberRoleChange()" required>
                     <option value="">请选择</option>
                     ${availableRoles.map(r => `<option value="${r.value}">${r.label}</option>`).join('')}
                 </select>
@@ -1508,7 +1628,7 @@ export async function showAddMemberModalForCreate() {
             </div>
             <div class="action-buttons">
                 <button type="submit">添加</button>
-                <button type="button" data-click="closeModal()">取消</button>
+                <button type="button" data-click="closeAddMemberModalAndReturnToCreate()">取消</button>
             </div>
         </form>
     `;
@@ -1579,9 +1699,29 @@ export async function addMemberForCreate(e) {
     }
     
     createProjectMembers.push(member);
-    closeModal();
     updateCreateProjectMembersList();
     showToast('成员已添加', 'success');
+    
+    // 更新保存的状态中的成员列表
+    if (createProjectFormState) {
+        createProjectFormState._members = [...createProjectMembers];
+    }
+    
+    // 关闭添加成员的模态框，返回到创建项目界面
+    // 由于模态框系统不支持嵌套，我们需要重新打开创建项目模态框
+    closeModal();
+    // 延迟一下，确保模态框完全关闭后再重新打开
+    setTimeout(() => {
+        showCreateProjectModal();
+    }, 100);
+}
+
+// 关闭添加成员模态框并返回到创建项目界面
+export function closeAddMemberModalAndReturnToCreate() {
+    closeModal();
+    setTimeout(() => {
+        showCreateProjectModal();
+    }, 100);
 }
 
 // 删除创建项目时的成员
@@ -1614,29 +1754,77 @@ export function toggleCreateTranslatorFields() {
     }
 }
 
+// 包装函数：当创建项目时角色选择改变时，同时调用 toggleCreateTranslatorFields 和 filterCreateUsersByRole
+export function onCreateMemberRoleChange() {
+    toggleCreateTranslatorFields();
+    filterCreateUsersByRole();
+}
+
 // 根据角色过滤用户（用于创建项目时）
 export function filterCreateUsersByRole() {
     const role = document.getElementById('createMemberRole')?.value;
     const userIdSelect = document.getElementById('createMemberUserId');
+    
     if (!role || !userIdSelect) {
         if (userIdSelect) userIdSelect.innerHTML = '<option value="">请先选择角色</option>';
         return;
     }
     
-    const users = (state.allUsers || []).filter(u => {
+    // 确保用户列表已加载
+    if (!state.allUsers || state.allUsers.length === 0) {
+        if (userIdSelect) userIdSelect.innerHTML = '<option value="">加载用户列表中...</option>';
+        // 尝试重新加载用户列表
+        apiFetch('/users').then(res => res.json()).then(data => {
+            if (data.success) {
+                state.allUsers = data.data;
+                // 重新过滤
+                filterCreateUsersByRole();
+            } else {
+                if (userIdSelect) userIdSelect.innerHTML = '<option value="">用户列表加载失败</option>';
+            }
+        }).catch(err => {
+            console.error('加载用户列表失败:', err);
+            if (userIdSelect) userIdSelect.innerHTML = '<option value="">用户列表加载失败</option>';
+        });
+        return;
+    }
+    
+    let filteredUsers = (state.allUsers || []).filter(u => {
         if (!u.isActive) return false;
-        if (role === 'pm') return u.roles?.includes('pm');
-        if (role === 'translator') return u.roles?.includes('translator');
-        if (role === 'reviewer') return u.roles?.includes('reviewer');
-        if (role === 'sales') return u.roles?.includes('sales');
-        if (role === 'admin_staff') return u.roles?.includes('admin_staff');
-        if (role === 'part_time_sales') return u.roles?.includes('part_time_sales');
-        if (role === 'layout') return u.roles?.includes('layout');
-        return true;
+        // roles 是数组，检查是否包含该角色
+        if (!u.roles || !Array.isArray(u.roles)) return false;
+        return u.roles.includes(role);
     });
     
-    userIdSelect.innerHTML = '<option value="">请选择用户</option>' + 
-        users.map(u => `<option value="${u._id}">${u.name}</option>`).join('');
+    // 自身限制
+    const me = state.currentUser;
+    if (me && (role === 'translator' || role === 'reviewer')) {
+        const isPM = me.roles?.includes('pm');
+        const isTranslator = me.roles?.includes('translator');
+        const isReviewer = me.roles?.includes('reviewer');
+        if (isPM) {
+            if (role === 'translator' && isTranslator) {
+                filteredUsers = filteredUsers.filter(u => u._id !== me._id);
+            }
+            if (role === 'reviewer' && isReviewer) {
+                filteredUsers = filteredUsers.filter(u => u._id !== me._id);
+            }
+        }
+    }
+    if (me && role === 'pm') {
+        const isSales = me.roles?.includes('sales') || me.roles?.includes('part_time_sales');
+        const hasPMRole = me.roles?.includes('pm');
+        if (isSales && hasPMRole) {
+            filteredUsers = filteredUsers.filter(u => u._id !== me._id);
+        }
+    }
+    
+    if (filteredUsers.length === 0) {
+        userIdSelect.innerHTML = '<option value="">没有可用的用户</option>';
+    } else {
+        userIdSelect.innerHTML = '<option value="">请选择用户</option>' + 
+            filteredUsers.map(u => `<option value="${u._id}">${u.name}</option>`).join('');
+    }
 }
 
 // 验证创建项目时的排版费用

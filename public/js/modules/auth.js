@@ -3,7 +3,7 @@ import { state, setToken, setCurrentUser, setCurrentRole } from '../core/state.j
 import { ROLE_PRIORITY, PERMISSIONS, ROLE_NAMES } from '../core/config.js';
 import { showToast, showAlert } from '../core/utils.js';
 import { showSection, showModal, closeModal } from '../core/ui.js';
-import { startNotificationPolling, stopNotificationPolling } from './notification.js';
+import { startNotificationPolling, stopNotificationPolling, initNotificationAudio } from './notification.js';
 
 // 初始化认证
 export async function initAuth() {
@@ -141,6 +141,8 @@ export function showMainApp() {
     });
 
     startNotificationPolling();
+    // 初始化通知音频（尝试在登录后立即初始化）
+    initNotificationAudio();
 }
 
 export function logout() {
