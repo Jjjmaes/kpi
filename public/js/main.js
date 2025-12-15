@@ -66,6 +66,7 @@ async function onLoginSuccess() {
 
 // ============ 角色切换后的处理 ============
 async function onRoleSwitched() {
+    console.log('[RoleSwitch] 角色切换，刷新数据');
     // 更新导航按钮可见性
     updateNavVisibility();
     
@@ -73,7 +74,12 @@ async function onRoleSwitched() {
     const activeSection = document.querySelector('.section.active');
     if (activeSection) {
         const route = SECTION_ROUTES[activeSection.id];
-        if (route?.onEnter) await route.onEnter();
+        if (route?.onEnter) {
+            console.log('[RoleSwitch] 重新加载当前 section:', activeSection.id);
+            await route.onEnter();
+            // 如果当前 section 是 dashboard，route.onEnter 已经调用了 loadDashboard，不需要再次调用
+            return; // 直接返回，避免重复调用
+        }
     }
 }
 

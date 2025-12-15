@@ -4,6 +4,10 @@ import { ROLE_PRIORITY, PERMISSIONS, ROLE_NAMES } from '../core/config.js';
 import { showToast, showAlert } from '../core/utils.js';
 import { showSection, showModal, closeModal } from '../core/ui.js';
 import { startNotificationPolling, stopNotificationPolling, initNotificationAudio } from './notification.js';
+import { loadDashboard } from './dashboard.js';
+import { loadProjects } from './project.js';
+import { loadKPI } from './kpi.js';
+import { loadReceivables, loadPaymentRecordsProjects, loadInvoiceProjects } from './finance.js';
 
 // 初始化认证
 export async function initAuth() {
@@ -61,22 +65,34 @@ export function switchRole(newRole) {
         console.error('用户不拥有该角色:', newRole);
         return;
     }
+    console.log('[RoleSwitch] 切换角色从', state.currentRole, '到', newRole);
     setCurrentRole(newRole);
+    console.log('[RoleSwitch] 角色已更新，当前角色:', state.currentRole);
     updateCurrentRoleTag();
 
     // 重新启动通知轮询（不同角色可能未读不同）
     startNotificationPolling();
 
-    // 如果主界面可见，刷新核心数据
+    // 触发角色切换事件，让 main.js 处理数据刷新
+    window.dispatchEvent(new CustomEvent('app:role-switched', { detail: { newRole } }));
+
+    // 如果主界面可见，刷新核心数据（除了看板，因为 onRoleSwitched 会处理）
     const mainApp = document.getElementById('mainApp');
     if (mainApp && mainApp.style.display !== 'none') {
-        window.loadDashboard?.();
-        window.loadProjects?.();
-        window.loadKPI?.();
+        // 检查当前是否在看板 section，如果是，不在这里调用 loadDashboard（让 onRoleSwitched 处理）
+        const dashboardSection = document.getElementById('dashboard');
+        const isDashboardActive = dashboardSection && dashboardSection.classList.contains('active');
+        
+        // 直接调用导入的函数
+        if (!isDashboardActive) {
+            loadDashboard(); // 如果不在看板 section，也刷新一下（可能在其他地方需要）
+        }
+        loadProjects();
+        loadKPI();
         if (window.hasPermission?.('finance.view') || PERMISSIONS[newRole]?.['finance.view']) {
-            window.loadReceivables?.();
-            window.loadPaymentRecordsProjects?.();
-            window.loadInvoiceProjects?.();
+            loadReceivables();
+            loadPaymentRecordsProjects();
+            loadInvoiceProjects();
         }
     }
 

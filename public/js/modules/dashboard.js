@@ -7,17 +7,53 @@ import { state } from '../core/state.js';
 let chartInstances = [];
 
 function destroyCharts() {
-    chartInstances.forEach(chart => chart?.destroy?.());
+    // 销毁所有图表实例
+    chartInstances.forEach(chart => {
+        try {
+            if (chart && typeof chart.destroy === 'function') {
+                chart.destroy();
+            }
+        } catch (err) {
+            console.warn('[Dashboard] 销毁图表失败:', err);
+        }
+    });
     chartInstances = [];
+    
+    // 清理所有 canvas 元素上的 Chart.js 实例
+    // Chart.js 会在 canvas 元素上存储图表实例，需要手动清理
+    const canvases = document.querySelectorAll('#dashboardCharts canvas');
+    canvases.forEach(canvas => {
+        try {
+            // Chart.js 会在 canvas 上存储图表实例
+            const chart = Chart.getChart(canvas);
+            if (chart) {
+                chart.destroy();
+            }
+        } catch (err) {
+            // 忽略错误，可能图表已经被销毁
+        }
+    });
 }
 
+// 防止重复加载的标记
+let isLoadingDashboard = false;
+
 export async function loadDashboard() {
+    // 如果正在加载，直接返回
+    if (isLoadingDashboard) {
+        console.log('[Dashboard] 正在加载中，跳过重复调用');
+        return;
+    }
+    
     try {
+        isLoadingDashboard = true;
         destroyCharts();
 
         const month = document.getElementById('dashboardMonth')?.value || new Date().toISOString().slice(0, 7);
         const status = document.getElementById('dashboardStatus')?.value || '';
         const businessType = document.getElementById('dashboardBusinessType')?.value || '';
+        // 注意：role 参数用于手动筛选特定角色的数据（如果有筛选器）
+        // 但后端主要使用 X-Role header（当前角色）来过滤数据
         const role = document.getElementById('dashboardRole')?.value || '';
 
         const params = new URLSearchParams();
@@ -25,6 +61,12 @@ export async function loadDashboard() {
         if (status) params.append('status', status);
         if (businessType) params.append('businessType', businessType);
         if (role) params.append('role', role);
+        
+        // 添加调试日志，确认当前角色和请求参数
+        console.log('[Dashboard] 加载看板数据');
+        console.log('[Dashboard] 当前角色 (state.currentRole):', state.currentRole);
+        console.log('[Dashboard] 筛选参数 - month:', month, 'status:', status, 'businessType:', businessType, 'role:', role || '(无)');
+        console.log('[Dashboard] API 请求 URL:', `/kpi/dashboard?${params.toString()}`);
 
         const res = await apiFetch(`/kpi/dashboard?${params.toString()}`);
         const result = await res.json();
@@ -40,6 +82,10 @@ export async function loadDashboard() {
         renderDashboardCharts(data);
     } catch (error) {
         showAlert('dashboardCards', '加载业务看板失败: ' + error.message, 'error');
+    } finally {
+        // 确保无论成功还是失败，都重置加载标记
+        isLoadingDashboard = false;
+        console.log('[Dashboard] 加载完成，重置加载标记');
     }
 }
 
@@ -337,6 +383,12 @@ function renderDashboardCharts(data) {
             setTimeout(() => {
                 const ctx = document.getElementById(chartId);
                 if (ctx) {
+                    // 检查 canvas 是否已经被使用，如果是，先销毁旧图表
+                    const existingChart = Chart.getChart(ctx);
+                    if (existingChart) {
+                        existingChart.destroy();
+                    }
+                    
                     const chart = new Chart(ctx, {
                         type: 'bar',
                         data: {
@@ -402,6 +454,12 @@ function renderDashboardCharts(data) {
         setTimeout(() => {
             const ctx = document.getElementById(chartId);
             if (ctx) {
+                // 检查 canvas 是否已经被使用，如果是，先销毁旧图表
+                const existingChart = Chart.getChart(ctx);
+                if (existingChart) {
+                    existingChart.destroy();
+                }
+                
                 const colors = ['#667eea', '#2ecc71', '#f39c12', '#e74c3c'];
                 const chart = new Chart(ctx, {
                     type: 'doughnut',
@@ -453,6 +511,12 @@ function renderDashboardCharts(data) {
         setTimeout(() => {
             const ctx = document.getElementById(chartId);
             if (ctx) {
+                // 检查 canvas 是否已经被使用，如果是，先销毁旧图表
+                const existingChart = Chart.getChart(ctx);
+                if (existingChart) {
+                    existingChart.destroy();
+                }
+                
                 const chart = new Chart(ctx, {
                     type: 'bar',
                     data: {
@@ -549,6 +613,12 @@ function renderDashboardCharts(data) {
         setTimeout(() => {
             const ctx = document.getElementById(chartId);
             if (ctx) {
+                // 检查 canvas 是否已经被使用，如果是，先销毁旧图表
+                const existingChart = Chart.getChart(ctx);
+                if (existingChart) {
+                    existingChart.destroy();
+                }
+                
                 const chart = new Chart(ctx, {
                     type: 'line',
                     data: {
