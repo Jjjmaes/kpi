@@ -8,7 +8,7 @@ import { showSection, closeModal } from './core/ui.js';
 // 导入业务模块
 import { initAuth, checkAuth, showLogin, showMainApp, logout, bindAuthEvents, submitForcePasswordChange } from './modules/auth.js';
 import { loadDashboard, navigateFromDashboardCard } from './modules/dashboard.js';
-import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, createProject, updateProject, setLayoutCost, addMember, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter } from './modules/project.js';
+import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, createProject, updateProject, setLayoutCost, addMember, showAddMemberModal, showPaymentModalForProject, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter, showAddMemberModalForCreate, addMemberForCreate, removeCreateProjectMember, toggleCreateTranslatorFields, filterCreateUsersByRole, validateCreateMemberLayoutCost, updateCreateProjectMembersList, onMemberRoleChange, toggleTranslatorFields, filterUsersByRole, validateAddMemberLayoutCost } from './modules/project.js';
 import { loadCustomers, searchCustomers, showCreateCustomerModal, showCreateCustomerModalFromProject, editCustomer, deleteCustomer, createCustomer, updateCustomer, updateCustomerInfo, addCustomerContactRow, removeCustomerContactRow } from './modules/customer.js';
 import { loadKPI, exportKPI, generateMonthlyKPI, showEvaluateModal, submitEvaluation } from './modules/kpi.js';
 import { loadReceivables, renderReceivables, exportReceivables, loadInvoiceProjects, renderInvoiceProjects, addInvoice, addInvoiceForProject, loadPaymentRecordsProjects, renderPaymentRecordsProjects, addPaymentRecord, addPaymentRecordForProject, loadPaymentRecords, clearPaymentRecordFilter, showFinanceSection, loadFinanceSummary, exportFinanceSummary, loadPendingKpi, reviewKpiRecord, rejectKpiRecord, batchReviewKpiRecords, selectAllPendingKpi, deselectAllPendingKpi, toggleSelectAllPendingKpi, loadReconciliation, exportReconciliation, togglePaymentRecords, toggleInvoiceRecords, clearPaymentRecordsFilters, removePaymentRecord, jumpReceivablePage, prevReceivablePage, nextReceivablePage, jumpPaymentRecordsProjectsPage, prevPaymentRecordsProjectsPage, nextPaymentRecordsProjectsPage, jumpInvoiceProjectsPage, prevInvoiceProjectsPage, nextInvoiceProjectsPage, backToFinanceNav, showProjectSelector, filterProjectSelector, selectProject } from './modules/finance.js';
@@ -382,6 +382,19 @@ const ACTIONS = Object.freeze({
     updateProject: (event, projectId) => updateProject(event, projectId),
     setLayoutCost: (event, projectId) => setLayoutCost(event, projectId),
     addMember: (event, projectId) => addMember(event, projectId),
+    showAddMemberModal: (projectId) => showAddMemberModal(projectId),
+    showPaymentModalForProject: (projectId) => showPaymentModalForProject(projectId),
+    onMemberRoleChange: () => onMemberRoleChange(),
+    toggleTranslatorFields: () => toggleTranslatorFields(),
+    filterUsersByRole: () => filterUsersByRole(),
+    validateAddMemberLayoutCost: () => validateAddMemberLayoutCost(),
+    showAddMemberModalForCreate: () => showAddMemberModalForCreate(),
+    addMemberForCreate: (event) => addMemberForCreate(event),
+    removeCreateProjectMember: (index) => removeCreateProjectMember(index),
+    toggleCreateTranslatorFields: () => toggleCreateTranslatorFields(),
+    filterCreateUsersByRole: () => filterCreateUsersByRole(),
+    validateCreateMemberLayoutCost: () => validateCreateMemberLayoutCost(),
+    updateCreateProjectMembersList: () => updateCreateProjectMembersList(),
     toggleProjectFields: () => toggleProjectFields(),
     calculateAmount: () => calculateAmount(),
     togglePartTimeSalesFields: () => togglePartTimeSalesFields(),

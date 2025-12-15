@@ -137,8 +137,14 @@ export function validateLayoutCost() {
     return true;
 }
 
+// 用于存储创建项目时的临时成员列表
+let createProjectMembers = [];
+
 export async function showCreateProjectModal() {
     console.log('showCreateProjectModal called');
+    // 重置成员列表
+    createProjectMembers = [];
+    
     if ((state.allCustomers || []).length === 0) {
         await loadCustomers();
     }
@@ -328,6 +334,16 @@ export async function showCreateProjectModal() {
             </div>
             ` : ''}
 
+            <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h4 style="margin: 0; font-size: 14px; color: #667eea;">项目成员</h4>
+                    <button type="button" class="btn-small" data-click="showAddMemberModalForCreate()">+ 添加成员</button>
+                </div>
+                <div id="createProjectMembersList" style="min-height: 40px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
+                    <p style="margin: 0; color: #999; font-size: 12px;">暂未添加成员，点击"添加成员"按钮添加项目经理、翻译、审校等</p>
+                </div>
+            </div>
+
             <div class="form-group" style="text-align:right; margin-top: 20px; display:flex; gap:10px; justify-content:flex-end;">
                 <button type="submit">创建项目</button>
                 <button type="button" class="btn-secondary" data-click="closeModal()">取消</button>
@@ -336,7 +352,10 @@ export async function showCreateProjectModal() {
     `;
 
     showModal({ title: '创建项目', body: content });
-    setTimeout(() => addTargetLanguageRow(), 0);
+    setTimeout(() => {
+        addTargetLanguageRow();
+        updateCreateProjectMembersList();
+    }, 0);
     toggleProjectFields();
 }
 
@@ -344,39 +363,43 @@ export async function createProject(e) {
     e.preventDefault();
     const formData = new FormData(e.target);
     
-    const members = [];
-    const memberRows = document.querySelectorAll('.member-row');
-    memberRows.forEach(row => {
-        const userId = row.querySelector('.member-user-select')?.value;
-        const role = row.querySelector('.member-role-select')?.value;
-        if (userId && role) {
-            if (state.currentUser) {
-                const isPM = state.currentUser.roles?.includes('pm');
-                const isTranslator = state.currentUser.roles?.includes('translator');
-                const isReviewer = state.currentUser.roles?.includes('reviewer');
-                const isSelfAssignment = userId === state.currentUser._id;
-                if (isPM && isSelfAssignment) {
-                    if ((role === 'translator' && isTranslator) || (role === 'reviewer' && isReviewer)) {
-                        showToast('作为项目经理，不能将翻译或审校任务分配给自己', 'error');
-                        return;
-                    }
-                }
-                const isSales = state.currentUser.roles?.includes('sales') || state.currentUser.roles?.includes('part_time_sales');
-                const hasPMRole = state.currentUser.roles?.includes('pm');
-                if (isSales && hasPMRole && isSelfAssignment && role === 'pm') {
-                    showToast('作为销售，不能将项目经理角色分配给自己', 'error');
+    // 使用临时成员列表
+    const members = createProjectMembers.map(m => {
+        const member = {
+            userId: m.userId,
+            role: m.role
+        };
+        if (m.role === 'translator') {
+            member.translatorType = m.translatorType || 'mtpe';
+            member.wordRatio = m.wordRatio || 1.0;
+        }
+        if (m.role === 'layout' && m.layoutCost) {
+            member.layoutCost = m.layoutCost;
+        }
+        return member;
+    });
+    
+    // 验证成员分配规则
+    for (const member of members) {
+        if (state.currentUser) {
+            const isPM = state.currentUser.roles?.includes('pm');
+            const isTranslator = state.currentUser.roles?.includes('translator');
+            const isReviewer = state.currentUser.roles?.includes('reviewer');
+            const isSelfAssignment = member.userId === state.currentUser._id;
+            if (isPM && isSelfAssignment) {
+                if ((member.role === 'translator' && isTranslator) || (member.role === 'reviewer' && isReviewer)) {
+                    showToast('作为项目经理，不能将翻译或审校任务分配给自己', 'error');
                     return;
                 }
             }
-            const member = {
-                userId,
-                role,
-                translatorType: role === 'translator' ? (row.querySelector('[name="memberTranslatorType"]')?.value || 'mtpe') : undefined,
-                wordRatio: role === 'translator' ? parseFloat(row.querySelector('[name="memberWordRatio"]')?.value || '1.0') : undefined
-            };
-            members.push(member);
+            const isSales = state.currentUser.roles?.includes('sales') || state.currentUser.roles?.includes('part_time_sales');
+            const hasPMRole = state.currentUser.roles?.includes('pm');
+            if (isSales && hasPMRole && isSelfAssignment && member.role === 'pm') {
+                showToast('作为销售，不能将项目经理角色分配给自己', 'error');
+                return;
+            }
         }
-    });
+    }
     
     const specialRequirements = {
         terminology: formData.get('specialRequirements.terminology') === 'on',
@@ -941,7 +964,8 @@ export async function viewProject(projectId) {
     }
     console.log('viewProject called with projectId:', projectId);
     try {
-        const response = await apiFetch(`/projects/${projectId}`);
+        // 添加时间戳防止缓存
+        const response = await apiFetch(`/projects/${projectId}?_t=${Date.now()}`);
         const data = await response.json();
 
         if (!data.success) return alert('加载项目详情失败: ' + (data.message || '未知错误'));
@@ -959,10 +983,13 @@ export async function viewProject(projectId) {
         const canQualityOps = isAdmin || isPM || isSales || isPartTimeSales;
         const canDeliver = (isAdmin || isSales || isPartTimeSales) && !isPM;
         const canEditDeleteExport = (isAdmin || isSales || isPartTimeSales) && !isPM;
-        const canManageMembers = isAdmin || isPM;
+        // 销售创建的项目，销售可以管理成员；管理员和项目经理可以管理所有项目的成员
+        const canManageMembers = isAdmin || isPM || (isSales || isPartTimeSales) && project.createdBy?._id === state.currentUser?._id;
         const canFinance = isFinanceRole();
 
-        const canManagePayment = roles.includes('admin') || roles.includes('finance') || project.createdBy?._id === state.currentUser?._id;
+        // 销售只能查看回款信息，不能修改；只有财务和管理员可以修改回款
+        const canManagePayment = roles.includes('admin') || roles.includes('finance');
+        const canViewPayment = canManagePayment || project.createdBy?._id === state.currentUser?._id;
 
         const memberRoles = (project.members || []).reduce((acc, m) => {
             if (!m || !m.userId || !state.currentUser?._id) return acc;
@@ -1078,7 +1105,7 @@ export async function viewProject(projectId) {
                 <div class="detail-section">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                         <h4>回款信息</h4>
-                        ${canManagePayment ? `<button class="btn-small" onclick="closeModal(); setTimeout(() => showPaymentModal('${projectId}'), 100)">更新回款</button>` : ''}
+                        ${canManagePayment ? `<button class="btn-small" data-click="showPaymentModalForProject('${projectId}')">更新回款</button>` : ''}
                     </div>
                     <div class="detail-row"><div class="detail-label">合同约定回款日:</div><div class="detail-value">${project.payment?.expectedAt ? new Date(project.payment.expectedAt).toLocaleDateString() : '-'}</div></div>
                     <div class="detail-row"><div class="detail-label">已回款金额:</div><div class="detail-value">¥${(project.payment?.receivedAmount || 0).toLocaleString()}</div></div>
@@ -1089,18 +1116,22 @@ export async function viewProject(projectId) {
                 <div class="detail-section">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <h4>项目成员</h4>
-                        ${canManageMembers ? '<button class="btn-small" onclick="closeModal(); setTimeout(() => showAddMemberModal(\'' + projectId + '\'), 100)">添加成员</button>' : ''}
+                        ${canManageMembers ? `<button class="btn-small" data-click="showAddMemberModal('${projectId}')">添加成员</button>` : ''}
                     </div>
-                    <div id="projectMembers">
-                        ${project.members?.length ? project.members.map(m => `
-                            <div class="member-item">
-                                <div class="member-info">
-                                    <strong>${m.userId.name}</strong> - ${getRoleText(m.role)}
-                                    ${m.role === 'translator' ? ` (${m.translatorType === 'deepedit' ? '深度编辑' : 'MTPE'}, 字数占比: ${(m.wordRatio * 100).toFixed(0)}%)` : ''}
+                    <div id="projectMembers" style="display: flex; flex-direction: column; gap: 10px;">
+                        ${project.members && Array.isArray(project.members) && project.members.length > 0 ? project.members.map(m => {
+                            // 处理 userId 可能是对象或字符串的情况
+                            const userName = (m.userId && typeof m.userId === 'object') ? m.userId.name : (m.userId || '未知用户');
+                            const roleText = getRoleText(m.role);
+                            return `<div class="member-item" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #f5f5f5; border-radius: 4px;">
+                                <div class="member-info" style="flex: 1;">
+                                    <strong>${userName}</strong> - ${roleText}
+                                    ${m.role === 'translator' ? ` (${m.translatorType === 'deepedit' ? '深度编辑' : 'MTPE'}, 字数占比: ${((m.wordRatio || 1) * 100).toFixed(0)}%)` : ''}
+                                    ${m.role === 'layout' && m.layoutCost ? ` (排版费用: ¥${(m.layoutCost || 0).toFixed(2)})` : ''}
                                 </div>
-                                ${canManageMembers ? `<div class="member-actions"><button class="btn-small btn-danger" onclick="deleteMember('${projectId}', '${m._id}')">删除</button></div>` : ''}
-                            </div>
-                        `).join('') : '<p>暂无成员</p>'}
+                                ${canManageMembers ? `<div class="member-actions" style="margin-left: 10px;"><button class="btn-small btn-danger" data-click="deleteMember('${projectId}', '${m._id}')" style="background: #dc2626; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">删除</button></div>` : ''}
+                            </div>`;
+                        }).join('') : '<p style="color: #999; font-size: 14px;">暂无成员</p>'}
                     </div>
                 </div>
 
@@ -1360,7 +1391,285 @@ export async function setLayoutCost(e, projectId) {
     }
 }
 
+// 更新创建项目时的成员列表显示
+export function updateCreateProjectMembersList() {
+    const container = document.getElementById('createProjectMembersList');
+    if (!container) return;
+    
+    if (createProjectMembers.length === 0) {
+        container.innerHTML = '<p style="margin: 0; color: #999; font-size: 12px;">暂未添加成员，点击"添加成员"按钮添加项目经理、翻译、审校等</p>';
+        return;
+    }
+    
+    const roleTextMap = {
+        'pm': '项目经理',
+        'translator': '翻译',
+        'reviewer': '审校',
+        'sales': '销售',
+        'admin_staff': '综合岗',
+        'part_time_sales': '兼职销售',
+        'layout': '兼职排版'
+    };
+    
+    container.innerHTML = createProjectMembers.map((member, index) => {
+        const user = (state.allUsers || []).find(u => u._id === member.userId);
+        const userName = user ? user.name : '未知用户';
+        const roleText = roleTextMap[member.role] || member.role;
+        let extraInfo = '';
+        if (member.role === 'translator') {
+            extraInfo = ` (${member.translatorType === 'mtpe' ? 'MTPE' : '深度编辑'}, 占比: ${(member.wordRatio || 1.0).toFixed(2)})`;
+        } else if (member.role === 'layout' && member.layoutCost) {
+            extraInfo = ` (费用: ¥${member.layoutCost.toFixed(2)})`;
+        }
+        return `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; background: white; border-radius: 4px; margin-bottom: 8px;">
+                <span style="font-size: 13px;">
+                    <strong>${userName}</strong> - ${roleText}${extraInfo}
+                </span>
+                <button type="button" class="btn-small" data-click="removeCreateProjectMember(${index})" style="background: #ff4444; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer;">删除</button>
+            </div>
+        `;
+    }).join('');
+}
+
+// 显示添加成员模态框（用于创建项目时）
+export async function showAddMemberModalForCreate() {
+    if ((state.allUsers || []).length === 0) {
+        try {
+            const response = await apiFetch('/users');
+            const data = await response.json();
+            if (data.success) state.allUsers = data.data;
+        } catch (err) {
+            alert('加载用户列表失败: ' + err.message);
+            return;
+        }
+    }
+    
+    // 检查用户角色，确定可选择的角色
+    const roles = state.currentUser?.roles || [];
+    const isAdmin = roles.includes('admin');
+    const isPM = roles.includes('pm');
+    const isSales = roles.includes('sales') || roles.includes('part_time_sales');
+    
+    // 权限控制：
+    // - 管理员：可以添加所有角色
+    // - 项目经理：只能添加翻译、审校、兼职排版
+    // - 销售：只能添加项目经理
+    const availableRoles = isAdmin ? [
+        { value: 'translator', label: '翻译' },
+        { value: 'reviewer', label: '审校' },
+        { value: 'pm', label: '项目经理' },
+        { value: 'sales', label: '销售' },
+        { value: 'admin_staff', label: '综合岗' },
+        { value: 'part_time_sales', label: '兼职销售' },
+        { value: 'layout', label: '兼职排版' }
+    ] : isPM ? [
+        { value: 'translator', label: '翻译' },
+        { value: 'reviewer', label: '审校' },
+        { value: 'layout', label: '兼职排版' }
+    ] : [
+        { value: 'pm', label: '项目经理' }
+    ];
+    
+    const projectAmountInput = document.getElementById('projectAmount');
+    const projectAmount = projectAmountInput ? parseFloat(projectAmountInput.value) || 0 : 0;
+    
+    const content = `
+        <form id="addMemberFormForCreate" data-project-amount="${projectAmount}" data-submit="addMemberForCreate(event)">
+            <div class="form-group">
+                <label>角色 *</label>
+                <select name="role" id="createMemberRole" data-change="toggleCreateTranslatorFields(); filterCreateUsersByRole()" required>
+                    <option value="">请选择</option>
+                    ${availableRoles.map(r => `<option value="${r.value}">${r.label}</option>`).join('')}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>选择用户 *</label>
+                <select name="userId" id="createMemberUserId" required>
+                    <option value="">请先选择角色</option>
+                </select>
+            </div>
+            <div class="form-group" id="createTranslatorTypeGroup" style="display: none;">
+                <label>翻译类型</label>
+                <select name="translatorType">
+                    <option value="mtpe">MTPE</option>
+                    <option value="deepedit">深度编辑</option>
+                </select>
+            </div>
+            <div class="form-group" id="createWordRatioGroup" style="display: none;">
+                <label>字数占比 (0-1，多个翻译时使用)</label>
+                <input type="number" name="wordRatio" step="0.01" min="0" max="1" value="1.0">
+            </div>
+            <div class="form-group" id="createLayoutCostGroup" style="display: none;">
+                <label>排版费用（元）</label>
+                <input type="number" name="layoutCost" id="createMemberLayoutCost" step="0.01" min="0" data-change="validateCreateMemberLayoutCost()">
+                <small style="color: #666; font-size: 12px;">排版费用不能超过项目总金额的5%</small>
+                <div id="createMemberLayoutCostValidation" style="margin-top: 5px;"></div>
+            </div>
+            <div class="action-buttons">
+                <button type="submit">添加</button>
+                <button type="button" data-click="closeModal()">取消</button>
+            </div>
+        </form>
+    `;
+    showModal({ title: '添加项目成员', body: content });
+}
+
+// 添加成员（用于创建项目时）
+export async function addMemberForCreate(e) {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const role = formData.get('role');
+    const userId = formData.get('userId');
+    if (!role || !userId) {
+        showToast('请选择角色和用户', 'error');
+        return;
+    }
+    
+    // 检查是否已添加
+    const exists = createProjectMembers.some(m => m.userId === userId && m.role === role);
+    if (exists) {
+        showToast('该用户已添加为此角色', 'error');
+        return;
+    }
+    
+    // 自我分配限制
+    const me = state.currentUser;
+    if (me) {
+        const isSelf = userId === me._id;
+        if (isSelf && me.roles?.includes('pm')) {
+            const isTranslator = me.roles?.includes('translator');
+            const isReviewer = me.roles?.includes('reviewer');
+            if ((role === 'translator' && isTranslator) || (role === 'reviewer' && isReviewer)) {
+                showToast('作为项目经理，不能将翻译或审校任务分配给自己', 'error');
+                return;
+            }
+        }
+        const isSales = me.roles?.includes('sales') || me.roles?.includes('part_time_sales');
+        const hasPMRole = me.roles?.includes('pm');
+        if (isSelf && role === 'pm' && isSales && hasPMRole) {
+            showToast('作为销售，不能将项目经理角色分配给自己', 'error');
+            return;
+        }
+    }
+    
+    const member = {
+        userId,
+        role
+    };
+    
+    if (role === 'translator') {
+        member.translatorType = formData.get('translatorType') || 'mtpe';
+        member.wordRatio = formData.get('wordRatio') ? parseFloat(formData.get('wordRatio')) : 1.0;
+    }
+    
+    if (role === 'layout') {
+        const layoutCost = formData.get('layoutCost') ? parseFloat(formData.get('layoutCost')) : 0;
+        if (layoutCost > 0) {
+            const projectAmount = parseFloat(document.getElementById('addMemberFormForCreate')?.dataset?.projectAmount || 0);
+            if (projectAmount > 0) {
+                const percentage = (layoutCost / projectAmount) * 100;
+                if (percentage > 5) {
+                    showToast(`排版费用不能超过项目总金额的5%，当前占比为${percentage.toFixed(2)}%`, 'error');
+                    return;
+                }
+            }
+        }
+        member.layoutCost = layoutCost;
+    }
+    
+    createProjectMembers.push(member);
+    closeModal();
+    updateCreateProjectMembersList();
+    showToast('成员已添加', 'success');
+}
+
+// 删除创建项目时的成员
+export function removeCreateProjectMember(index) {
+    if (index >= 0 && index < createProjectMembers.length) {
+        createProjectMembers.splice(index, 1);
+        updateCreateProjectMembersList();
+        showToast('成员已移除', 'success');
+    }
+}
+
+// 切换翻译字段显示（用于创建项目时）
+export function toggleCreateTranslatorFields() {
+    const role = document.getElementById('createMemberRole')?.value;
+    const translatorGroup = document.getElementById('createTranslatorTypeGroup');
+    const wordRatioGroup = document.getElementById('createWordRatioGroup');
+    const layoutCostGroup = document.getElementById('createLayoutCostGroup');
+    if (role === 'translator') {
+        if (translatorGroup) translatorGroup.style.display = 'block';
+        if (wordRatioGroup) wordRatioGroup.style.display = 'block';
+        if (layoutCostGroup) layoutCostGroup.style.display = 'none';
+    } else if (role === 'layout') {
+        if (translatorGroup) translatorGroup.style.display = 'none';
+        if (wordRatioGroup) wordRatioGroup.style.display = 'none';
+        if (layoutCostGroup) layoutCostGroup.style.display = 'block';
+    } else {
+        if (translatorGroup) translatorGroup.style.display = 'none';
+        if (wordRatioGroup) wordRatioGroup.style.display = 'none';
+        if (layoutCostGroup) layoutCostGroup.style.display = 'none';
+    }
+}
+
+// 根据角色过滤用户（用于创建项目时）
+export function filterCreateUsersByRole() {
+    const role = document.getElementById('createMemberRole')?.value;
+    const userIdSelect = document.getElementById('createMemberUserId');
+    if (!role || !userIdSelect) {
+        if (userIdSelect) userIdSelect.innerHTML = '<option value="">请先选择角色</option>';
+        return;
+    }
+    
+    const users = (state.allUsers || []).filter(u => {
+        if (!u.isActive) return false;
+        if (role === 'pm') return u.roles?.includes('pm');
+        if (role === 'translator') return u.roles?.includes('translator');
+        if (role === 'reviewer') return u.roles?.includes('reviewer');
+        if (role === 'sales') return u.roles?.includes('sales');
+        if (role === 'admin_staff') return u.roles?.includes('admin_staff');
+        if (role === 'part_time_sales') return u.roles?.includes('part_time_sales');
+        if (role === 'layout') return u.roles?.includes('layout');
+        return true;
+    });
+    
+    userIdSelect.innerHTML = '<option value="">请选择用户</option>' + 
+        users.map(u => `<option value="${u._id}">${u.name}</option>`).join('');
+}
+
+// 验证创建项目时的排版费用
+export function validateCreateMemberLayoutCost() {
+    const layoutCostInput = document.getElementById('createMemberLayoutCost');
+    const validationDiv = document.getElementById('createMemberLayoutCostValidation');
+    if (!layoutCostInput || !validationDiv) return true;
+    
+    const layoutCost = parseFloat(layoutCostInput.value) || 0;
+    const projectAmount = parseFloat(document.getElementById('addMemberFormForCreate')?.dataset?.projectAmount || 0);
+    
+    if (projectAmount > 0 && layoutCost > 0) {
+        const percentage = (layoutCost / projectAmount) * 100;
+        if (percentage > 5) {
+            validationDiv.innerHTML = `<span style="color: #ff4444; font-size: 12px;">排版费用不能超过项目总金额的5%，当前占比为${percentage.toFixed(2)}%</span>`;
+            return false;
+        } else {
+            validationDiv.innerHTML = `<span style="color: #28a745; font-size: 12px;">占比: ${percentage.toFixed(2)}%</span>`;
+        }
+    } else {
+        validationDiv.innerHTML = '';
+    }
+    return true;
+}
+
 export async function showAddMemberModal(projectId) {
+    // 如果当前有打开的模态框，先关闭它
+    if (document.getElementById('modalOverlay')?.classList.contains('active')) {
+        closeModal();
+        // 等待模态框关闭动画完成
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
     if ((state.allUsers || []).length === 0) {
         try {
             const response = await apiFetch('/users');
@@ -1372,20 +1681,33 @@ export async function showAddMemberModal(projectId) {
         }
     }
 
+    // 检查用户角色，确定可选择的角色
+    const roles = state.currentUser?.roles || [];
+    const isAdmin = roles.includes('admin');
+    const isPM = roles.includes('pm');
+    const isSales = roles.includes('sales') || roles.includes('part_time_sales');
+    
+    // 销售只能添加项目经理
+    const availableRoles = isAdmin || isPM ? [
+        { value: 'translator', label: '翻译' },
+        { value: 'reviewer', label: '审校' },
+        { value: 'pm', label: '项目经理' },
+        { value: 'sales', label: '销售' },
+        { value: 'admin_staff', label: '综合岗' },
+        { value: 'part_time_sales', label: '兼职销售' },
+        { value: 'layout', label: '兼职排版' }
+    ] : [
+        { value: 'pm', label: '项目经理' }
+    ];
+
     const projectAmount = currentProjectDetail?.projectAmount || 0;
     const content = `
         <form id="addMemberForm" data-project-id="${projectId}" data-project-amount="${projectAmount}" data-submit="addMember(event, '${projectId}')">
             <div class="form-group">
                 <label>角色 *</label>
-                <select name="role" id="memberRole" onchange="toggleTranslatorFields(); filterUsersByRole()" required>
+                <select name="role" id="memberRole" data-change="onMemberRoleChange()" required>
                     <option value="">请选择</option>
-                    <option value="translator">翻译</option>
-                    <option value="reviewer">审校</option>
-                    <option value="pm">项目经理</option>
-                    <option value="sales">销售</option>
-                    <option value="admin_staff">综合岗</option>
-                    <option value="part_time_sales">兼职销售</option>
-                    <option value="layout">兼职排版</option>
+                    ${availableRoles.map(r => `<option value="${r.value}">${r.label}</option>`).join('')}
                 </select>
             </div>
             <div class="form-group">
@@ -1407,17 +1729,25 @@ export async function showAddMemberModal(projectId) {
             </div>
             <div class="form-group" id="layoutCostGroup" style="display: none;">
                 <label>排版费用（元）</label>
-                <input type="number" name="layoutCost" id="addMemberLayoutCost" step="0.01" min="0" onchange="validateAddMemberLayoutCost()">
+                <input type="number" name="layoutCost" id="addMemberLayoutCost" step="0.01" min="0" data-change="validateAddMemberLayoutCost()">
                 <small style="color: #666; font-size: 12px;">排版费用不能超过项目总金额的5%</small>
                 <div id="addMemberLayoutCostValidation" style="margin-top: 5px;"></div>
             </div>
             <div class="action-buttons">
                 <button type="submit">添加</button>
-                <button type="button" onclick="closeModal()">取消</button>
+                <button type="button" data-click="closeModal()">取消</button>
             </div>
         </form>
     `;
     showModal({ title: '添加项目成员', body: content });
+    
+    // 如果已经选择了角色，立即过滤用户列表
+    setTimeout(() => {
+        const roleSelect = document.getElementById('memberRole');
+        if (roleSelect && roleSelect.value) {
+            filterUsersByRole();
+        }
+    }, 100);
 }
 
 export function toggleTranslatorFields() {
@@ -1440,14 +1770,68 @@ export function toggleTranslatorFields() {
     }
 }
 
+// 包装函数：当角色选择改变时，同时调用 toggleTranslatorFields 和 filterUsersByRole
+export function onMemberRoleChange() {
+    toggleTranslatorFields();
+    filterUsersByRole();
+}
+
 export function filterUsersByRole() {
+    console.log('filterUsersByRole 被调用');
     const role = document.getElementById('memberRole')?.value;
     const userIdSelect = document.getElementById('memberUserId');
+    
+    console.log('选择的角色:', role);
+    console.log('用户列表长度:', state.allUsers?.length || 0);
+    console.log('当前用户:', state.currentUser?.name);
+    
     if (!role || !userIdSelect) {
+        console.log('角色或用户选择框不存在');
         if (userIdSelect) userIdSelect.innerHTML = '<option value="">请先选择角色</option>';
         return;
     }
-    let filteredUsers = (state.allUsers || []).filter(u => u.isActive && u.roles?.includes(role));
+    
+    // 确保用户列表已加载
+    if (!state.allUsers || state.allUsers.length === 0) {
+        console.warn('用户列表未加载，尝试重新加载...');
+        if (userIdSelect) userIdSelect.innerHTML = '<option value="">加载用户列表中...</option>';
+        // 尝试重新加载用户列表
+        apiFetch('/users').then(res => res.json()).then(data => {
+            if (data.success) {
+                state.allUsers = data.data;
+                console.log('用户列表已重新加载，数量:', state.allUsers.length);
+                // 重新过滤
+                filterUsersByRole();
+            } else {
+                if (userIdSelect) userIdSelect.innerHTML = '<option value="">用户列表加载失败</option>';
+            }
+        }).catch(err => {
+            console.error('加载用户列表失败:', err);
+            if (userIdSelect) userIdSelect.innerHTML = '<option value="">用户列表加载失败</option>';
+        });
+        return;
+    }
+    
+    // 显示所有用户信息（用于调试）
+    console.log('所有用户:', state.allUsers.map(u => ({ name: u.name, roles: u.roles, isActive: u.isActive })));
+    
+    let filteredUsers = (state.allUsers || []).filter(u => {
+        if (!u.isActive) {
+            console.log(`用户 ${u.name} 未激活`);
+            return false;
+        }
+        // roles 是数组，检查是否包含该角色
+        if (!u.roles || !Array.isArray(u.roles)) {
+            console.log(`用户 ${u.name} 没有角色或角色不是数组:`, u.roles);
+            return false;
+        }
+        const hasRole = u.roles.includes(role);
+        console.log(`用户 ${u.name} 角色:`, u.roles, `包含 ${role}:`, hasRole);
+        return hasRole;
+    });
+    
+    console.log(`角色 ${role} 的可用用户 (过滤前):`, filteredUsers.length, filteredUsers.map(u => u.name));
+    
     // 自身限制
     const me = state.currentUser;
     if (me && (role === 'translator' || role === 'reviewer')) {
@@ -1455,16 +1839,34 @@ export function filterUsersByRole() {
         const isTranslator = me.roles?.includes('translator');
         const isReviewer = me.roles?.includes('reviewer');
         if (isPM) {
-            if (role === 'translator' && isTranslator) filteredUsers = filteredUsers.filter(u => u._id !== me._id);
-            if (role === 'reviewer' && isReviewer) filteredUsers = filteredUsers.filter(u => u._id !== me._id);
+            if (role === 'translator' && isTranslator) {
+                console.log('过滤掉自己（PM不能分配翻译给自己）');
+                filteredUsers = filteredUsers.filter(u => u._id !== me._id);
+            }
+            if (role === 'reviewer' && isReviewer) {
+                console.log('过滤掉自己（PM不能分配审校给自己）');
+                filteredUsers = filteredUsers.filter(u => u._id !== me._id);
+            }
         }
     }
     if (me && role === 'pm') {
         const isSales = me.roles?.includes('sales') || me.roles?.includes('part_time_sales');
         const hasPMRole = me.roles?.includes('pm');
-        if (isSales && hasPMRole) filteredUsers = filteredUsers.filter(u => u._id !== me._id);
+        if (isSales && hasPMRole) {
+            console.log('过滤掉自己（销售不能分配PM给自己）');
+            filteredUsers = filteredUsers.filter(u => u._id !== me._id);
+        }
     }
-    userIdSelect.innerHTML = '<option value="">请选择用户</option>' + filteredUsers.map(u => `<option value="${u._id}">${u.name}</option>`).join('');
+    
+    console.log(`角色 ${role} 的可用用户 (过滤后):`, filteredUsers.length, filteredUsers.map(u => u.name));
+    
+    if (filteredUsers.length === 0) {
+        userIdSelect.innerHTML = '<option value="">没有可用的用户</option>';
+        console.warn('没有找到符合条件的用户');
+    } else {
+        userIdSelect.innerHTML = '<option value="">请选择用户</option>' + filteredUsers.map(u => `<option value="${u._id}">${u.name}</option>`).join('');
+        console.log('用户列表已更新，选项数量:', filteredUsers.length);
+    }
 }
 
 export function validateAddMemberLayoutCost() {
@@ -1530,7 +1932,7 @@ export async function addMember(e, projectId) {
     }
 
     try {
-        const res = await apiFetch(`/projects/${projectId}/members`, {
+        const res = await apiFetch(`/projects/${projectId}/add-member`, {
             method: 'POST',
             body: JSON.stringify(payload)
         });
@@ -1540,17 +1942,188 @@ export async function addMember(e, projectId) {
             return;
         }
         closeModal();
-        viewProject(projectId);
+        // 重新加载项目详情以获取最新的成员列表
+        await viewProject(projectId);
         showToast('成员已添加', 'success');
     } catch (err) {
         showToast('添加失败: ' + err.message, 'error');
     }
 }
 
+// 显示回款管理模态框（用于项目详情）
+export async function showPaymentModalForProject(projectId) {
+    // 如果当前有打开的模态框，先关闭它
+    if (document.getElementById('modalOverlay')?.classList.contains('active')) {
+        closeModal();
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    // 导入 finance 模块的函数
+    const { loadPaymentRecordsForProject } = await import('./finance.js');
+    
+    // 创建一个临时容器ID用于模态框
+    const tempContainerId = `projectPaymentModalContent_${projectId}`;
+    const content = `
+        <div id="${tempContainerId}">
+            <div class="card-desc">加载中...</div>
+        </div>
+    `;
+    
+    showModal({ title: '回款管理', body: content });
+    
+    // 临时修改 loadPaymentRecordsForProject 使用的容器ID
+    const originalContainerId = `payment-records-detail-${projectId}`;
+    
+    // 加载回款记录到模态框容器
+    try {
+        const res = await apiFetch(`/finance/payment/${projectId}`);
+        const data = await res.json();
+        if (!data.success) {
+            document.getElementById(tempContainerId).innerHTML = `<div style="text-align: center; color: #ef4444;">加载失败: ${data.message || '未知错误'}</div>`;
+            return;
+        }
+
+        const projectRes = await apiFetch(`/projects/${projectId}`);
+        const projectData = await projectRes.json();
+        const project = projectData.success ? projectData.data : null;
+
+        const paymentStatusText = { unpaid: '未支付', partially_paid: '部分支付', paid: '已支付' };
+        const canManageFinance = (state.currentUser?.roles || []).includes('admin') || (state.currentUser?.roles || []).includes('finance');
+
+        // 如果没有回款记录，显示新增表单
+        if (!data.data || data.data.length === 0) {
+            const projectAmount = project?.projectAmount || 0;
+            const projectPaymentStatus = project?.payment?.paymentStatus || 'unpaid';
+            document.getElementById(tempContainerId).innerHTML = `
+                <div style="background: #f0f9ff; padding: 12px; border-radius: 4px; margin-bottom: 12px; display: flex; gap: 20px; flex-wrap: wrap;">
+                    <div><div style="font-size: 12px; color: #666;">项目金额</div><div style="font-size: 16px; font-weight: bold;">¥${projectAmount.toLocaleString()}</div></div>
+                    <div><div style="font-size: 12px; color: #666;">已回款</div><div style="font-size: 16px; font-weight: bold; color: #10b981;">¥0</div></div>
+                    <div><div style="font-size: 12px; color: #666;">剩余应收</div><div style="font-size: 16px; font-weight: bold; color: #f59e0b;">¥${projectAmount.toLocaleString()}</div></div>
+                    <div>
+                        <div style="font-size: 12px; color: #666;">回款状态</div>
+                        <div><span class="badge ${projectPaymentStatus === 'paid' ? 'badge-success' : projectPaymentStatus === 'partially_paid' ? 'badge-warning' : 'badge-danger'}">${paymentStatusText[projectPaymentStatus] || projectPaymentStatus}</span></div>
+                    </div>
+                </div>
+                ${canManageFinance ? `
+                <div class="card" style="margin-bottom: 12px; background: #f9fafb;">
+                    <div class="card-title" style="font-size: 14px; margin-bottom: 8px;">新增回款记录</div>
+                    <form id="addPaymentForm_${projectId}" data-submit="addPaymentRecordForProject(event, '${projectId}')" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end;">
+                        <div style="flex: 1; min-width: 120px;">
+                            <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">回款日期 <span style="color: #e74c3c;">*</span></label>
+                            <input type="date" id="paymentDate_${projectId}" required style="padding: 6px; width: 100%;" value="${new Date().toISOString().split('T')[0]}">
+                        </div>
+                        <div style="flex: 1; min-width: 120px;">
+                            <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">金额 <span style="color: #e74c3c;">*</span></label>
+                            <input type="number" step="0.01" id="paymentAmount_${projectId}" required style="padding: 6px; width: 100%;" placeholder="0.00">
+                        </div>
+                        <div style="flex: 1; min-width: 100px;">
+                            <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">支付方式</label>
+                            <select id="paymentMethod_${projectId}" style="padding: 6px; width: 100%;">
+                                <option value="bank">银行转账</option>
+                                <option value="cash">现金</option>
+                                <option value="alipay">支付宝</option>
+                                <option value="wechat">微信</option>
+                            </select>
+                        </div>
+                        <div style="flex: 1; min-width: 120px;">
+                            <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">凭证号</label>
+                            <input type="text" id="paymentReference_${projectId}" style="padding: 6px; width: 100%;" placeholder="可选">
+                        </div>
+                        <div style="flex: 1; min-width: 120px;">
+                            <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">关联发票号</label>
+                            <input type="text" id="paymentInvoiceNumber_${projectId}" style="padding: 6px; width: 100%;" placeholder="可选">
+                        </div>
+                        <div>
+                            <button type="submit" style="padding: 6px 16px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">新增回款</button>
+                        </div>
+                    </form>
+                </div>
+                ` : ''}
+                <div class="card-desc">暂无回款记录</div>
+            `;
+            return;
+        }
+
+        const rows = data.data.map(r => `
+            <tr>
+                <td>${new Date(r.receivedAt).toLocaleDateString()}</td>
+                <td>¥${(r.amount || 0).toLocaleString()}</td>
+                <td>${r.method === 'bank' ? '银行转账' : r.method === 'cash' ? '现金' : r.method === 'alipay' ? '支付宝' : r.method === 'wechat' ? '微信' : r.method || '-'}</td>
+                <td>${r.reference || '-'}</td>
+                <td>${r.invoiceNumber || '-'}</td>
+                <td>${r.recordedBy?.name || '-'}</td>
+                ${canManageFinance ? `<td><button class="btn-small btn-danger" data-click="removePaymentRecord('${r._id}', '${projectId}')">删除</button></td>` : ''}
+            </tr>
+        `).join('');
+
+        const totalReceived = data.data.reduce((sum, r) => sum + (r.amount || 0), 0);
+        const projectAmount = project?.projectAmount || 0;
+        const remainingAmount = Math.max(0, projectAmount - totalReceived);
+        const projectPaymentStatus = project?.payment?.paymentStatus || 'unpaid';
+
+        document.getElementById(tempContainerId).innerHTML = `
+            <div style="background: #f0f9ff; padding: 12px; border-radius: 4px; margin-bottom: 12px; display: flex; gap: 20px; flex-wrap: wrap;">
+                <div><div style="font-size: 12px; color: #666;">项目金额</div><div style="font-size: 16px; font-weight: bold;">¥${projectAmount.toLocaleString()}</div></div>
+                <div><div style="font-size: 12px; color: #666;">已回款</div><div style="font-size: 16px; font-weight: bold; color: #10b981;">¥${totalReceived.toLocaleString()}</div></div>
+                <div><div style="font-size: 12px; color: #666;">剩余应收</div><div style="font-size: 16px; font-weight: bold; color: ${remainingAmount > 0 ? '#f59e0b' : '#10b981'};">¥${remainingAmount.toLocaleString()}</div></div>
+                <div>
+                    <div style="font-size: 12px; color: #666;">回款状态</div>
+                    <div><span class="badge ${projectPaymentStatus === 'paid' ? 'badge-success' : projectPaymentStatus === 'partially_paid' ? 'badge-warning' : 'badge-danger'}">${paymentStatusText[projectPaymentStatus] || projectPaymentStatus}</span></div>
+                </div>
+            </div>
+            ${canManageFinance ? `
+            <div class="card" style="margin-bottom: 12px; background: #f9fafb;">
+                <div class="card-title" style="font-size: 14px; margin-bottom: 8px;">新增回款记录</div>
+                <form id="addPaymentForm_${projectId}" data-submit="addPaymentRecordForProject(event, '${projectId}')" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end;">
+                    <div style="flex: 1; min-width: 120px;">
+                        <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">回款日期 <span style="color: #e74c3c;">*</span></label>
+                        <input type="date" id="paymentDate_${projectId}" required style="padding: 6px; width: 100%;" value="${new Date().toISOString().split('T')[0]}">
+                    </div>
+                    <div style="flex: 1; min-width: 120px;">
+                        <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">金额 <span style="color: #e74c3c;">*</span></label>
+                        <input type="number" step="0.01" id="paymentAmount_${projectId}" required style="padding: 6px; width: 100%;" placeholder="0.00">
+                    </div>
+                    <div style="flex: 1; min-width: 100px;">
+                        <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">支付方式</label>
+                        <select id="paymentMethod_${projectId}" style="padding: 6px; width: 100%;">
+                            <option value="bank">银行转账</option>
+                            <option value="cash">现金</option>
+                            <option value="alipay">支付宝</option>
+                            <option value="wechat">微信</option>
+                        </select>
+                    </div>
+                    <div style="flex: 1; min-width: 120px;">
+                        <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">凭证号</label>
+                        <input type="text" id="paymentReference_${projectId}" style="padding: 6px; width: 100%;" placeholder="可选">
+                    </div>
+                    <div style="flex: 1; min-width: 120px;">
+                        <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">关联发票号</label>
+                        <input type="text" id="paymentInvoiceNumber_${projectId}" style="padding: 6px; width: 100%;" placeholder="可选">
+                    </div>
+                    <div>
+                        <button type="submit" style="padding: 6px 16px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">新增回款</button>
+                    </div>
+                </form>
+            </div>
+            ` : ''}
+            <table class="table-sticky">
+                <thead>
+                    <tr>
+                        <th>日期</th><th>金额</th><th>方式</th><th>凭证</th><th>发票号</th><th>记录人</th>${canManageFinance ? '<th>操作</th>' : ''}
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    } catch (error) {
+        document.getElementById(tempContainerId).innerHTML = `<div style="text-align: center; color: #ef4444;">加载失败: ${error.message}</div>`;
+    }
+}
+
 export async function deleteMember(projectId, memberId) {
     if (!confirm('确定删除该成员吗？')) return;
     try {
-        const res = await apiFetch(`/projects/${projectId}/members/${memberId}`, { method: 'DELETE' });
+        const res = await apiFetch(`/projects/${projectId}/member/${memberId}`, { method: 'DELETE' });
         const data = await res.json();
         if (data.success) {
             viewProject(projectId);
