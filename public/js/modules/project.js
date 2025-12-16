@@ -1204,7 +1204,10 @@ export async function viewProject(projectId) {
         const isPM = currentRole === 'pm';
         const isSales = currentRole === 'sales';
         const isPartTimeSales = currentRole === 'part_time_sales';
-        // 对于财务权限，需要检查用户是否拥有财务角色（因为财务权限应该基于拥有的角色，而不是当前选择的角色）
+        const isFinance = currentRole === 'finance';
+        
+        // 对于财务权限，应该基于当前选择的角色，而不是用户拥有的所有角色
+        // 这样当管理员切换到销售角色时，财务相关功能会被隐藏
         const roles = state.currentUser?.roles || [];
         const hasFinanceRole = roles.includes('finance') || roles.includes('admin');
 
@@ -1215,9 +1218,11 @@ export async function viewProject(projectId) {
         const canEditDeleteExport = (isAdmin || isSales || isPartTimeSales) && !isPM;
         // 销售创建的项目，销售可以管理成员；管理员和项目经理可以管理所有项目的成员
         const canManageMembers = isAdmin || isPM || (isSales || isPartTimeSales) && project.createdBy?._id === state.currentUser?._id;
-        const canFinance = hasFinanceRole;
+        // 财务相关功能应该基于当前选择的角色，而不是用户拥有的所有角色
+        const canFinance = isAdmin || isFinance;
 
         // 销售只能查看回款信息，不能修改；只有财务和管理员可以修改回款
+        // 这里仍然使用 hasFinanceRole，因为后端权限检查基于用户拥有的角色
         const canManagePayment = hasFinanceRole;
         const canViewPayment = canManagePayment || project.createdBy?._id === state.currentUser?._id;
 
@@ -1435,8 +1440,9 @@ export async function viewProject(projectId) {
         // 直接调用导入的函数，而不是通过window
         loadRealtimeKPI(projectId);
         if (canFinance) {
-            window.loadProjectPayments?.(projectId);
-            window.loadProjectInvoices?.(projectId);
+            // 只有当有财务权限时才加载回款和发票数据
+            loadProjectPayments(projectId);
+            loadProjectInvoices(projectId);
         }
     } catch (error) {
         alert('加载项目详情失败: ' + error.message);
