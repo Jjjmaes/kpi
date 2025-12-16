@@ -161,7 +161,7 @@ export async function loadConfigHistory() {
                             <td>${h.changedAt ? new Date(h.changedAt).toLocaleString() : '-'}</td>
                             <td>${h.changedByUser?.name || '未知'}</td>
                             <td>${h.reason || '无'}</td>
-                            <td><button class="btn-small" onclick="viewConfigChange(${idx})">查看详情</button></td>
+                            <td><button class="btn-small" data-click="viewConfigChange(${idx})">查看详情</button></td>
                         </tr>
                     `).join('')}
                 </tbody>

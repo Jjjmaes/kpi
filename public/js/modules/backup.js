@@ -51,8 +51,8 @@ function renderBackups(backups) {
                         <td>${new Date(backup.createdAt).toLocaleString('zh-CN')}</td>
                         <td>${backup.age} 天</td>
                         <td>
-                            <button class="btn-small btn-success" onclick="restoreBackup('${backup.filename}')" style="margin-right: 5px;">恢复</button>
-                            <button class="btn-small btn-danger" onclick="deleteBackupFile('${backup.filename}')">删除</button>
+                            <button class="btn-small btn-success" data-click="restoreBackup('${backup.filename}')" style="margin-right: 5px;">恢复</button>
+                            <button class="btn-small btn-danger" data-click="deleteBackupFile('${backup.filename}')">删除</button>
                         </td>
                     </tr>
                 `).join('')}

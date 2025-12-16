@@ -81,10 +81,13 @@ class ProjectService {
       );
     }
 
-    // 日期校验
+    // 日期校验：允许当天交付，只比较日期部分（不包含时间）
     const deadlineDate = new Date(deadline);
-    if (deadlineDate < new Date()) {
-      throw new AppError('交付时间不能早于当前时间', 400, 'INVALID_DEADLINE');
+    deadlineDate.setHours(0, 0, 0, 0); // 设置为当天的00:00:00
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // 设置为当天的00:00:00
+    if (deadlineDate < today) {
+      throw new AppError('交付时间不能早于今天', 400, 'INVALID_DEADLINE');
     }
 
     // 兼职销售字段校验

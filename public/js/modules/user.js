@@ -27,9 +27,9 @@ export async function loadUsers() {
                                 <td>${(u.roles || []).map(r => getRoleText(r)).join(', ')}</td>
                                 <td><span class="badge ${u.isActive ? 'badge-success' : 'badge-danger'}">${u.isActive ? '激活' : '禁用'}</span></td>
                                 <td>
-                                    <button class="btn-small" onclick="editUser('${u._id}')">编辑</button>
-                                    <button class="btn-small" onclick="resetUserPassword('${u._id}', '${u.name}')" style="background: #f59e0b; color: white;">重置密码</button>
-                                    <button class="btn-small btn-danger" onclick="deleteUser('${u._id}')">删除</button>
+                                    <button class="btn-small" data-click="editUser('${u._id}')">编辑</button>
+                                    <button class="btn-small" data-click="resetUserPassword('${u._id}', '${u.name}')" style="background: #f59e0b; color: white;">重置密码</button>
+                                    <button class="btn-small btn-danger" data-click="deleteUser('${u._id}')">删除</button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -247,7 +247,7 @@ export async function editUser(userId) {
             </div>
             <div class="action-buttons">
                 <button type="submit">更新</button>
-                <button type="button" onclick="closeModal()">取消</button>
+                <button type="button" data-click="closeModal()">取消</button>
             </div>
         </form>
     `;
@@ -301,7 +301,7 @@ export async function resetUserPassword(userId, userName) {
                         <div style="display: flex; gap: 8px; align-items: center;">
                             <input type="text" id="newPasswordDisplay" value="${newPassword}" readonly 
                                    style="flex: 1; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; font-family: monospace; font-size: 14px; background: white;">
-                            <button type="button" onclick="copyPasswordToClipboard('${newPassword}')" 
+                            <button type="button" data-click="copyPasswordToClipboard('${newPassword}')" 
                                     style="padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer;">
                                 复制
                             </button>
@@ -311,7 +311,7 @@ export async function resetUserPassword(userId, userName) {
                         ⚠️ 请妥善保存并告知用户。用户首次登录时需要修改密码。
                     </p>
                     <div style="text-align: right;">
-                        <button type="button" onclick="closeModal()" style="padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                        <button type="button" data-click="closeModal()" style="padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer;">
                             确定
                         </button>
                     </div>

@@ -116,7 +116,7 @@ export async function loadKPI() {
                                         <td style="font-size: 12px;">${r.calculationDetails?.formula || ''}</td>
                                         ${(state.currentUser?.roles || []).includes('admin') ? `
                                             <td>
-                                                <button class="btn-small" onclick="showEvaluateModal('${r._id}', '${r.role}', '${r.evaluationLevel || 'medium'}')">
+                                                <button class="btn-small" data-click="showEvaluateModal('${r._id}', '${r.role}', '${r.evaluationLevel || 'medium'}')">
                                                     ${r.evaluatedBy ? '修改评价' : '评价'}
                                                 </button>
                                             </td>
@@ -169,7 +169,7 @@ export async function loadKPI() {
                                         <td style="font-size: 12px;">${r.calculationDetails?.formula || ''}</td>
                                         ${(state.currentUser?.roles || []).includes('admin') ? `
                                             <td>
-                                                <button class="btn-small" onclick="showEvaluateModal('${r._id}', '${r.role}', '${r.evaluationLevel || 'medium'}')">
+                                                <button class="btn-small" data-click="showEvaluateModal('${r._id}', '${r.role}', '${r.evaluationLevel || 'medium'}')">
                                                     ${r.evaluatedBy ? '修改评价' : '评价'}
                                                 </button>
                                             </td>
@@ -324,7 +324,7 @@ export function showEvaluateModal(recordId, role, currentLevel) {
             </div>
             <div class="action-buttons">
                 <button type="submit">提交</button>
-                <button type="button" class="btn-secondary" onclick="closeModal()">取消</button>
+                <button type="button" class="btn-secondary" data-click="closeModal()">取消</button>
             </div>
         </form>
     `;

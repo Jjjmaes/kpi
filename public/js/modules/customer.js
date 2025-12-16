@@ -21,8 +21,9 @@ export async function loadCustomers() {
 }
 
 function renderCustomersList(customers) {
-    const roles = state.currentUser?.roles || [];
-    const isAdmin = roles.includes('admin');
+    // 基于当前选择的角色判断UI权限
+    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    const isAdmin = currentRole === 'admin';
     const html = `
         <table>
             <thead>
@@ -47,8 +48,8 @@ function renderCustomersList(customers) {
                         <td>${c.email || '-'}</td>
                         <td><span class="badge ${c.isActive ? 'badge-success' : 'badge-danger'}">${c.isActive ? '激活' : '禁用'}</span></td>
                         <td>
-                            <button class="btn-small" onclick="editCustomer('${c._id}')">编辑</button>
-                            ${isAdmin ? `<button class="btn-small btn-danger" onclick="deleteCustomer('${c._id}')">删除</button>` : ''}
+                            <button class="btn-small" data-click="editCustomer('${c._id}')">编辑</button>
+                            ${isAdmin ? `<button class="btn-small btn-danger" data-click="deleteCustomer('${c._id}')">删除</button>` : ''}
                         </td>
                     </tr>
                 `).join('')}

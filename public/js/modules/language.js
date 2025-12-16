@@ -29,7 +29,7 @@ function renderLanguages() {
             <td>${lang.nativeName || '-'}</td>
             <td>${lang.isActive ? '<span class="badge badge-success">启用</span>' : '<span class="badge badge-danger">停用</span>'}</td>
             <td>
-                <button class="btn-small" onclick="showEditLanguageModal('${lang._id}')">编辑</button>
+                <button class="btn-small" data-click="showEditLanguageModal('${lang._id}')">编辑</button>
             </td>
         </tr>
     `).join('');
@@ -69,7 +69,7 @@ export function showCreateLanguageModal() {
             </div>
             <div class="action-buttons">
                 <button type="submit">创建</button>
-                <button type="button" onclick="closeModal()">取消</button>
+                <button type="button" data-click="closeModal()">取消</button>
             </div>
         </form>
     `;
@@ -128,7 +128,7 @@ export function showEditLanguageModal(id) {
             </div>
             <div class="action-buttons">
                 <button type="submit">保存</button>
-                <button type="button" onclick="closeModal()">取消</button>
+                <button type="button" data-click="closeModal()">取消</button>
             </div>
         </form>
     `;

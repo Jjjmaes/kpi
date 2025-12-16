@@ -794,7 +794,7 @@ export function addEditTargetLanguageRow(selectedValue = '') {
             </select>
         </div>
         <div style="flex: 0 0 auto;">
-            <button type="button" class="btn-small btn-danger" onclick="removeEditTargetLanguageRow('targetLanguageRow${targetLanguageRowIndex}')" style="margin-bottom: 0;">删除</button>
+            <button type="button" class="btn-small btn-danger" data-click="removeEditTargetLanguageRow('targetLanguageRow${targetLanguageRowIndex}')" style="margin-bottom: 0;">删除</button>
         </div>
     `;
     container.appendChild(row);
@@ -948,7 +948,7 @@ export async function showEditProjectModal() {
             <div class="form-group">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <label style="margin-bottom: 0;">目标语言 *</label>
-                    <button type="button" class="btn-small" onclick="addEditTargetLanguageRow()">+ 添加目标语种</button>
+                    <button type="button" class="btn-small" data-click="addEditTargetLanguageRow()">+ 添加目标语种</button>
                 </div>
                 <div id="editTargetLanguagesContainer" style="display: flex; flex-direction: column; gap: 8px;"></div>
                 <small style="color:#666; font-size: 12px; margin-top: 8px; display: block;">至少需要添加一个目标语种，支持一对多翻译</small>
@@ -1083,7 +1083,7 @@ export async function showEditProjectModal() {
             
             <div class="action-buttons">
                 <button type="submit">保存</button>
-                <button type="button" onclick="closeModal()">取消</button>
+                <button type="button" data-click="closeModal()">取消</button>
             </div>
         </form>
     `;
@@ -1198,11 +1198,15 @@ export async function viewProject(projectId) {
 
         const project = data.data;
         currentProjectDetail = project;
+        // 基于当前选择的角色判断UI权限，而不是用户拥有的所有角色
+        const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+        const isAdmin = currentRole === 'admin';
+        const isPM = currentRole === 'pm';
+        const isSales = currentRole === 'sales';
+        const isPartTimeSales = currentRole === 'part_time_sales';
+        // 对于财务权限，需要检查用户是否拥有财务角色（因为财务权限应该基于拥有的角色，而不是当前选择的角色）
         const roles = state.currentUser?.roles || [];
-        const isAdmin = roles.includes('admin');
-        const isPM = roles.includes('pm');
-        const isSales = roles.includes('sales');
-        const isPartTimeSales = roles.includes('part_time_sales');
+        const hasFinanceRole = roles.includes('finance') || roles.includes('admin');
 
         const canStart = isAdmin || isSales || isPartTimeSales;
         const canSchedule = isAdmin || isPM;
@@ -1211,10 +1215,10 @@ export async function viewProject(projectId) {
         const canEditDeleteExport = (isAdmin || isSales || isPartTimeSales) && !isPM;
         // 销售创建的项目，销售可以管理成员；管理员和项目经理可以管理所有项目的成员
         const canManageMembers = isAdmin || isPM || (isSales || isPartTimeSales) && project.createdBy?._id === state.currentUser?._id;
-        const canFinance = isFinanceRole();
+        const canFinance = hasFinanceRole;
 
         // 销售只能查看回款信息，不能修改；只有财务和管理员可以修改回款
-        const canManagePayment = roles.includes('admin') || roles.includes('finance');
+        const canManagePayment = hasFinanceRole;
         const canViewPayment = canManagePayment || project.createdBy?._id === state.currentUser?._id;
 
         const memberRoles = (project.members || []).reduce((acc, m) => {
@@ -1300,7 +1304,7 @@ export async function viewProject(projectId) {
                                     </div>
                                 </div>
                                 ${canManageMembers && project.status !== 'completed' ? `
-                                    <button class="btn-small" onclick="showSetLayoutCostModal('${projectId}')" style="margin-left: 10px;">
+                                    <button class="btn-small" data-click="showSetLayoutCostModal('${projectId}')" style="margin-left: 10px;">
                                         ${(project.partTimeLayout?.layoutCost || 0) > 0 ? '修改费用' : '设置费用'}
                                     </button>
                                 ` : ''}
@@ -1378,7 +1382,7 @@ export async function viewProject(projectId) {
                         <input type="number" id="projectPaymentAmount" placeholder="回款金额" style="padding:6px; width:140px;">
                         <input type="date" id="projectPaymentDate" style="padding:6px;">
                         <input type="text" id="projectPaymentRef" placeholder="凭证号/备注" style="padding:6px; min-width:160px;">
-                        <button class="btn-small" onclick="addProjectPayment('${projectId}')">新增回款</button>
+                        <button class="btn-small" data-click="addProjectPayment('${projectId}')">新增回款</button>
                     </div>
                     <div id="projectPaymentList"><div class="card-desc">加载中...</div></div>
                 </div>
@@ -1396,7 +1400,7 @@ export async function viewProject(projectId) {
                             <option value="normal">普票</option>
                             <option value="other">其他</option>
                         </select>
-                        <button class="btn-small" onclick="addProjectInvoice('${projectId}')">新增发票</button>
+                        <button class="btn-small" data-click="addProjectInvoice('${projectId}')">新增发票</button>
                     </div>
                     <div id="projectInvoiceList"><div class="card-desc">加载中...</div></div>
                 </div>
@@ -1406,7 +1410,7 @@ export async function viewProject(projectId) {
                     <div class="detail-section">
                         <h4>项目管理</h4>
                         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                            ${canStart ? `<button class="btn-small btn-success" ${startReached ? 'disabled' : ''} onclick="startProject('${projectId}')">开始项目</button>` : ''}
+                            ${canStart ? `<button class="btn-small btn-success" ${startReached ? 'disabled' : ''} data-click="startProject('${projectId}')">开始项目</button>` : ''}
                             ${canSetScheduled && project.status === 'scheduled' ? `<button class="btn-small" data-click="updateProjectStatus('${projectId}','in_progress','确认人员已安排完毕，项目开始执行？')">开始执行</button>` : ''}
                             ${canSetTranslationDone ? `<button class="btn-small" ${translationReached ? 'disabled' : ''} data-click="updateProjectStatus('${projectId}','translation_done','确认标记翻译完成？')">翻译完成</button>` : ''}
                             ${canSetReviewDone ? `<button class="btn-small" ${reviewReached ? 'disabled' : ''} data-click="updateProjectStatus('${projectId}','review_done','确认标记审校完成？')">审校完成</button>` : ''}
@@ -1418,9 +1422,9 @@ export async function viewProject(projectId) {
                             ` : ''}
                             ${(project.status === 'in_progress' || project.status === 'scheduled' || project.status === 'translation_done' || project.status === 'review_done' || project.status === 'layout_done') && canDeliver ? `<button class="btn-small btn-success" data-click="finishProject('${projectId}')">交付项目</button>` : ''}
                             ${canEditDeleteExport ? `
-                              <button class="btn-small" onclick="exportProjectQuotation('${projectId}')" style="background: #10b981;">📄 导出报价单</button>
-                              <button class="btn-small" onclick="showEditProjectModal()">编辑项目</button>
-                              <button class="btn-small btn-danger" onclick="deleteProject('${projectId}')">删除项目</button>
+                              <button class="btn-small" data-click="exportProjectQuotation('${projectId}')" style="background: #10b981;">📄 导出报价单</button>
+                              <button class="btn-small" data-click="showEditProjectModal()">编辑项目</button>
+                              <button class="btn-small btn-danger" data-click="deleteProject('${projectId}')">删除项目</button>
                             ` : ''}
                         </div>
                     </div>
@@ -1557,7 +1561,7 @@ export async function showSetLayoutCostModal(projectId) {
             </div>
             <div class="action-buttons">
                 <button type="submit">保存</button>
-                <button type="button" onclick="closeModal()">取消</button>
+                <button type="button" data-click="closeModal()">取消</button>
             </div>
         </form>
     `;
@@ -1622,15 +1626,12 @@ function initInlineCreateMemberForm() {
     const roleSelect = document.getElementById('inlineCreateMemberRole');
     if (!roleSelect) return;
     
-    // 获取可选择的角色
-    const roles = state.currentUser?.roles || [];
-    const currentRole = state.currentRole;
-    const isAdmin = roles.includes('admin');
-    const isPM = roles.includes('pm');
-    const isSales = roles.includes('sales');
-    const isPartTimeSales = roles.includes('part_time_sales');
-    const isCurrentSales = currentRole === 'sales';
-    const isCurrentPartTimeSales = currentRole === 'part_time_sales';
+    // 获取可选择的角色 - 基于当前选择的角色判断
+    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    const isAdmin = currentRole === 'admin';
+    const isPM = currentRole === 'pm';
+    const isSales = currentRole === 'sales';
+    const isPartTimeSales = currentRole === 'part_time_sales';
     
     let availableRoles;
     if (isAdmin) {
@@ -1643,17 +1644,17 @@ function initInlineCreateMemberForm() {
             { value: 'part_time_sales', label: '兼职销售' },
             { value: 'layout', label: '兼职排版' }
         ];
-    } else if (currentRole === 'pm' || isPM && !isCurrentSales && !isCurrentPartTimeSales) {
+    } else if (currentRole === 'pm') {
         availableRoles = [
             { value: 'translator', label: '翻译' },
             { value: 'reviewer', label: '审校' },
             { value: 'layout', label: '兼职排版' }
         ];
-    } else if (isCurrentSales || isCurrentPartTimeSales) {
-        availableRoles = [{ value: 'pm', label: '项目经理' }];
     } else if (isSales || isPartTimeSales) {
+        // 当前角色为销售/兼职销售：只能添加项目经理
         availableRoles = [{ value: 'pm', label: '项目经理' }];
     } else {
+        // 其他情况默认只能添加项目经理
         availableRoles = [{ value: 'pm', label: '项目经理' }];
     }
     
@@ -1703,12 +1704,27 @@ export function filterInlineCreateUsersByRole() {
         return;
     }
     
+    // 确保用户列表已加载
     if (!state.allUsers || state.allUsers.length === 0) {
         if (userIdSelect) userIdSelect.innerHTML = '<option value="">加载用户列表中...</option>';
+        // 尝试重新加载用户列表
+        apiFetch('/users').then(res => res.json()).then(data => {
+            if (data.success) {
+                state.allUsers = data.data;
+                // 重新过滤
+                filterInlineCreateUsersByRole();
+            } else {
+                if (userIdSelect) userIdSelect.innerHTML = '<option value="">用户列表加载失败</option>';
+            }
+        }).catch(err => {
+            console.error('加载用户列表失败:', err);
+            if (userIdSelect) userIdSelect.innerHTML = '<option value="">用户列表加载失败</option>';
+        });
         return;
     }
     
     const filteredUsers = state.allUsers.filter(user => {
+        if (!user.isActive) return false; // 只显示激活的用户
         if (!user.roles || !Array.isArray(user.roles)) return false;
         return user.roles.includes(role);
     });
@@ -1900,21 +1916,18 @@ export async function showAddMemberModalForCreate() {
         }
     }
     
-    // 检查用户角色，确定可选择的角色
-    const roles = state.currentUser?.roles || [];
-    const currentRole = state.currentRole;
-    const isAdmin = roles.includes('admin');
-    const isPM = roles.includes('pm');
-    const isSales = roles.includes('sales');
-    const isPartTimeSales = roles.includes('part_time_sales');
-    const isCurrentSales = currentRole === 'sales';
-    const isCurrentPartTimeSales = currentRole === 'part_time_sales';
+    // 检查用户角色，确定可选择的角色 - 基于当前选择的角色判断
+    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    const isAdmin = currentRole === 'admin';
+    const isPM = currentRole === 'pm';
+    const isSales = currentRole === 'sales';
+    const isPartTimeSales = currentRole === 'part_time_sales';
     
-    // 权限控制（按当前角色优先）：
+    // 权限控制（按当前角色）：
     // - 管理员：可以添加所有角色
     // - 当前角色为项目经理：只能添加翻译、审校、兼职排版
     // - 当前角色为销售或兼职销售：只能添加项目经理
-    // - 其他情况按原有角色列表回退
+    // - 其他情况默认只能添加项目经理
     let availableRoles;
     if (isAdmin) {
         availableRoles = [
@@ -1926,19 +1939,17 @@ export async function showAddMemberModalForCreate() {
             { value: 'part_time_sales', label: '兼职销售' },
             { value: 'layout', label: '兼职排版' }
         ];
-    } else if (currentRole === 'pm' || isPM && !isCurrentSales && !isCurrentPartTimeSales) {
+    } else if (currentRole === 'pm') {
         availableRoles = [
             { value: 'translator', label: '翻译' },
             { value: 'reviewer', label: '审校' },
             { value: 'layout', label: '兼职排版' }
         ];
-    } else if (isCurrentSales || isCurrentPartTimeSales) {
-        // 兼职销售/销售当前角色：只能添加PM
-        availableRoles = [{ value: 'pm', label: '项目经理' }];
     } else if (isSales || isPartTimeSales) {
-        // 拥有销售/兼职销售角色但当前角色不是它们，仍然限制为PM，避免越权
+        // 当前角色为销售/兼职销售：只能添加项目经理
         availableRoles = [{ value: 'pm', label: '项目经理' }];
     } else {
+        // 其他情况默认只能添加项目经理
         availableRoles = [{ value: 'pm', label: '项目经理' }];
     }
     

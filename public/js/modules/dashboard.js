@@ -92,12 +92,13 @@ export async function loadDashboard() {
 }
 
 function renderDashboardTodayInfo(data) {
-    const roles = state.currentUser?.roles || [];
-    const isSales = roles.includes('sales') || roles.includes('part_time_sales');
-    const isAdmin = roles.includes('admin');
-    const isFinance = roles.includes('finance');
-    const isPM = roles.includes('pm');
-    const isWorker = roles.includes('translator') || roles.includes('reviewer') || roles.includes('layout');
+    // 基于当前选择的角色判断，而不是用户拥有的所有角色
+    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    const isSales = currentRole === 'sales' || currentRole === 'part_time_sales';
+    const isAdmin = currentRole === 'admin';
+    const isFinance = currentRole === 'finance';
+    const isPM = currentRole === 'pm';
+    const isWorker = currentRole === 'translator' || currentRole === 'reviewer' || currentRole === 'layout';
     const showSalesAmount = isSales && !isAdmin && !isFinance;
     const showPMDelivery = isPM && !isAdmin && !isFinance;
 
@@ -221,10 +222,11 @@ function renderDashboardCards(data) {
     const recentPaymentOverdue = data.recentPaymentOverdue || 0;
     const recentDeliveryOverdue = data.recentDeliveryOverdue || 0;
 
-    const roles = state.currentUser?.roles || [];
-    const isSales = roles.includes('sales') || roles.includes('part_time_sales');
-    const isAdmin = roles.includes('admin');
-    const isFinance = roles.includes('finance');
+    // 基于当前选择的角色判断，而不是用户拥有的所有角色
+    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    const isSales = currentRole === 'sales' || currentRole === 'part_time_sales';
+    const isAdmin = currentRole === 'admin';
+    const isFinance = currentRole === 'finance';
     const showSalesAmount = isSales && !isAdmin && !isFinance;
     const showKPI = data.kpiTotal !== undefined || data.kpiByRole !== undefined;
 
@@ -239,7 +241,7 @@ function renderDashboardCards(data) {
                 </div>
             </div>
             ${showSalesAmount && data.totalProjectAmount !== undefined ? `
-            <div class="card stat-card stat-success">
+            <div class="card stat-card stat-success" data-click="navigateFromDashboardCard('projects')">
                 <div class="stat-icon">💰</div>
                 <div class="stat-content">
                     <div class="card-title">成交额合计</div>
@@ -360,10 +362,11 @@ function renderDashboardCards(data) {
 function renderDashboardCharts(data) {
     destroyCharts();
 
-    const roles = state.currentUser?.roles || [];
-    const isSales = roles.includes('sales') || roles.includes('part_time_sales');
-    const isAdmin = roles.includes('admin');
-    const isFinance = roles.includes('finance');
+    // 基于当前选择的角色判断，而不是用户拥有的所有角色
+    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    const isSales = currentRole === 'sales' || currentRole === 'part_time_sales';
+    const isAdmin = currentRole === 'admin';
+    const isFinance = currentRole === 'finance';
     const showSalesAmount = isSales && !isAdmin && !isFinance;
 
     const charts = [];
