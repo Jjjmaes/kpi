@@ -17,6 +17,7 @@ import { loadLanguages, showCreateLanguageModal, showEditLanguageModal, createLa
 import { loadBackups, createBackup, cleanupOldBackups, restoreBackup, deleteBackupFile } from './modules/backup.js';
 import { loadConfig, loadConfigHistory, loadPermissionsConfig, savePermissionsConfig, loadOrgInfo, viewConfigChange } from './modules/system.js';
 import { startNotificationPolling, stopNotificationPolling, toggleNotificationPanel, markAllNotificationsRead, initNotificationAudio } from './modules/notification.js';
+import { loadPaymentCompletionDetail, renderPaymentCompletionDetail, pcdPrevPage, pcdNextPage, pcdJumpPage, pcdToggleProject, pcdToggleOverdue } from './modules/paymentDetail.js';
 
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', async () => {
@@ -302,12 +303,22 @@ const SECTION_ROUTES = {
     },
     finance: {
         onEnter: async () => {
-            // 检查用户是否有财务查看权限
             const canViewFinance = hasPermission('finance.view');
-            
+
+            // 若来自回款完成率卡片，隐藏导航，直达回款记录
+            if (state.hideFinanceNav) {
+                state.salesFinanceView = true; // 即便有权限，也按照只看回款记录处理
+                try {
+                    const { showFinanceSection } = await import('./modules/finance.js');
+                    showFinanceSection('paymentRecords');
+                } catch (e) {
+                    console.warn('showFinanceSection (hide nav) failed:', e);
+                }
+                return;
+            }
+
             // 如果已经设置了salesFinanceView（比如从dashboard跳转），保持该状态
             if (state.salesFinanceView && !canViewFinance) {
-                // 销售视图已设置，直接显示回款记录
                 try {
                     const { showFinanceSection } = await import('./modules/finance.js');
                     showFinanceSection('paymentRecords');
@@ -319,7 +330,6 @@ const SECTION_ROUTES = {
             
             // 销售只读视图：只允许查看自己的回款列表
             if (!canViewFinance) {
-                // 如果没有财务查看权限，设置为销售视图
                 state.salesFinanceView = true;
                 try {
                     const { showFinanceSection } = await import('./modules/finance.js');
@@ -330,8 +340,7 @@ const SECTION_ROUTES = {
                 return;
             }
             
-            // 财务/管理员：预填充筛选（客户/项目/销售下拉等），并默认显示第一个card（应收对账）的内容
-            // 确保清除销售视图标记
+            // 财务/管理员：预填充筛选（客户/项目/销售下拉等），并默认显示应收对账
             state.salesFinanceView = false;
             try {
                 const { fillFinanceFilters } = await import('./modules/project.js');
@@ -341,13 +350,13 @@ const SECTION_ROUTES = {
             }
             try {
                 const { showFinanceSection } = await import('./modules/finance.js');
-                // 默认显示第一个card（应收对账）的内容
                 showFinanceSection('receivables');
             } catch (e) {
                 console.warn('showFinanceSection failed:', e);
             }
         }
     },
+    paymentDetail: { onEnter: async () => loadPaymentCompletionDetail() },
     config: { onEnter: async () => { if (hasPermission('system.config')) await loadConfig(); } },
     users: { onEnter: async () => { if (hasPermission('user.manage')) await loadUsers(); } },
     languages: { onEnter: async () => { if (hasPermission('system.config')) await loadLanguages(); } },
@@ -359,15 +368,11 @@ const SECTION_ROUTES = {
 async function goToSection(sectionId) {
     // 财务模块入口权限校验
     if (sectionId === 'finance') {
-        const canViewFinance = hasPermission('finance.view');
-        if (!canViewFinance) {
-            // 销售角色：允许查看自己的回款记录
-            // salesFinanceView 会在 finance.onEnter 中设置
-            // 这里不阻止访问，让 onEnter 处理
-        }
+        // 允许后续 onEnter 处理销售/财务视图
     } else {
-        // 离开财务页时重置销售只读视图标记
+        // 离开财务页时重置销售只读视图标记与导航显示
         if (state.salesFinanceView) state.salesFinanceView = false;
+        if (state.hideFinanceNav) state.hideFinanceNav = false;
     }
 
     showSection(sectionId);
@@ -398,6 +403,8 @@ const ACTIONS = Object.freeze({
     // Dashboard
     loadDashboard: () => loadDashboard(),
     navigateFromDashboardCard: (target, overrideStatus) => navigateFromDashboardCard(target, overrideStatus),
+    loadPaymentCompletionDetail: () => loadPaymentCompletionDetail(),
+    renderPaymentCompletionDetail: () => renderPaymentCompletionDetail(),
 
     // Projects（含列表渲染中动态按钮）
     loadProjects: () => loadProjects(),
@@ -542,6 +549,11 @@ const ACTIONS = Object.freeze({
     jumpPaymentRecordsProjectsPage: (page, maxPage) => jumpPaymentRecordsProjectsPage(page, maxPage),
     prevPaymentRecordsProjectsPage: () => prevPaymentRecordsProjectsPage(),
     nextPaymentRecordsProjectsPage: () => nextPaymentRecordsProjectsPage(),
+    pcdPrevPage: () => pcdPrevPage(),
+    pcdNextPage: () => pcdNextPage(),
+    pcdJumpPage: (page, total) => pcdJumpPage(page, total),
+    pcdToggleProject: (projectId) => pcdToggleProject(projectId),
+    pcdToggleOverdue: () => pcdToggleOverdue(),
     jumpInvoiceProjectsPage: (page, maxPage) => jumpInvoiceProjectsPage(page, maxPage),
     prevInvoiceProjectsPage: () => prevInvoiceProjectsPage(),
     nextInvoiceProjectsPage: () => nextInvoiceProjectsPage(),

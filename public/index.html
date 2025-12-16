@@ -110,6 +110,48 @@
                 <div id="dashboardCharts" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;"></div>
             </div>
 
+            <!-- 回款完成率详情（独立页面，不依赖财务导航） -->
+            <div id="paymentDetail" class="section">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+                    <div>
+                        <h2 style="margin:0;">回款完成率详情</h2>
+                        <p style="margin:4px 0 0;color:#666;">查看可见范围内项目的回款进度</p>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button class="btn-secondary" data-click="showSection('dashboard')">返回看板</button>
+                        <button data-click="loadPaymentCompletionDetail()" style="padding:6px 12px;">刷新</button>
+                    </div>
+                </div>
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-title">筛选</div>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
+                        <input type="month" id="pcdMonth" style="padding:6px; min-width:150px;" data-change="loadPaymentCompletionDetail()">
+                        <input type="date" id="pcdStartDate" style="padding:6px; min-width:150px;" placeholder="开始日期" data-change="loadPaymentCompletionDetail()">
+                        <input type="date" id="pcdEndDate" style="padding:6px; min-width:150px;" placeholder="结束日期" data-change="loadPaymentCompletionDetail()">
+                        <select id="pcdStatus" style="padding:6px;" data-change="loadPaymentCompletionDetail()">
+                            <option value="">全部状态</option>
+                            <option value="pending">待开始</option>
+                            <option value="in_progress">进行中</option>
+                            <option value="completed">已完成</option>
+                            <option value="cancelled">已取消</option>
+                        </select>
+                        <select id="pcdPaymentStatus" style="padding:6px;" data-change="loadPaymentCompletionDetail()">
+                            <option value="">全部回款状态</option>
+                            <option value="unpaid">未支付</option>
+                            <option value="partially_paid">部分支付</option>
+                            <option value="paid">已支付</option>
+                        </select>
+                        <select id="pcdPageSize" style="padding:6px;" data-change="renderPaymentCompletionDetail()">
+                            <option value="10">每页10</option>
+                            <option value="20">每页20</option>
+                            <option value="50">每页50</option>
+                        </select>
+                        <button class="btn-secondary" data-click="pcdToggleOverdue()">仅看逾期</button>
+                    </div>
+                    <div id="paymentCompletionList"></div>
+                </div>
+            </div>
+
             <!-- 财务管理 -->
             <div id="finance" class="section">
                 <h2>财务管理</h2>

@@ -1317,25 +1317,29 @@ export function showFinanceSection(sectionName) {
         el.style.display = 'none';
     });
 
-    // 根据权限显示/隐藏导航卡片
+    // 根据权限显示/隐藏导航卡片（支持从Dashboard回款完成率跳转时隐藏）
     const financeNav = document.getElementById('financeNavCards');
     if (financeNav) {
-        const navCards = financeNav.querySelectorAll('.finance-nav-card');
-        navCards.forEach(card => {
-            const cardSection = card.dataset.section;
-            // 销售只能看到回款记录，其他卡片都隐藏
-            if (isSalesView) {
-                if (cardSection === 'paymentRecords') {
-                    card.style.display = 'block';
+        if (state.hideFinanceNav) {
+            financeNav.style.display = 'none';
+        } else {
+            const navCards = financeNav.querySelectorAll('.finance-nav-card');
+            navCards.forEach(card => {
+                const cardSection = card.dataset.section;
+                // 销售只能看到回款记录，其他卡片都隐藏
+                if (isSalesView) {
+                    if (cardSection === 'paymentRecords') {
+                        card.style.display = 'block';
+                    } else {
+                        card.style.display = 'none';
+                    }
                 } else {
-                    card.style.display = 'none';
+                    // 财务/管理员可以看到所有卡片
+                    card.style.display = 'block';
                 }
-            } else {
-                // 财务/管理员可以看到所有卡片
-                card.style.display = 'block';
-            }
-        });
-        financeNav.style.display = 'grid';
+            });
+            financeNav.style.display = 'grid';
+        }
     }
 
     // 激活当前卡片
@@ -1343,7 +1347,7 @@ export function showFinanceSection(sectionName) {
         card.classList.toggle('active', card.dataset.section === sectionName);
     });
 
-    // 显示目标区块
+    // 显示目标区块（隐藏导航时只显示回款记录区域）
     const target = document.getElementById(`financeSection-${sectionName}`);
     if (target) target.style.display = 'block';
 

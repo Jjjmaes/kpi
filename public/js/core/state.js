@@ -21,6 +21,7 @@ export const state = {
     projectFilterRecentDeliveryOverdue: false, // 近7天交付逾期
     projectFilterRecentCompleted: false,
     salesFinanceView: false,
+    hideFinanceNav: false, // 控制财务页导航卡片显示
     // 后端筛选条件（用于判断前端是否需要再次过滤）
     backendFilters: null
 };

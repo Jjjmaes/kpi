@@ -1,5 +1,6 @@
 import { apiFetch } from '../core/api.js';
 import { showSection } from '../core/ui.js';
+import { loadPaymentCompletionDetail } from './paymentDetail.js';
 import { showToast, showAlert, getStatusText, getBusinessTypeText, getRoleText, hasPermission } from '../core/utils.js';
 import { state } from '../core/state.js';
 import { loadProjects, renderProjects } from './project.js';
@@ -764,41 +765,11 @@ export async function navigateFromDashboardCard(target, overrideStatus) {
             window.loadPaymentRecordsProjects?.();
             break;
         case 'receivables':
-            // 检查用户是否有财务查看权限
-            const hasFinanceView = hasPermission('finance.view');
-            if (!hasFinanceView) {
-                // 销售角色：只能查看自己创建的项目回款记录
-                // 先设置销售视图标记，避免finance.onEnter覆盖
-                state.salesFinanceView = true;
-                // 直接跳转到财务模块
-                showSection('finance');
-                // 使用setTimeout确保DOM已更新，并且finance.onEnter已执行
-                setTimeout(() => {
-                    // 再次确保设置销售视图标记（防止被覆盖）
-                    state.salesFinanceView = true;
-                    if (window.showFinanceSection) {
-                        window.showFinanceSection('paymentRecords');
-                    }
-                    applyFinanceMonth('paymentMonth');
-                    if (window.loadPaymentRecordsProjects) {
-                        window.loadPaymentRecordsProjects();
-                    }
-                }, 100);
-            } else {
-                // 财务/管理员：可以查看应收对账
-                // 确保清除销售视图标记
-                state.salesFinanceView = false;
-                showSection('finance');
-                setTimeout(() => {
-                    if (window.showFinanceSection) {
-                        window.showFinanceSection('receivables');
-                    }
-                    applyFinanceMonth('financeMonth');
-                    if (window.loadReceivables) {
-                        window.loadReceivables();
-                    }
-                }, 100);
-            }
+            // 跳转到独立的回款完成率详情页（不依赖财务导航）
+            state.hideFinanceNav = false;
+            state.salesFinanceView = false;
+            showSection('paymentDetail');
+            setTimeout(() => loadPaymentCompletionDetail(), 0);
             break;
         case 'deliveryOverdue':
             showSection('projects');
