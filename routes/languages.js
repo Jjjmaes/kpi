@@ -14,7 +14,14 @@ router.get('/', async (req, res) => {
     const list = await Language.find(query).sort({ name: 1 });
     res.json({ success: true, data: list });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
   }
 });
 
@@ -39,7 +46,16 @@ router.post('/', authorize('admin', 'pm', 'sales'), async (req, res) => {
 router.put('/:id', authorize('admin', 'pm', 'sales'), async (req, res) => {
   try {
     const lang = await Language.findById(req.params.id);
-    if (!lang) return res.status(404).json({ success: false, message: '语种不存在' });
+    if (!lang) {
+      return res.status(404).json({ 
+        success: false, 
+        error: {
+          code: 'NOT_FOUND',
+          message: '语种不存在',
+          statusCode: 404
+        }
+      });
+    }
     ['name', 'code', 'nativeName', 'isActive'].forEach(f => {
       if (req.body[f] !== undefined) lang[f] = req.body[f];
     });
@@ -59,7 +75,14 @@ router.delete('/:id', authorize('admin'), async (req, res) => {
     await Language.findByIdAndDelete(req.params.id);
     res.json({ success: true, message: '已删除' });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
   }
 });
 

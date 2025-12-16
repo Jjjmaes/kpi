@@ -830,10 +830,208 @@ async function calculateProjectRealtime(projectId) {
   };
 }
 
+/**
+ * 批量计算多个项目的实时KPI（优化N+1查询问题）
+ * @param {Array<String>} projectIds - 项目ID数组
+ * @returns {Object} 返回格式：{ projectId: { results: [...], month: '...' }, ... }
+ *                    results数组中包含所有成员的KPI，调用方需要根据需要进行过滤
+ */
+async function calculateProjectsRealtimeBatch(projectIds) {
+  if (!projectIds || projectIds.length === 0) {
+    return {};
+  }
+
+  // 1. 批量获取所有项目（一次性查询）
+  const projects = await Project.find({ _id: { $in: projectIds } });
+  if (projects.length === 0) {
+    return {};
+  }
+
+  // 2. 批量获取所有项目成员（一次性查询）
+  const allMembers = await ProjectMember.find({ 
+    projectId: { $in: projectIds } 
+  }).populate('userId');
+
+  // 按项目ID分组成员
+  const membersByProject = new Map();
+  allMembers.forEach(member => {
+    const projectId = member.projectId.toString();
+    if (!membersByProject.has(projectId)) {
+      membersByProject.set(projectId, []);
+    }
+    membersByProject.get(projectId).push(member);
+  });
+
+  // 3. 批量获取所有创建者信息（如果需要补充销售成员）
+  const creatorIds = [...new Set(projects.map(p => p.createdBy?.toString()).filter(Boolean))];
+  const creators = creatorIds.length > 0 
+    ? await User.find({ _id: { $in: creatorIds } })
+    : [];
+  const creatorsMap = new Map(creators.map(c => [c._id.toString(), c]));
+
+  // 4. 收集所有需要的月份，批量获取同月已完成项目（避免每个项目都查询）
+  const monthsSet = new Set();
+  projects.forEach(project => {
+    const targetDate = project.completedAt || new Date();
+    const month = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
+    monthsSet.add(month);
+  });
+
+  // 批量获取所有月份的全公司总额
+  const monthlyAmountsMap = new Map();
+  for (const month of monthsSet) {
+    const [year, monthNum] = month.split('-').map(Number);
+    const startDate = new Date(year, monthNum - 1, 1);
+    const endDate = new Date(year, monthNum, 0, 23, 59, 59);
+    
+    const monthlyProjects = await Project.find({
+      status: 'completed',
+      completedAt: {
+        $gte: startDate,
+        $lte: endDate
+      }
+    });
+    const totalCompanyAmount = monthlyProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0);
+    monthlyAmountsMap.set(month, totalCompanyAmount);
+  }
+
+  // 5. 批量计算所有项目的KPI
+  const results = {};
+
+  for (const project of projects) {
+    const projectId = project._id.toString();
+    
+    // 确定计算月份
+    const targetDate = project.completedAt || new Date();
+    const month = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
+    
+    // 获取项目成员
+    let members = membersByProject.get(projectId) || [];
+    
+    // 如果未显式添加销售成员，但创建人具备销售角色，自动补充
+    const hasSalesMember = members.some(m => m.role === 'sales');
+    if (!hasSalesMember && project.createdBy) {
+      const creator = creatorsMap.get(project.createdBy.toString());
+      if (creator && (creator.roles || []).includes('sales')) {
+        members.push({
+          userId: creator,
+          role: 'sales',
+          ratio_locked: project.locked_ratios?.sales_bonus,
+          wordRatio: 1.0,
+          translatorType: 'mtpe'
+        });
+      }
+    }
+
+    if (members.length === 0) {
+      results[projectId] = { count: 0, message: '项目没有成员，无法计算KPI', month, results: [] };
+      continue;
+    }
+
+    // 计算完成系数
+    const completionFactor = project.calculateCompletionFactor();
+    
+    // 获取全公司总额（用于综合岗）
+    const totalCompanyAmount = monthlyAmountsMap.get(month) || 0;
+
+    const projectResults = [];
+
+    for (const member of members) {
+      // 注意：这里不进行用户ID和角色过滤，因为批量计算需要返回所有成员的KPI
+      // 过滤逻辑在调用方（Dashboard API）中处理
+
+      const ratio = member.ratio_locked;
+      let effectiveRatio = ratio;
+      const wordRatio = member.wordRatio || 1.0;
+      const translatorType = member.translatorType || 'mtpe';
+
+      let kpiResult;
+
+      if (member.role === 'sales') {
+        const salesCompletion = calculateCompletionFactorForSales(project);
+        const salesResult = calculateSalesCombined(project, salesCompletion);
+        effectiveRatio = project.locked_ratios?.sales_bonus || 0;
+        kpiResult = {
+          kpiValue: salesResult.kpiValue,
+          formula: salesResult.formula,
+          bonusPart: salesResult.bonusPart,
+          commissionPart: salesResult.commissionPart
+        };
+      } else if (member.role === 'part_time_sales') {
+        const commission = project.calculatePartTimeSalesCommission();
+        const totalAmount = project.projectAmount || 0;
+        const companyReceivable = project.partTimeSales?.companyReceivable || 0;
+        const taxRate = project.partTimeSales?.taxRate || 0;
+        const receivableAmount = totalAmount - companyReceivable;
+        const taxAmount = receivableAmount * taxRate;
+        
+        kpiResult = {
+          kpiValue: commission,
+          formula: `成交额(${totalAmount}) - 公司应收(${companyReceivable}) = 应收金额(${receivableAmount})；应收金额(${receivableAmount}) - 税费(${taxAmount.toFixed(2)}) = 返还佣金(${commission})`
+        };
+      } else if (member.role === 'layout') {
+        const layoutCost = project.partTimeLayout?.layoutCost || 0;
+        kpiResult = {
+          kpiValue: layoutCost,
+          formula: `排版费用：${layoutCost}元`
+        };
+      } else if (member.role === 'admin_staff' || member.role === 'finance') {
+        kpiResult = {
+          kpiValue: 0,
+          formula: '综合岗/财务岗KPI需要按月汇总计算，使用管理员评价的完成系数'
+        };
+      } else {
+        kpiResult = calculateKPIByRole({
+          role: member.role,
+          projectAmount: project.projectAmount,
+          ratio: effectiveRatio,
+          wordRatio,
+          completionFactor,
+          translatorType
+        });
+      }
+
+      kpiResult.formula = appendComplaintNote(kpiResult.formula, project);
+
+      projectResults.push({
+        userId: member.userId?._id,
+        userName: member.userId?.name,
+        role: member.role,
+        kpiValue: kpiResult.kpiValue,
+        formula: member.role === 'sales' ? kpiResult.formula : appendComplaintNote(kpiResult.formula, project),
+        details: {
+          projectAmount: member.role === 'admin_staff' ? totalCompanyAmount : project.projectAmount,
+          ratio: effectiveRatio,
+          wordRatio: member.role === 'translator' ? wordRatio : undefined,
+          completionFactor: member.role === 'sales' ? calculateCompletionFactorForSales(project) : completionFactor,
+          translatorType: member.role === 'translator' ? translatorType : undefined,
+          salesBonus: member.role === 'sales' ? kpiResult.bonusPart : undefined,
+          salesCommission: member.role === 'sales' ? kpiResult.commissionPart : undefined
+        }
+      });
+    }
+
+    results[projectId] = {
+      count: projectResults.length,
+      month,
+      project: {
+        id: project._id,
+        projectName: project.projectName,
+        projectAmount: project.projectAmount,
+        completionFactor
+      },
+      results: projectResults
+    };
+  }
+
+  return results;
+}
+
 module.exports = {
   generateMonthlyKPIRecords,
   getUserMonthlyKPI,
   generateProjectKPI,
-  calculateProjectRealtime
+  calculateProjectRealtime,
+  calculateProjectsRealtimeBatch
 };
 

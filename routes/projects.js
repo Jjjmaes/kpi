@@ -13,22 +13,11 @@ const { getUserProjectIds } = require('../utils/projectUtils');
 const { createProjectValidation, handleValidationErrors } = require('../validators/projectValidator');
 const { checkProjectAccess, canModifyProject, canAddMember, canRemoveMember } = require('../utils/projectAccess');
 const projectService = require('../services/projectService');
-
-// 判断是否为仅交付角色（翻译/审校/排版），无查看客户信息权限
-function isDeliveryOnlyUser(user, currentRole) {
-  if (currentRole) {
-    // 基于当前角色判断
-    const restricted = ['translator', 'reviewer', 'layout'];
-    return restricted.includes(currentRole);
-  }
-  // 向后兼容：基于所有角色判断
-  const roles = user?.roles || [];
-  const restricted = ['translator', 'reviewer', 'layout'];
-  const privileged = ['admin', 'finance', 'pm', 'sales', 'part_time_sales', 'admin_staff'];
-  const hasRestricted = roles.some(r => restricted.includes(r));
-  const hasPrivileged = roles.some(r => privileged.includes(r));
-  return hasRestricted && !hasPrivileged;
-}
+const { 
+  isDeliveryOnlyUser, 
+  canModifyProject: canModifyProjectCheck, 
+  canDeleteProject 
+} = require('../utils/permissionChecker');
 
 // 对项目数据脱敏客户信息
 function scrubCustomerInfo(project) {
@@ -91,13 +80,7 @@ router.post('/create',
 // 更新项目（管理员、销售、兼职销售；含PM身份的销售也不可编辑）
 router.put('/:id', authorize('admin', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
   // 权限检查：管理员或纯销售可修改
-  const isAdmin = req.user.roles.includes('admin');
-  const isSales = req.user.roles.includes('sales');
-  const isPartTimeSales = req.user.roles.includes('part_time_sales');
-  const isPM = req.user.roles.includes('pm');
-  const isAllowedRole = isAdmin || ((isSales || isPartTimeSales) && !isPM);
-  
-  if (!isAllowedRole) {
+  if (!canModifyProjectCheck(req)) {
     throw new AppError('仅管理员或纯销售可修改项目', 403, 'PERMISSION_DENIED');
   }
 
@@ -114,13 +97,7 @@ router.put('/:id', authorize('admin', 'sales', 'part_time_sales'), asyncHandler(
 // 取消/删除项目（管理员、销售、兼职销售；含PM身份的销售也不可删除）
 router.delete('/:id', authorize('admin', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
   // 权限检查：管理员或纯销售可删除
-  const isAdmin = req.user.roles.includes('admin');
-  const isSales = req.user.roles.includes('sales');
-  const isPartTimeSales = req.user.roles.includes('part_time_sales');
-  const isPM = req.user.roles.includes('pm');
-  const isAllowedRole = isAdmin || ((isSales || isPartTimeSales) && !isPM);
-  
-  if (!isAllowedRole) {
+  if (!canDeleteProject(req)) {
     throw new AppError('仅管理员或纯销售可删除项目', 403, 'PERMISSION_DENIED');
   }
 
@@ -243,7 +220,7 @@ router.get('/', asyncHandler(async (req, res) => {
     }
 
     // 基于当前角色判断是否需要脱敏客户信息
-    const isDeliveryOnly = isDeliveryOnlyUser(req.user, req.currentRole);
+    const isDeliveryOnly = isDeliveryOnlyUser(req);
     const data = isDeliveryOnly ? projects.map(scrubCustomerInfo) : projects;
 
     res.json({

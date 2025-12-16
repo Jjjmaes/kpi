@@ -47,17 +47,20 @@ function errorHandler(err, req, res, next) {
     ? err.message
     : '服务器内部错误，请稍后重试';
   
-  // 构建错误响应
+  // 构建统一格式的错误响应
   const errorResponse = {
     success: false,
-    message,
-    code
+    error: {
+      code,
+      message,
+      statusCode
+    }
   };
   
-  // 开发环境返回堆栈信息
+  // 开发环境返回堆栈信息和额外详情
   if (isDevelopment) {
-    errorResponse.stack = err.stack;
-    errorResponse.details = {
+    errorResponse.error.stack = err.stack;
+    errorResponse.error.details = {
       url: req.url,
       method: req.method,
       userId: req.user?._id?.toString()

@@ -1,6 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, authorize, getCurrentPermission } = require('../middleware/auth');
+const { 
+  isAdmin, 
+  isFinance, 
+  isSales, 
+  isPM, 
+  canViewAllProjects, 
+  canViewAllKPI, 
+  canViewAmount 
+} = require('../utils/permissionChecker');
 const KpiRecord = require('../models/KpiRecord');
 const MonthlyRoleKPI = require('../models/MonthlyRoleKPI');
 const Project = require('../models/Project');
@@ -8,7 +17,7 @@ const ProjectMember = require('../models/ProjectMember');
 const User = require('../models/User');
 const { calculateKPIByRole } = require('../utils/kpiCalculator');
 const { calculateAdminStaff, calculateFinance } = require('../utils/kpiCalculator');
-const { generateMonthlyKPIRecords, generateProjectKPI, calculateProjectRealtime } = require('../services/kpiService');
+const { generateMonthlyKPIRecords, generateProjectKPI, calculateProjectRealtime, calculateProjectsRealtimeBatch } = require('../services/kpiService');
 const { exportMonthlyKPISheet, exportUserKPIDetail } = require('../services/excelService');
 
 // 所有KPI路由需要认证
@@ -31,17 +40,10 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
     const kpiViewPerm = getCurrentPermission(req, 'kpi.view');
     const projectViewPerm = getCurrentPermission(req, 'project.view');
     const financeViewPerm = getCurrentPermission(req, 'finance.view');
-    
-    const isAdmin = currentRole === 'admin';
-    const isFinance = currentRole === 'finance';
-    const isSales = currentRole === 'sales' || currentRole === 'part_time_sales';
-    const isPM = currentRole === 'pm';
-    // 管理员、财务、销售和兼职销售可以查看项目金额（成交额）
-    const canViewAmount = isAdmin || isFinance || isSales;
 
     // 项目可见性 - 基于当前角色的权限
     let projectQuery = {};
-    if (projectViewPerm === 'all') {
+    if (canViewAllProjects(req)) {
       // 可以查看所有项目，不需要过滤
     } else if (projectViewPerm === 'sales') {
       // 只看自己创建的项目
@@ -216,8 +218,13 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
       });
     }
     
-    // 4. 实时计算KPI（按项目和角色分别计算）
+    // 4. 实时计算KPI（批量优化，避免N+1查询）
     // 注意：综合岗和财务岗跳过项目级计算，将在步骤5中按月汇总计算
+    
+    // 收集需要实时计算的项目ID和角色信息
+    const projectsToCalculate = [];
+    const projectRoleKeys = [];
+    
     for (const [key, member] of projectRoleMap) {
       const [projectId, role] = key.split('_');
       
@@ -231,19 +238,32 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
         continue;
       }
       
+      // 检查是否已经在kpiRecords中（避免重复计算）
+      const alreadyInRecords = kpiRecords.some(r => {
+        const rProjectId = r.projectId?._id ? r.projectId._id.toString() : 
+                          (r.projectId ? r.projectId.toString() : null);
+        return rProjectId === projectId && r.role === role;
+      });
+      
+      if (!alreadyInRecords) {
+        if (!projectsToCalculate.includes(projectId)) {
+          projectsToCalculate.push(projectId);
+        }
+        projectRoleKeys.push({ projectId, role, key });
+      }
+    }
+    
+    // 批量计算实时KPI（优化N+1查询）
+    if (projectsToCalculate.length > 0) {
       try {
-        // 检查是否已经在kpiRecords中（避免重复计算）
-        const alreadyInRecords = kpiRecords.some(r => {
-          const rProjectId = r.projectId?._id ? r.projectId._id.toString() : 
-                            (r.projectId ? r.projectId.toString() : null);
-          return rProjectId === projectId && r.role === role;
-        });
+        const batchResults = await calculateProjectsRealtimeBatch(projectsToCalculate);
         
-        if (!alreadyInRecords) {
-          const realtimeResult = await calculateProjectRealtime(projectId);
-          if (realtimeResult && realtimeResult.results && realtimeResult.results.length > 0) {
+        // 从批量结果中提取当前用户的KPI
+        for (const { projectId, role } of projectRoleKeys) {
+          const projectResult = batchResults[projectId];
+          if (projectResult && projectResult.results && projectResult.results.length > 0) {
             // 只累加当前用户在当前项目中的当前角色的KPI
-            for (const result of realtimeResult.results) {
+            for (const result of projectResult.results) {
               const resultUserId = result.userId?._id ? result.userId._id.toString() : 
                                   (result.userId ? result.userId.toString() : null);
               const currentUserId = req.user._id.toString();
@@ -260,7 +280,32 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
           }
         }
       } catch (error) {
-        console.error(`[Dashboard] 计算项目 ${projectId} 角色 ${role} 的实时KPI失败:`, error.message);
+        console.error('[Dashboard] 批量计算实时KPI失败:', error.message, error.stack);
+        // 如果批量计算失败，降级为单个计算（向后兼容）
+        console.warn('[Dashboard] 降级为单个计算模式');
+        for (const { projectId, role } of projectRoleKeys) {
+          try {
+            const realtimeResult = await calculateProjectRealtime(projectId);
+            if (realtimeResult && realtimeResult.results && realtimeResult.results.length > 0) {
+              for (const result of realtimeResult.results) {
+                const resultUserId = result.userId?._id ? result.userId._id.toString() : 
+                                    (result.userId ? result.userId.toString() : null);
+                const currentUserId = req.user._id.toString();
+                
+                if (resultUserId === currentUserId && result.role === role) {
+                  if (result.kpiValue && result.kpiValue > 0) {
+                    if (!kpiByRole[result.role]) {
+                      kpiByRole[result.role] = 0;
+                    }
+                    kpiByRole[result.role] += result.kpiValue;
+                  }
+                }
+              }
+            }
+          } catch (singleError) {
+            console.error(`[Dashboard] 计算项目 ${projectId} 角色 ${role} 的实时KPI失败:`, singleError.message);
+          }
+        }
       }
     }
     
@@ -370,7 +415,7 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
     }
     
     let kpiTrend = [];
-    if (isSales && !isAdmin && !isFinance) {
+    if (isSales(req) && !isAdmin(req) && !isFinance(req)) {
       // 销售和兼职销售：计算成交额趋势（基于项目金额）
       for (const month of trendMonths) {
         const [year, monthNum] = month.split('-');
@@ -483,7 +528,7 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
     let todayDelivery = null; // 今日进入交付（销售和兼职销售）
     let todayMyDueProjects = null; // 今日本人应完成项目（翻译、审校、排版）
 
-    if (isSales && !isAdmin && !isFinance) {
+    if (isSales(req) && !isAdmin(req) && !isFinance(req)) {
       // 销售和兼职销售：今日成交和进入交付
       // 今日成交：今天创建的项目
       const todayCreatedQuery = { ...projectQuery };
@@ -505,7 +550,7 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
         count: todayDueProjects.length,
         amount: todayDueProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0)
       };
-    } else if (isPM && !isAdmin && !isFinance) {
+    } else if (isPM(req) && !isAdmin(req) && !isFinance(req)) {
       // 项目经理：今日待交付项目（deadline是今天，且项目经理是PM成员）
       const todayDueQuery = {
         deadline: { $gte: today, $lt: tomorrow },
@@ -928,21 +973,34 @@ router.get('/project/:projectId/realtime', authorize('admin', 'finance', 'pm', '
 
     const project = await Project.findById(projectId);
     if (!project) {
-      return res.status(404).json({ success: false, message: '项目不存在' });
+      return res.status(404).json({ 
+        success: false, 
+        error: {
+          code: 'PROJECT_NOT_FOUND',
+          message: '项目不存在',
+          statusCode: 404
+        }
+      });
     }
 
-    const isAdmin = req.user.roles.includes('admin') || req.user.roles.includes('finance');
     const isCreator = project.createdBy.toString() === req.user._id.toString();
     const isMember = await ProjectMember.findOne({ projectId, userId: req.user._id });
 
-    if (!isAdmin && !isCreator && !isMember) {
-      return res.status(403).json({ success: false, message: '无权查看该项目KPI' });
+    if (!isAdminOrFinance(req) && !isCreator && !isMember) {
+      return res.status(403).json({ 
+        success: false, 
+        error: {
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: '无权查看该项目KPI',
+          statusCode: 403
+        }
+      });
     }
 
     const data = await calculateProjectRealtime(projectId);
 
     // 非财务/管理员仅返回自己的预估KPI
-    if (!isAdmin) {
+    if (!isAdminOrFinance(req)) {
       data.results = (data.results || []).filter(r => r.userId.toString() === req.user._id.toString());
       data.count = data.results.length;
     }

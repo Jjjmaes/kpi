@@ -1,6 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, authorize, getCurrentPermission } = require('../middleware/auth');
+const { 
+  isAdmin, 
+  isFinance, 
+  isAdminOrFinance, 
+  canViewAllFinance, 
+  canManageFinance 
+} = require('../utils/permissionChecker');
 const Project = require('../models/Project');
 const ProjectMember = require('../models/ProjectMember');
 const PaymentRecord = require('../models/PaymentRecord');
@@ -21,21 +28,17 @@ router.get('/receivables', allowViewFinance, async (req, res) => {
     const { customerId, status, dueBefore, salesId, paymentStatus, hasInvoice, expectedStartDate, expectedEndDate } = req.query;
     
     // 基于当前角色进行权限判断
-    const currentRole = req.currentRole;
     const financeViewPerm = getCurrentPermission(req, 'finance.view');
-    const isAdmin = currentRole === 'admin';
-    const isFinance = currentRole === 'finance';
-    const isAdminOrFinance = isAdmin || isFinance;
     
     // 收集所有基础条件
     const baseConditions = {};
     if (customerId) baseConditions.customerId = customerId;
     
     // 根据财务查看权限过滤项目
-    if (financeViewPerm === true || financeViewPerm === 'all') {
+    if (canViewAllFinance(req)) {
       // 可以查看所有财务数据，财务/管理员可按销售筛选
-      if (salesId && isAdminOrFinance) baseConditions.createdBy = salesId;
-    } else if (financeViewPerm === 'sales' || (!financeViewPerm && (currentRole === 'sales' || currentRole === 'part_time_sales'))) {
+      if (salesId && isAdminOrFinance(req)) baseConditions.createdBy = salesId;
+    } else if (financeViewPerm === 'sales' || (!financeViewPerm && (req.currentRole === 'sales' || req.currentRole === 'part_time_sales'))) {
       // 只能查看自己创建的项目（销售角色即使没有finance.view权限，也可以查看自己的项目回款）
       baseConditions.createdBy = req.user._id;
     } else {
@@ -195,7 +198,14 @@ router.get('/receivables', allowViewFinance, async (req, res) => {
       data
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
   }
 });
 
@@ -205,10 +215,26 @@ router.post('/payment/:projectId', allowManageFinance, async (req, res) => {
     const { projectId } = req.params;
     const { amount, receivedAt, method, reference, invoiceNumber, note } = req.body;
     if (!amount || amount <= 0 || !receivedAt) {
-      return res.status(400).json({ success: false, message: '回款金额和日期必填' });
+      return res.status(400).json({ 
+        success: false, 
+        error: {
+          code: 'MISSING_REQUIRED_FIELDS',
+          message: '回款金额和日期必填',
+          statusCode: 400
+        }
+      });
     }
     const project = await Project.findById(projectId);
-    if (!project) return res.status(404).json({ success: false, message: '项目不存在' });
+    if (!project) {
+      return res.status(404).json({ 
+        success: false, 
+        error: {
+          code: 'PROJECT_NOT_FOUND',
+          message: '项目不存在',
+          statusCode: 404
+        }
+      });
+    }
 
     const paymentAmount = Number(amount);
     const projectAmount = project.projectAmount || 0;
@@ -271,7 +297,14 @@ router.post('/payment/:projectId', allowManageFinance, async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
   }
 });
 
@@ -284,15 +317,27 @@ router.get('/payment/:projectId', allowViewFinance, async (req, res) => {
     // 获取项目信息
     const project = await Project.findById(projectId).select('projectAmount payment createdBy');
     if (!project) {
-      return res.status(404).json({ success: false, message: '项目不存在' });
+      return res.status(404).json({ 
+        success: false, 
+        error: {
+          code: 'PROJECT_NOT_FOUND',
+          message: '项目不存在',
+          statusCode: 404
+        }
+      });
     }
     
-    const roles = req.user.roles || [];
-    const isAdminOrFinance = roles.includes('admin') || roles.includes('finance');
-    if (!isAdminOrFinance) {
+    if (!isAdminOrFinance(req)) {
       const isOwner = project.createdBy?.toString() === req.user._id.toString();
       if (!isOwner) {
-        return res.status(403).json({ success: false, message: '无权查看该项目回款' });
+        return res.status(403).json({ 
+          success: false, 
+          error: {
+            code: 'INSUFFICIENT_PERMISSIONS',
+            message: '无权查看该项目回款',
+            statusCode: 403
+          }
+        });
       }
     }
     
@@ -349,7 +394,14 @@ router.get('/payment/:projectId', allowViewFinance, async (req, res) => {
     
     res.json({ success: true, data: records });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
   }
 });
 
@@ -358,7 +410,16 @@ router.delete('/payment/:recordId', allowManageFinance, async (req, res) => {
   try {
     const { recordId } = req.params;
     const rec = await PaymentRecord.findById(recordId);
-    if (!rec) return res.status(404).json({ success: false, message: '记录不存在' });
+    if (!rec) {
+      return res.status(404).json({ 
+        success: false, 
+        error: {
+          code: 'PAYMENT_NOT_FOUND',
+          message: '记录不存在',
+          statusCode: 404
+        }
+      });
+    }
     const projectId = rec.projectId;
     const amount = rec.amount || 0;
     await PaymentRecord.deleteOne({ _id: recordId });
@@ -388,7 +449,14 @@ router.delete('/payment/:recordId', allowManageFinance, async (req, res) => {
     }
     res.json({ success: true, message: '回款记录已删除并已回滚项目回款' });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
   }
 });
 
@@ -398,11 +466,27 @@ router.post('/invoice/:projectId', allowManageFinance, async (req, res) => {
     const { projectId } = req.params;
     const { invoiceNumber, amount, issueDate, status, type, note } = req.body;
     if (!invoiceNumber || !amount || !issueDate) {
-      return res.status(400).json({ success: false, message: '发票号、金额、开票日期必填' });
+      return res.status(400).json({ 
+        success: false, 
+        error: {
+          code: 'MISSING_REQUIRED_FIELDS',
+          message: '发票号、金额、开票日期必填',
+          statusCode: 400
+        }
+      });
     }
     
     const project = await Project.findById(projectId);
-    if (!project) return res.status(404).json({ success: false, message: '项目不存在' });
+    if (!project) {
+      return res.status(404).json({ 
+        success: false, 
+        error: {
+          code: 'PROJECT_NOT_FOUND',
+          message: '项目不存在',
+          statusCode: 404
+        }
+      });
+    }
     
     const invoiceAmount = Number(amount);
     const projectAmount = project.projectAmount || 0;
@@ -445,7 +529,14 @@ router.post('/invoice/:projectId', allowManageFinance, async (req, res) => {
     // 检查发票号是否已存在
     const existingInvoice = await Invoice.findOne({ invoiceNumber });
     if (existingInvoice) {
-      return res.status(400).json({ success: false, message: '发票号已存在' });
+      return res.status(400).json({ 
+        success: false, 
+        error: {
+          code: 'DUPLICATE_ENTRY',
+          message: '发票号已存在',
+          statusCode: 400
+        }
+      });
     }
     
     const invoice = await Invoice.create({
@@ -461,7 +552,14 @@ router.post('/invoice/:projectId', allowManageFinance, async (req, res) => {
     
     res.json({ success: true, data: invoice });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
   }
 });
 
@@ -471,10 +569,28 @@ router.put('/invoice/:invoiceId', allowManageFinance, async (req, res) => {
     const { invoiceId } = req.params;
     const invoice = await Invoice.findById(invoiceId)
       .populate('projectId', 'projectName projectNumber projectAmount customerId');
-    if (!invoice) return res.status(404).json({ success: false, message: '发票不存在' });
+    if (!invoice) {
+      return res.status(404).json({ 
+        success: false, 
+        error: {
+          code: 'INVOICE_NOT_FOUND',
+          message: '发票不存在',
+          statusCode: 404
+        }
+      });
+    }
     
     const project = invoice.projectId;
-    if (!project) return res.status(404).json({ success: false, message: '项目不存在' });
+    if (!project) {
+      return res.status(404).json({ 
+        success: false, 
+        error: {
+          code: 'PROJECT_NOT_FOUND',
+          message: '项目不存在',
+          statusCode: 404
+        }
+      });
+    }
     
     const projectAmount = project.projectAmount || 0;
     
@@ -526,7 +642,14 @@ router.put('/invoice/:invoiceId', allowManageFinance, async (req, res) => {
         _id: { $ne: invoiceId }
       });
       if (existingInvoice) {
-        return res.status(400).json({ success: false, message: '发票号已存在' });
+        return res.status(400).json({ 
+        success: false, 
+        error: {
+          code: 'DUPLICATE_ENTRY',
+          message: '发票号已存在',
+          statusCode: 400
+        }
+      });
       }
     }
     
@@ -538,7 +661,14 @@ router.put('/invoice/:invoiceId', allowManageFinance, async (req, res) => {
     await invoice.save();
     res.json({ success: true, data: invoice });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
   }
 });
 
@@ -552,16 +682,21 @@ router.get('/invoice', allowViewFinance, async (req, res) => {
     if (type) query.type = type;
     
     // 权限控制：sale只能查看自己项目的发票
-    const roles = req.user.roles || [];
-    const isAdminOrFinance = roles.includes('admin') || roles.includes('finance');
-    if (!isAdminOrFinance) {
+    if (!isAdminOrFinance(req)) {
       // sale角色：只能查看自己创建的项目
       const projects = await Project.find({ createdBy: req.user._id }).select('_id');
       const projectIds = projects.map(p => p._id);
       if (projectId) {
         // 如果指定了projectId，检查是否属于该用户
         if (!projectIds.some(id => id.toString() === projectId)) {
-          return res.status(403).json({ success: false, message: '无权查看该项目发票' });
+          return res.status(403).json({ 
+          success: false, 
+          error: {
+            code: 'INSUFFICIENT_PERMISSIONS',
+            message: '无权查看该项目发票',
+            statusCode: 403
+          }
+        });
         }
       } else {
         // 如果没有指定projectId，只查询该用户的项目
@@ -574,7 +709,14 @@ router.get('/invoice', allowViewFinance, async (req, res) => {
       .sort({ issueDate: -1 });
     res.json({ success: true, data: list });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
   }
 });
 
@@ -589,7 +731,14 @@ router.get('/kpi/pending', allowManageFinance, async (req, res) => {
       .populate('projectId', 'projectName');
     res.json({ success: true, data: list });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
   }
 });
 
@@ -653,7 +802,14 @@ router.get('/reports/summary', allowManageFinance, async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
   }
 });
 
@@ -752,7 +908,14 @@ router.get('/reconciliation', allowManageFinance, async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
   }
 });
 
@@ -762,16 +925,11 @@ router.get('/receivables/export', allowViewFinance, async (req, res) => {
     const iconv = require('iconv-lite');
     const { customerId, status, dueBefore, salesId, paymentStatus, hasInvoice, expectedStartDate, expectedEndDate } = req.query;
     
-    const roles = req.user.roles || [];
-    const isAdmin = roles.includes('admin');
-    const isFinance = roles.includes('finance');
-    const isAdminOrFinance = isAdmin || isFinance;
-    
     // 使用与/receivables相同的查询逻辑
     const baseConditions = {};
     if (customerId) baseConditions.customerId = customerId;
-    if (salesId && isAdminOrFinance) baseConditions.createdBy = salesId;
-    if (!isAdminOrFinance) {
+    if (salesId && isAdminOrFinance(req)) baseConditions.createdBy = salesId;
+    if (!isAdminOrFinance(req)) {
       baseConditions.createdBy = req.user._id;
     }
     if (status) {

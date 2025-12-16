@@ -10,7 +10,11 @@ const authenticate = async (req, res, next) => {
     if (!token) {
       return res.status(401).json({ 
         success: false, 
-        message: '未提供认证令牌' 
+        error: {
+          code: 'UNAUTHORIZED',
+          message: '未提供认证令牌',
+          statusCode: 401
+        }
       });
     }
 
@@ -20,7 +24,11 @@ const authenticate = async (req, res, next) => {
     if (!user || !user.isActive) {
       return res.status(401).json({ 
         success: false, 
-        message: '用户不存在或已被禁用' 
+        error: {
+          code: user ? 'USER_DISABLED' : 'USER_NOT_FOUND',
+          message: '用户不存在或已被禁用',
+          statusCode: 401
+        }
       });
     }
 
@@ -48,7 +56,11 @@ const authenticate = async (req, res, next) => {
   } catch (error) {
     return res.status(401).json({ 
       success: false, 
-      message: '无效的认证令牌' 
+      error: {
+        code: 'INVALID_TOKEN',
+        message: '无效的认证令牌',
+        statusCode: 401
+      }
     });
   }
 };
@@ -59,7 +71,11 @@ const authorize = (...roles) => {
     if (!req.user) {
       return res.status(401).json({ 
         success: false, 
-        message: '未认证' 
+        error: {
+          code: 'UNAUTHORIZED',
+          message: '未认证',
+          statusCode: 401
+        }
       });
     }
 
@@ -77,7 +93,11 @@ const authorize = (...roles) => {
     if (!hasRole) {
       return res.status(403).json({ 
         success: false, 
-        message: '权限不足' 
+        error: {
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: '权限不足',
+          statusCode: 403
+        }
       });
     }
 
@@ -91,7 +111,11 @@ const requirePermission = (permission) => {
     if (!req.user || !req.currentRole) {
       return res.status(401).json({ 
         success: false, 
-        message: '未认证' 
+        error: {
+          code: 'UNAUTHORIZED',
+          message: '未认证',
+          statusCode: 401
+        }
       });
     }
 

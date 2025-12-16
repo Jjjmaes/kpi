@@ -32,7 +32,11 @@ router.post('/login', async (req, res) => {
     if (!username || !password) {
       return res.status(400).json({ 
         success: false, 
-        message: '用户名和密码不能为空' 
+        error: {
+          code: 'MISSING_REQUIRED_FIELDS',
+          message: '用户名和密码不能为空',
+          statusCode: 400
+        }
       });
     }
 
@@ -40,7 +44,11 @@ router.post('/login', async (req, res) => {
     if (!user) {
       return res.status(401).json({ 
         success: false, 
-        message: '用户名或密码错误' 
+        error: {
+          code: 'INVALID_CREDENTIALS',
+          message: '用户名或密码错误',
+          statusCode: 401
+        }
       });
     }
 
@@ -48,7 +56,11 @@ router.post('/login', async (req, res) => {
     if (!isPasswordValid) {
       return res.status(401).json({ 
         success: false, 
-        message: '用户名或密码错误' 
+        error: {
+          code: 'INVALID_CREDENTIALS',
+          message: '用户名或密码错误',
+          statusCode: 401
+        }
       });
     }
 
