@@ -91,11 +91,13 @@ export function togglePartTimeSalesFields() {
     const fields = document.getElementById('partTimeSalesFields');
     if (checkbox && fields) {
         fields.style.display = checkbox.checked ? 'flex' : 'none';
-        if (checkbox.checked) {
-            calculatePartTimeSalesCommission();
-        } else {
+        if (!checkbox.checked) {
             const companyReceivableInput = document.getElementById('partTimeCompanyReceivable');
             if (companyReceivableInput) companyReceivableInput.value = '';
+            const preview = document.getElementById('partTimeSalesCommissionPreview');
+            if (preview) preview.textContent = '当前预估佣金：--';
+        } else {
+            calculatePartTimeSalesCommission();
         }
     }
 }
@@ -103,14 +105,22 @@ export function togglePartTimeSalesFields() {
 export function calculatePartTimeSalesCommission() {
     const isPartTimeSales = document.querySelector('input[name="partTimeSales.isPartTime"]')?.checked;
     const companyReceivableInput = document.getElementById('partTimeCompanyReceivable');
-    if (!isPartTimeSales || !companyReceivableInput) {
-        if (companyReceivableInput) companyReceivableInput.value = '';
+    const preview = document.getElementById('partTimeSalesCommissionPreview');
+    if (!isPartTimeSales || !companyReceivableInput || !preview) {
+        if (preview) preview.textContent = '当前预估佣金：--';
         return;
     }
     const amount = parseFloat(document.getElementById('projectAmount')?.value || 0);
+    const companyReceivable = parseFloat(companyReceivableInput.value || 0);
     const taxRate = parseFloat(document.getElementById('partTimeTaxRate')?.value || 0) / 100;
-    const commission = amount - (amount * taxRate);
-    companyReceivableInput.value = commission >= 0 ? commission.toFixed(2) : '';
+    if (!amount) {
+        preview.textContent = '当前预估佣金：--（请先填写项目金额）';
+        return;
+    }
+    const receivableAmount = amount - companyReceivable;
+    const taxAmount = receivableAmount * taxRate;
+    const commission = receivableAmount - taxAmount;
+    preview.textContent = `当前预估佣金：¥${Math.max(0, commission).toFixed(2)}`;
 }
 
 export function validateLayoutCost() {
@@ -162,8 +172,8 @@ function saveCreateProjectFormState() {
     
     // 保存目标语言
     const targetLanguages = [];
-    form.querySelectorAll('[name^="targetLanguages"]').forEach(input => {
-        if (input.value) targetLanguages.push(input.value);
+    form.querySelectorAll('.target-language-select').forEach(select => {
+        if (select.value) targetLanguages.push(select.value);
     });
     createProjectFormState._targetLanguages = targetLanguages;
     
@@ -207,17 +217,19 @@ function restoreCreateProjectFormState() {
         const container = document.getElementById('targetLanguagesContainer');
         if (container) {
             container.innerHTML = '';
-            createProjectFormState._targetLanguages.forEach((lang) => {
+            // 先创建所有行
+            createProjectFormState._targetLanguages.forEach(() => {
                 addTargetLanguageRow();
-                // 等待 DOM 更新
-                setTimeout(() => {
-                    const selects = container.querySelectorAll('select[name^="targetLanguages"]');
-                    const lastSelect = selects[selects.length - 1];
-                    if (lastSelect) {
-                        lastSelect.value = lang;
-                    }
-                }, 10);
             });
+            // 然后一次性设置所有值
+            setTimeout(() => {
+                const selects = container.querySelectorAll('.target-language-select');
+                createProjectFormState._targetLanguages.forEach((lang, index) => {
+                    if (selects[index]) {
+                        selects[index].value = lang;
+                    }
+                });
+            }, 50);
         }
     } else {
         // 如果没有保存的目标语言，添加一个默认行
@@ -403,15 +415,16 @@ export async function showCreateProjectModal() {
                 <div id="partTimeSalesFields" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
                     <div style="display:flex;gap:10px;flex-wrap:wrap;">
                         <div style="flex:1;min-width:220px;">
-                            <label>公司应收（含税）</label>
-                            <input type="number" id="partTimeCompanyReceivable" name="partTimeSales.companyReceivable" step="0.01" min="0" placeholder="自动计算" readonly>
+                            <label>公司应收（含税） *</label>
+                            <input type="number" id="partTimeCompanyReceivable" name="partTimeSales.companyReceivable" step="0.01" min="0" required placeholder="请输入公司应收" data-change="calculatePartTimeSalesCommission()">
                         </div>
                         <div style="flex:1;min-width:220px;">
                             <label>税率(%)</label>
                             <input type="number" id="partTimeTaxRate" name="partTimeSales.taxRate" step="0.01" min="0" max="100" value="0" data-change="calculatePartTimeSalesCommission()">
                         </div>
                     </div>
-                    <small style="color:#666;font-size:12px;">佣金 = 项目金额 - (项目金额 * 税率)。当前角色为兼职销售，自动启用。</small>
+                    <small style="color:#666;font-size:12px;">佣金 = 项目金额 - 公司应收 - 税费（仅用于预估分成展示，不影响项目金额）。</small>
+                    <div id="partTimeSalesCommissionPreview" style="font-size:12px;color:#0369a1;margin-top:4px;">当前预估佣金：--</div>
                 </div>
             </div>
             ` : isSalesRole ? '' : `
@@ -425,14 +438,15 @@ export async function showCreateProjectModal() {
                     <div style="display:flex;gap:10px;flex-wrap:wrap;">
                         <div style="flex:1;min-width:220px;">
                             <label>公司应收（含税）</label>
-                            <input type="number" id="partTimeCompanyReceivable" name="partTimeSales.companyReceivable" step="0.01" min="0" placeholder="自动计算" readonly>
+                            <input type="number" id="partTimeCompanyReceivable" name="partTimeSales.companyReceivable" step="0.01" min="0" placeholder="请输入公司应收">
                         </div>
                         <div style="flex:1;min-width:220px;">
                             <label>税率(%)</label>
                             <input type="number" id="partTimeTaxRate" name="partTimeSales.taxRate" step="0.01" min="0" max="100" value="0" data-change="calculatePartTimeSalesCommission()">
                         </div>
                     </div>
-                    <small style="color:#666;font-size:12px;">佣金 = 项目金额 - (项目金额 * 税率)。仅在勾选兼职销售时计算。</small>
+                    <small style="color:#666;font-size:12px;">佣金 = 项目金额 - 公司应收 - 税费（仅在勾选兼职销售时计算）。</small>
+                    <div id="partTimeSalesCommissionPreview" style="font-size:12px;color:#0369a1;margin-top:4px;">当前预估佣金：--</div>
                 </div>
             </div>
             `}
@@ -463,12 +477,58 @@ export async function showCreateProjectModal() {
             ` : ''}
 
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h4 style="margin: 0; font-size: 14px; color: #667eea;">项目成员</h4>
-                    <button type="button" class="btn-small" data-click="showAddMemberModalForCreate()">+ 添加成员</button>
+                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">项目成员</h4>
+                
+                <!-- 添加成员表单 -->
+                <div id="addMemberInlineForm" style="background: #f8f9fa; padding: 15px; border-radius: 6px; margin-bottom: 15px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                        <div>
+                            <label style="font-size: 12px; display: block; margin-bottom: 4px;">角色</label>
+                            <select id="inlineCreateMemberRole" class="target-language-select" style="width: 100%; padding: 6px;" data-change="onInlineCreateMemberRoleChange()">
+                                <option value="">请选择角色</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size: 12px; display: block; margin-bottom: 4px;">选择用户</label>
+                            <select id="inlineCreateMemberUserId" style="width: 100%; padding: 6px;">
+                                <option value="">请先选择角色</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- 翻译相关字段 -->
+                    <div id="inlineCreateTranslatorTypeGroup" style="display: none; margin-bottom: 10px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <div>
+                                <label style="font-size: 12px; display: block; margin-bottom: 4px;">翻译类型</label>
+                                <select id="inlineCreateTranslatorType" style="width: 100%; padding: 6px;">
+                                    <option value="mtpe">MTPE</option>
+                                    <option value="deepedit">深度编辑</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-size: 12px; display: block; margin-bottom: 4px;">字数占比 (0-1)</label>
+                                <input type="number" id="inlineCreateWordRatio" step="0.01" min="0" max="1" value="1.0" style="width: 100%; padding: 6px;">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 排版费用字段 -->
+                    <div id="inlineCreateLayoutCostGroup" style="display: none; margin-bottom: 10px;">
+                        <div>
+                            <label style="font-size: 12px; display: block; margin-bottom: 4px;">排版费用（元）</label>
+                            <input type="number" id="inlineCreateLayoutCost" step="0.01" min="0" style="width: 100%; padding: 6px;" data-change="validateInlineCreateMemberLayoutCost()">
+                            <small style="color: #666; font-size: 11px;">排版费用不能超过项目总金额的5%</small>
+                            <div id="inlineCreateMemberLayoutCostValidation" style="margin-top: 4px; font-size: 11px;"></div>
+                        </div>
+                    </div>
+                    
+                    <button type="button" class="btn-small" data-click="addInlineMemberForCreate()" style="width: 100%;">+ 添加成员</button>
                 </div>
+                
+                <!-- 已添加的成员列表 -->
                 <div id="createProjectMembersList" style="min-height: 40px; padding: 10px; background: #f5f5f5; border-radius: 4px;">
-                    <p style="margin: 0; color: #999; font-size: 12px;">暂未添加成员，点击"添加成员"按钮添加项目经理、翻译、审校等</p>
+                    <p style="margin: 0; color: #999; font-size: 12px;">暂未添加成员，请在上方选择角色和用户后点击"添加成员"</p>
                 </div>
             </div>
 
@@ -497,6 +557,8 @@ export async function showCreateProjectModal() {
         if (isPartTimeSalesRole) {
             calculatePartTimeSalesCommission();
         }
+        // 初始化内联添加成员表单
+        initInlineCreateMemberForm();
     }, 100);
 }
 
@@ -568,6 +630,23 @@ export async function createProject(e) {
     const isPartTimeSalesRole = currentRole === 'part_time_sales';
     const isSalesRole = currentRole === 'sales';
     const partTimeSalesEnabled = isPartTimeSalesRole ? true : isSalesRole ? false : formData.get('partTimeSales.isPartTime') === 'on';
+    
+    // 兼职销售创建项目时，验证必填字段
+    if (isPartTimeSalesRole) {
+        const companyReceivable = parseFloat(formData.get('partTimeSales.companyReceivable') || 0);
+        const projectAmount = parseFloat(formData.get('projectAmount') || 0);
+        
+        if (!companyReceivable || companyReceivable <= 0) {
+            showToast('请填写公司应收金额', 'error');
+            return;
+        }
+        
+        if (companyReceivable > projectAmount) {
+            showToast('公司应收金额不能大于项目总金额', 'error');
+            return;
+        }
+    }
+    
     const partTimeSales = partTimeSalesEnabled ? {
         isPartTime: true,
         companyReceivable: parseFloat(formData.get('partTimeSales.companyReceivable') || 0),
@@ -1284,7 +1363,7 @@ export async function viewProject(projectId) {
 
                 <div class="detail-section" id="realtimeKpiSection">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                        <h4>预估KPI（分值）</h4>
+                        <h4>${state.currentRole === 'part_time_sales' ? '预估分成金额' : '预估KPI（分值）'}</h4>
                         <button class="btn-small" data-click="loadRealtimeKPI('${projectId}')">刷新</button>
                     </div>
                     <div id="realtimeKpiContent"><div class="card-desc">加载中...</div></div>
@@ -1538,13 +1617,239 @@ export async function setLayoutCost(e, projectId) {
     }
 }
 
+// 初始化内联添加成员表单
+function initInlineCreateMemberForm() {
+    const roleSelect = document.getElementById('inlineCreateMemberRole');
+    if (!roleSelect) return;
+    
+    // 获取可选择的角色
+    const roles = state.currentUser?.roles || [];
+    const currentRole = state.currentRole;
+    const isAdmin = roles.includes('admin');
+    const isPM = roles.includes('pm');
+    const isSales = roles.includes('sales');
+    const isPartTimeSales = roles.includes('part_time_sales');
+    const isCurrentSales = currentRole === 'sales';
+    const isCurrentPartTimeSales = currentRole === 'part_time_sales';
+    
+    let availableRoles;
+    if (isAdmin) {
+        availableRoles = [
+            { value: 'translator', label: '翻译' },
+            { value: 'reviewer', label: '审校' },
+            { value: 'pm', label: '项目经理' },
+            { value: 'sales', label: '销售' },
+            { value: 'admin_staff', label: '综合岗' },
+            { value: 'part_time_sales', label: '兼职销售' },
+            { value: 'layout', label: '兼职排版' }
+        ];
+    } else if (currentRole === 'pm' || isPM && !isCurrentSales && !isCurrentPartTimeSales) {
+        availableRoles = [
+            { value: 'translator', label: '翻译' },
+            { value: 'reviewer', label: '审校' },
+            { value: 'layout', label: '兼职排版' }
+        ];
+    } else if (isCurrentSales || isCurrentPartTimeSales) {
+        availableRoles = [{ value: 'pm', label: '项目经理' }];
+    } else if (isSales || isPartTimeSales) {
+        availableRoles = [{ value: 'pm', label: '项目经理' }];
+    } else {
+        availableRoles = [{ value: 'pm', label: '项目经理' }];
+    }
+    
+    roleSelect.innerHTML = '<option value="">请选择角色</option>' + 
+        availableRoles.map(r => `<option value="${r.value}">${r.label}</option>`).join('');
+    
+    // 重置用户选择
+    const userIdSelect = document.getElementById('inlineCreateMemberUserId');
+    if (userIdSelect) {
+        userIdSelect.innerHTML = '<option value="">请先选择角色</option>';
+    }
+    
+    // 隐藏所有额外字段
+    const translatorGroup = document.getElementById('inlineCreateTranslatorTypeGroup');
+    const layoutCostGroup = document.getElementById('inlineCreateLayoutCostGroup');
+    if (translatorGroup) translatorGroup.style.display = 'none';
+    if (layoutCostGroup) layoutCostGroup.style.display = 'none';
+}
+
+// 内联添加成员：角色变化处理
+export function onInlineCreateMemberRoleChange() {
+    const role = document.getElementById('inlineCreateMemberRole')?.value;
+    const translatorGroup = document.getElementById('inlineCreateTranslatorTypeGroup');
+    const layoutCostGroup = document.getElementById('inlineCreateLayoutCostGroup');
+    
+    if (role === 'translator') {
+        if (translatorGroup) translatorGroup.style.display = 'block';
+        if (layoutCostGroup) layoutCostGroup.style.display = 'none';
+    } else if (role === 'layout') {
+        if (translatorGroup) translatorGroup.style.display = 'none';
+        if (layoutCostGroup) layoutCostGroup.style.display = 'block';
+    } else {
+        if (translatorGroup) translatorGroup.style.display = 'none';
+        if (layoutCostGroup) layoutCostGroup.style.display = 'none';
+    }
+    
+    filterInlineCreateUsersByRole();
+}
+
+// 内联添加成员：根据角色过滤用户
+export function filterInlineCreateUsersByRole() {
+    const role = document.getElementById('inlineCreateMemberRole')?.value;
+    const userIdSelect = document.getElementById('inlineCreateMemberUserId');
+    
+    if (!role || !userIdSelect) {
+        if (userIdSelect) userIdSelect.innerHTML = '<option value="">请先选择角色</option>';
+        return;
+    }
+    
+    if (!state.allUsers || state.allUsers.length === 0) {
+        if (userIdSelect) userIdSelect.innerHTML = '<option value="">加载用户列表中...</option>';
+        return;
+    }
+    
+    const filteredUsers = state.allUsers.filter(user => {
+        if (!user.roles || !Array.isArray(user.roles)) return false;
+        return user.roles.includes(role);
+    });
+    
+    if (filteredUsers.length === 0) {
+        userIdSelect.innerHTML = '<option value="">没有符合条件的用户</option>';
+        return;
+    }
+    
+    userIdSelect.innerHTML = '<option value="">请选择用户</option>' +
+        filteredUsers.map(u => `<option value="${u._id}">${u.name}${u.username ? ' (' + u.username + ')' : ''}</option>`).join('');
+}
+
+// 内联添加成员：验证排版费用
+export function validateInlineCreateMemberLayoutCost() {
+    const layoutCostInput = document.getElementById('inlineCreateLayoutCost');
+    const validationDiv = document.getElementById('inlineCreateMemberLayoutCostValidation');
+    if (!layoutCostInput || !validationDiv) return true;
+    
+    const layoutCost = parseFloat(layoutCostInput.value) || 0;
+    const projectAmountInput = document.getElementById('projectAmount');
+    const projectAmount = projectAmountInput ? parseFloat(projectAmountInput.value) || 0 : 0;
+    
+    if (projectAmount > 0 && layoutCost > 0) {
+        const percentage = (layoutCost / projectAmount) * 100;
+        if (percentage > 5) {
+            validationDiv.innerHTML = `<span style="color: #ff4444; font-size: 11px;">排版费用不能超过项目总金额的5%，当前占比为${percentage.toFixed(2)}%</span>`;
+            return false;
+        } else {
+            validationDiv.innerHTML = `<span style="color: #28a745; font-size: 11px;">占比: ${percentage.toFixed(2)}%</span>`;
+        }
+    } else {
+        validationDiv.innerHTML = '';
+    }
+    return true;
+}
+
+// 内联添加成员：添加成员
+export function addInlineMemberForCreate() {
+    const roleSelect = document.getElementById('inlineCreateMemberRole');
+    const userIdSelect = document.getElementById('inlineCreateMemberUserId');
+    const role = roleSelect?.value;
+    const userId = userIdSelect?.value;
+    
+    const currentRole = state.currentRole;
+    if ((currentRole === 'sales' || currentRole === 'part_time_sales') && role !== 'pm') {
+        showToast('当前角色只能添加项目经理', 'error');
+        return;
+    }
+    
+    if (!role || !userId) {
+        showToast('请选择角色和用户', 'error');
+        return;
+    }
+    
+    // 检查是否已添加
+    const exists = createProjectMembers.some(m => m.userId === userId && m.role === role);
+    if (exists) {
+        showToast('该用户已添加为此角色', 'error');
+        return;
+    }
+    
+    // 自我分配限制
+    const me = state.currentUser;
+    if (me) {
+        const isSelf = userId === me._id;
+        if (isSelf && me.roles?.includes('pm')) {
+            const isTranslator = me.roles?.includes('translator');
+            const isReviewer = me.roles?.includes('reviewer');
+            if ((role === 'translator' && isTranslator) || (role === 'reviewer' && isReviewer)) {
+                showToast('作为项目经理，不能将翻译或审校任务分配给自己', 'error');
+                return;
+            }
+        }
+        const isSales = me.roles?.includes('sales') || me.roles?.includes('part_time_sales');
+        const hasPMRole = me.roles?.includes('pm');
+        if (isSelf && role === 'pm' && isSales && hasPMRole) {
+            showToast('作为销售，不能将项目经理角色分配给自己', 'error');
+            return;
+        }
+    }
+    
+    const member = {
+        userId,
+        role
+    };
+    
+    if (role === 'translator') {
+        const translatorType = document.getElementById('inlineCreateTranslatorType')?.value || 'mtpe';
+        const wordRatio = parseFloat(document.getElementById('inlineCreateWordRatio')?.value || 1.0);
+        member.translatorType = translatorType;
+        member.wordRatio = wordRatio;
+    }
+    
+    if (role === 'layout') {
+        const layoutCost = parseFloat(document.getElementById('inlineCreateLayoutCost')?.value || 0);
+        if (layoutCost > 0) {
+            const projectAmountInput = document.getElementById('projectAmount');
+            const projectAmount = projectAmountInput ? parseFloat(projectAmountInput.value) || 0 : 0;
+            if (projectAmount > 0) {
+                const percentage = (layoutCost / projectAmount) * 100;
+                if (percentage > 5) {
+                    showToast(`排版费用不能超过项目总金额的5%，当前占比为${percentage.toFixed(2)}%`, 'error');
+                    return;
+                }
+            }
+        }
+        member.layoutCost = layoutCost;
+    }
+    
+    createProjectMembers.push(member);
+    updateCreateProjectMembersList();
+    showToast('成员已添加', 'success');
+    
+    // 清空表单
+    if (roleSelect) roleSelect.value = '';
+    if (userIdSelect) userIdSelect.innerHTML = '<option value="">请先选择角色</option>';
+    const translatorGroup = document.getElementById('inlineCreateTranslatorTypeGroup');
+    const layoutCostGroup = document.getElementById('inlineCreateLayoutCostGroup');
+    if (translatorGroup) translatorGroup.style.display = 'none';
+    if (layoutCostGroup) {
+        layoutCostGroup.style.display = 'none';
+        const layoutCostInput = document.getElementById('inlineCreateLayoutCost');
+        if (layoutCostInput) layoutCostInput.value = '';
+        const validationDiv = document.getElementById('inlineCreateMemberLayoutCostValidation');
+        if (validationDiv) validationDiv.innerHTML = '';
+    }
+    
+    // 更新保存的状态中的成员列表
+    if (createProjectFormState) {
+        createProjectFormState._members = [...createProjectMembers];
+    }
+}
+
 // 更新创建项目时的成员列表显示
 export function updateCreateProjectMembersList() {
     const container = document.getElementById('createProjectMembersList');
     if (!container) return;
     
     if (createProjectMembers.length === 0) {
-        container.innerHTML = '<p style="margin: 0; color: #999; font-size: 12px;">暂未添加成员，点击"添加成员"按钮添加项目经理、翻译、审校等</p>';
+        container.innerHTML = '<p style="margin: 0; color: #999; font-size: 12px;">暂未添加成员，请在上方选择角色和用户后点击"添加成员"</p>';
         return;
     }
     
@@ -2554,6 +2859,7 @@ export async function loadRealtimeKPI(projectId) {
         }
         // 后端返回的数据结构：{ success: true, data: { count, month, project, results: [...] } }
         const results = data.data?.results || [];
+        const isPartTimeSalesView = state.currentRole === 'part_time_sales';
         const rows = results.map(r => {
             const roleStr = String(r.role || '').trim();
             const isPartTimeRole = roleStr === 'part_time_sales' || roleStr === 'layout';
@@ -2561,13 +2867,16 @@ export async function loadRealtimeKPI(projectId) {
             const prefix = isPartTimeRole ? '¥' : '';
             const salesBonusUnit = r.role === 'sales' ? '分' : (r.role === 'part_time_sales' ? '元' : '');
             const salesCommissionUnit = r.role === 'sales' ? '分' : (r.role === 'part_time_sales' ? '元' : '');
+            const displayKpiValue = isPartTimeSalesView && roleStr === 'part_time_sales'
+                ? (r.details?.salesCommission || r.kpiValue || 0)
+                : (r.kpiValue || 0);
             return `
             <tr>
                 <td>${r.userName}</td>
                 <td>${getRoleText(r.role)}</td>
                 <td>${r.details?.salesBonus !== undefined ? (r.role === 'sales' ? '' : '¥') + (r.details.salesBonus || 0).toLocaleString() + (salesBonusUnit ? ' ' + salesBonusUnit : '') : '-'}</td>
                 <td>${r.details?.salesCommission !== undefined ? (r.role === 'sales' ? '' : '¥') + (r.details.salesCommission || 0).toLocaleString() + (salesCommissionUnit ? ' ' + salesCommissionUnit : '') : '-'}</td>
-                <td>${prefix}${(r.kpiValue || 0).toLocaleString()} ${unit}</td>
+                <td>${prefix}${displayKpiValue.toLocaleString()} ${unit}</td>
                 <td style="font-size:12px;">${r.formula || ''}</td>
             </tr>
         `;

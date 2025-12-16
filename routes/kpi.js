@@ -6,6 +6,7 @@ const {
   isFinance, 
   isSales, 
   isPM, 
+  isAdminOrFinance,
   canViewAllProjects, 
   canViewAllKPI, 
   canViewAmount 

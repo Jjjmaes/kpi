@@ -708,7 +708,22 @@ async function calculateProjectRealtime(projectId) {
       members.push({
         userId: creator,
         role: 'sales',
-        ratio_locked: project.locked_ratios.sales_bonus,
+        ratio_locked: project.locked_ratios?.sales_bonus,
+        wordRatio: 1.0,
+        translatorType: 'mtpe'
+      });
+    }
+  }
+
+  // 如果未显式添加兼职销售成员，但创建人具备兼职销售角色，自动补充一条兼职销售成员用于预估分成
+  const hasPartTimeSalesMember = members.some(m => m.role === 'part_time_sales');
+  if (!hasPartTimeSalesMember && project.createdBy) {
+    const creator = await User.findById(project.createdBy);
+    if (creator && (creator.roles || []).includes('part_time_sales')) {
+      members.push({
+        userId: creator,
+        role: 'part_time_sales',
+        ratio_locked: 1.0,
         wordRatio: 1.0,
         translatorType: 'mtpe'
       });
@@ -758,7 +773,7 @@ async function calculateProjectRealtime(projectId) {
         commissionPart: salesResult.commissionPart
       };
       } else if (member.role === 'part_time_sales') {
-        // 兼职销售：成交额 - 公司应收 - 税费 = 返还佣金
+        // 兼职销售：成交额 - 公司应收 - 税费 = 返还佣金（直接作为“预估分成金额”）
         const commission = project.calculatePartTimeSalesCommission();
         const totalAmount = project.projectAmount || 0;
         const companyReceivable = project.partTimeSales?.companyReceivable || 0;
@@ -768,6 +783,7 @@ async function calculateProjectRealtime(projectId) {
         
         kpiResult = {
           kpiValue: commission,
+          commission,
           formula: `成交额(${totalAmount}) - 公司应收(${companyReceivable}) = 应收金额(${receivableAmount})；应收金额(${receivableAmount}) - 税费(${taxAmount.toFixed(2)}) = 返还佣金(${commission})`
         };
       } else if (member.role === 'layout') {
@@ -812,7 +828,9 @@ async function calculateProjectRealtime(projectId) {
         completionFactor: member.role === 'sales' ? calculateCompletionFactorForSales(project) : completionFactor,
         translatorType: member.role === 'translator' ? translatorType : undefined,
         salesBonus: member.role === 'sales' ? kpiResult.bonusPart : undefined,
-        salesCommission: member.role === 'sales' ? kpiResult.commissionPart : undefined
+        salesCommission: member.role === 'sales'
+          ? kpiResult.commissionPart
+          : (member.role === 'part_time_sales' ? kpiResult.kpiValue : undefined)
       }
     });
   }

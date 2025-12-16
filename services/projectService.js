@@ -90,9 +90,16 @@ class ProjectService {
     // 兼职销售字段校验
     if (partTimeSales && partTimeSales.isPartTime) {
       const companyReceivable = parseFloat(partTimeSales.companyReceivable || 0);
+      if (!companyReceivable || companyReceivable <= 0) {
+        throw new AppError(
+          '兼职销售创建项目时，公司应收金额必须大于0',
+          400,
+          'INVALID_PART_TIME_SALES'
+        );
+      }
       if (companyReceivable > finalAmount) {
         throw new AppError(
-          '公司应收金额必须在0到项目总金额之间',
+          '公司应收金额不能大于项目总金额',
           400,
           'INVALID_PART_TIME_SALES'
         );
