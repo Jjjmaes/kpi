@@ -136,6 +136,7 @@ router.delete('/:id', authorize('admin', 'sales', 'part_time_sales'), asyncHandl
 
 // 获取项目列表
 router.get('/', asyncHandler(async (req, res) => {
+    const { month, status, businessType, role, customerId } = req.query;
     let query = {};
     
     // 基于当前角色的权限进行数据过滤
@@ -172,10 +173,74 @@ router.get('/', asyncHandler(async (req, res) => {
       }
     }
 
-    const projects = await Project.find(query)
+    // 应用筛选条件（与 dashboard 保持一致）
+    if (status) {
+      query.status = status;
+    } else {
+      // 默认排除已取消项目
+      query.status = { $ne: 'cancelled' };
+    }
+    if (businessType) query.businessType = businessType;
+    if (customerId) query.customerId = customerId;
+
+    // 角色筛选：如果指定了 role，按该角色进一步限定项目范围
+    if (role) {
+      let roleProjectIds = [];
+      if (role === 'sales') {
+        // 销售：本人创建的项目 + 作为销售成员的项目
+        const salesMemberProjects = await ProjectMember.find({ userId: req.user._id, role: 'sales' }).distinct('projectId');
+        const createdProjects = await Project.find({ createdBy: req.user._id }).distinct('_id');
+        roleProjectIds = [...new Set([...salesMemberProjects.map(String), ...createdProjects.map(String)])];
+      } else {
+        // 其他角色：仅本人作为该角色成员参与的项目
+        const memberProjects = await ProjectMember.find({ userId: req.user._id, role }).distinct('projectId');
+        roleProjectIds = memberProjects.map(String);
+      }
+
+      // 将角色过滤与现有可见性过滤求交集
+      if (query._id && query._id.$in) {
+        const allowedSet = new Set(roleProjectIds);
+        const intersected = query._id.$in.map(String).filter(id => allowedSet.has(id));
+        query._id = { $in: intersected };
+      } else if (roleProjectIds.length > 0) {
+        query._id = { $in: roleProjectIds };
+      } else {
+        // 没有符合角色的项目，确保查询结果为空
+        query._id = { $in: [] };
+      }
+    }
+
+    // 月份筛选：统一使用 createdAt 判断当月项目数（与 dashboard 保持一致）
+    if (month) {
+      const target = new Date(`${month}-01`);
+      const startDate = new Date(target.getFullYear(), target.getMonth(), 1);
+      const endDate = new Date(target.getFullYear(), target.getMonth() + 1, 0, 23, 59, 59);
+      query.createdAt = { $gte: startDate, $lte: endDate };
+    }
+
+    let projects = await Project.find(query)
       .populate('createdBy', 'name username')
       .populate('customerId', 'name shortName contactPerson phone email')
       .sort({ createdAt: -1 });
+
+    // 再次基于 role 对项目进行用户侧过滤（防止查询条件未生效或遗漏）
+    if (role) {
+      let allowedIds = [];
+      if (role === 'sales') {
+        const salesMemberProjects = await ProjectMember.find({ userId: req.user._id, role: 'sales' }).distinct('projectId');
+        const createdProjects = await Project.find({ createdBy: req.user._id }).distinct('_id');
+        allowedIds = [...new Set([...salesMemberProjects.map(String), ...createdProjects.map(String)])];
+      } else {
+        const memberProjects = await ProjectMember.find({ userId: req.user._id, role }).distinct('projectId');
+        allowedIds = memberProjects.map(String);
+      }
+      if (allowedIds.length > 0) {
+        const allowedSet = new Set(allowedIds.map(String));
+        projects = projects.filter(p => allowedSet.has(p._id.toString()));
+      } else {
+        projects = [];
+      }
+    }
 
     // 基于当前角色判断是否需要脱敏客户信息
     const isDeliveryOnly = isDeliveryOnlyUser(req.user, req.currentRole);

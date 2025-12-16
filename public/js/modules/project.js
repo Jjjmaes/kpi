@@ -270,6 +270,9 @@ export async function showCreateProjectModal() {
         .filter(lang => lang.isActive)
         .map(lang => `<option value="${lang.name}">${lang.name}${lang.code ? ' (' + lang.code + ')' : ''}${lang.nativeName ? ' - ' + lang.nativeName : ''}</option>`)
         .join('');
+    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    const isPartTimeSalesRole = currentRole === 'part_time_sales';
+    const isSalesRole = currentRole === 'sales';
 
     const content = `
         <form id="createProjectForm" data-submit="createProject(event)">
@@ -393,6 +396,25 @@ export async function showCreateProjectModal() {
                 </div>
             </div>
 
+            ${isPartTimeSalesRole ? `
+            <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
+                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">兼职销售（当前角色）</h4>
+                <input type="hidden" name="partTimeSales.isPartTime" value="on">
+                <div id="partTimeSalesFields" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                        <div style="flex:1;min-width:220px;">
+                            <label>公司应收（含税）</label>
+                            <input type="number" id="partTimeCompanyReceivable" name="partTimeSales.companyReceivable" step="0.01" min="0" placeholder="自动计算" readonly>
+                        </div>
+                        <div style="flex:1;min-width:220px;">
+                            <label>税率(%)</label>
+                            <input type="number" id="partTimeTaxRate" name="partTimeSales.taxRate" step="0.01" min="0" max="100" value="0" data-change="calculatePartTimeSalesCommission()">
+                        </div>
+                    </div>
+                    <small style="color:#666;font-size:12px;">佣金 = 项目金额 - (项目金额 * 税率)。当前角色为兼职销售，自动启用。</small>
+                </div>
+            </div>
+            ` : isSalesRole ? '' : `
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
                 <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">兼职销售</h4>
                 <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
@@ -413,6 +435,7 @@ export async function showCreateProjectModal() {
                     <small style="color:#666;font-size:12px;">佣金 = 项目金额 - (项目金额 * 税率)。仅在勾选兼职销售时计算。</small>
                 </div>
             </div>
+            `}
 
             ${!(state.currentUser?.roles || []).some(r => r === 'sales' || r === 'part_time_sales') ? `
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
@@ -470,6 +493,10 @@ export async function showCreateProjectModal() {
             updateCreateProjectMembersList();
         }
         toggleProjectFields();
+        // 兼职销售角色：自动计算佣金，显示兼职销售区域
+        if (isPartTimeSalesRole) {
+            calculatePartTimeSalesCommission();
+        }
     }, 100);
 }
 
@@ -537,7 +564,10 @@ export async function createProject(e) {
         return;
     }
 
-    const partTimeSalesEnabled = formData.get('partTimeSales.isPartTime') === 'on';
+    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    const isPartTimeSalesRole = currentRole === 'part_time_sales';
+    const isSalesRole = currentRole === 'sales';
+    const partTimeSalesEnabled = isPartTimeSalesRole ? true : isSalesRole ? false : formData.get('partTimeSales.isPartTime') === 'on';
     const partTimeSales = partTimeSalesEnabled ? {
         isPartTime: true,
         companyReceivable: parseFloat(formData.get('partTimeSales.companyReceivable') || 0),
@@ -1567,29 +1597,45 @@ export async function showAddMemberModalForCreate() {
     
     // 检查用户角色，确定可选择的角色
     const roles = state.currentUser?.roles || [];
+    const currentRole = state.currentRole;
     const isAdmin = roles.includes('admin');
     const isPM = roles.includes('pm');
-    const isSales = roles.includes('sales') || roles.includes('part_time_sales');
+    const isSales = roles.includes('sales');
+    const isPartTimeSales = roles.includes('part_time_sales');
+    const isCurrentSales = currentRole === 'sales';
+    const isCurrentPartTimeSales = currentRole === 'part_time_sales';
     
-    // 权限控制：
+    // 权限控制（按当前角色优先）：
     // - 管理员：可以添加所有角色
-    // - 项目经理：只能添加翻译、审校、兼职排版
-    // - 销售：只能添加项目经理
-    const availableRoles = isAdmin ? [
-        { value: 'translator', label: '翻译' },
-        { value: 'reviewer', label: '审校' },
-        { value: 'pm', label: '项目经理' },
-        { value: 'sales', label: '销售' },
-        { value: 'admin_staff', label: '综合岗' },
-        { value: 'part_time_sales', label: '兼职销售' },
-        { value: 'layout', label: '兼职排版' }
-    ] : isPM ? [
-        { value: 'translator', label: '翻译' },
-        { value: 'reviewer', label: '审校' },
-        { value: 'layout', label: '兼职排版' }
-    ] : [
-        { value: 'pm', label: '项目经理' }
-    ];
+    // - 当前角色为项目经理：只能添加翻译、审校、兼职排版
+    // - 当前角色为销售或兼职销售：只能添加项目经理
+    // - 其他情况按原有角色列表回退
+    let availableRoles;
+    if (isAdmin) {
+        availableRoles = [
+            { value: 'translator', label: '翻译' },
+            { value: 'reviewer', label: '审校' },
+            { value: 'pm', label: '项目经理' },
+            { value: 'sales', label: '销售' },
+            { value: 'admin_staff', label: '综合岗' },
+            { value: 'part_time_sales', label: '兼职销售' },
+            { value: 'layout', label: '兼职排版' }
+        ];
+    } else if (currentRole === 'pm' || isPM && !isCurrentSales && !isCurrentPartTimeSales) {
+        availableRoles = [
+            { value: 'translator', label: '翻译' },
+            { value: 'reviewer', label: '审校' },
+            { value: 'layout', label: '兼职排版' }
+        ];
+    } else if (isCurrentSales || isCurrentPartTimeSales) {
+        // 兼职销售/销售当前角色：只能添加PM
+        availableRoles = [{ value: 'pm', label: '项目经理' }];
+    } else if (isSales || isPartTimeSales) {
+        // 拥有销售/兼职销售角色但当前角色不是它们，仍然限制为PM，避免越权
+        availableRoles = [{ value: 'pm', label: '项目经理' }];
+    } else {
+        availableRoles = [{ value: 'pm', label: '项目经理' }];
+    }
     
     const projectAmountInput = document.getElementById('projectAmount');
     const projectAmount = projectAmountInput ? parseFloat(projectAmountInput.value) || 0 : 0;
@@ -1641,6 +1687,12 @@ export async function addMemberForCreate(e) {
     const formData = new FormData(e.target);
     const role = formData.get('role');
     const userId = formData.get('userId');
+    const currentRole = state.currentRole;
+    // 当前角色为销售/兼职销售时，强制只能添加项目经理
+    if ((currentRole === 'sales' || currentRole === 'part_time_sales') && role !== 'pm') {
+        showToast('当前角色只能添加项目经理', 'error');
+        return;
+    }
     if (!role || !userId) {
         showToast('请选择角色和用户', 'error');
         return;
@@ -2546,15 +2598,36 @@ export async function loadRealtimeKPI(projectId) {
 
 // --- 核心逻辑 ---
 
-export async function loadProjects() {
+export async function loadProjects(filters = {}) {
     try {
-        const response = await apiFetch('/projects');
+        // 构建查询参数
+        const params = new URLSearchParams();
+        if (filters.month) params.append('month', filters.month);
+        if (filters.status) params.append('status', filters.status);
+        if (filters.businessType) params.append('businessType', filters.businessType);
+        if (filters.role) params.append('role', filters.role);
+        if (filters.customerId) params.append('customerId', filters.customerId);
+        
+        const url = `/projects${params.toString() ? '?' + params.toString() : ''}`;
+        console.log('[Projects] loadProjects request', { url, filters });
+        const response = await apiFetch(url);
         const data = await response.json();
 
         if (data.success) {
             state.allProjectsCache = data.data || [];
+            // 保存后端筛选条件，用于前端判断是否需要再次过滤
+            state.backendFilters = filters;
+            console.log('[Projects] loadProjects success', {
+                total: state.allProjectsCache.length,
+                filters,
+                projectFilterMonth: state.projectFilterMonth,
+                projectFilterDeliveryOverdue: state.projectFilterDeliveryOverdue,
+                projectFilterRecentCompleted: state.projectFilterRecentCompleted
+            });
             renderProjects();
             // fillFinanceProjectSelects 在后续批次完成
+        } else {
+            console.warn('[Projects] loadProjects failed', data);
         }
     } catch (error) {
         console.error('加载项目失败:', error);
@@ -2564,6 +2637,7 @@ export async function loadProjects() {
 }
 
 export function renderProjects() {
+    console.log('[Projects] renderProjects start');
     const search = document.getElementById('projectSearch')?.value?.toLowerCase() || '';
     const status = document.getElementById('projectStatusFilter')?.value || '';
     const biz = document.getElementById('projectBizFilter')?.value || '';
@@ -2571,14 +2645,119 @@ export function renderProjects() {
     const pageSizeSel = document.getElementById('projectPageSize');
     const pageSize = pageSizeSel ? parseInt(pageSizeSel.value, 10) || 10 : 10;
     const now = new Date();
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    // 如果用户手动修改了筛选条件（状态、业务类型、月份），需要重新从后端加载数据
+    if (state.backendFilters) {
+        const currentFilters = {};
+        if (state.projectFilterMonth) currentFilters.month = state.projectFilterMonth;
+        if (status) currentFilters.status = status;
+        if (biz) currentFilters.businessType = biz;
+        
+        // 检查筛选条件是否与后端不一致
+        // 需要比较：月份、状态、业务类型是否都一致
+        const monthMatch = !state.projectFilterMonth ? !state.backendFilters.month : (state.backendFilters.month === state.projectFilterMonth);
+        const statusMatch = !status ? !state.backendFilters.status : (state.backendFilters.status === status);
+        const bizMatch = !biz ? !state.backendFilters.businessType : (state.backendFilters.businessType === biz);
+        const filtersMatch = monthMatch && statusMatch && bizMatch;
+        
+        if (!filtersMatch) {
+            console.log('[Projects] Filters changed, reloading from backend', {
+                oldFilters: state.backendFilters,
+                newFilters: { month: state.projectFilterMonth, status, businessType: biz },
+                monthMatch,
+                statusMatch,
+                bizMatch
+            });
+            // 重新从后端加载数据，而不是在前端已筛选的结果上继续筛选
+            const newFilters = {};
+            if (state.projectFilterMonth) newFilters.month = state.projectFilterMonth;
+            if (status) newFilters.status = status;
+            if (biz) newFilters.businessType = biz;
+            // 重置页码
+            state.projectPage = 1;
+            // 重新加载项目
+            loadProjects(newFilters);
+            return; // 提前返回，loadProjects会调用renderProjects
+        }
+    }
+
+    // 如果后端已经筛选过，前端只做搜索和客户过滤，不再过滤月份、状态、业务类型
+    const backendFiltered = state.backendFilters && Object.keys(state.backendFilters).length > 0;
+    
     const filtered = (state.allProjectsCache || []).filter(p => {
-        const matchesSearch = !search || (p.projectName?.toLowerCase().includes(search)) || (p.projectNumber?.toLowerCase().includes(search)) || ((p.customerId?.name || p.clientName || '').toLowerCase().includes(search));
-        const matchesStatus = !status || p.status === status;
+        const matchesSearch = !search || (p.projectName?.toLowerCase().includes(search)) || (p.projectNumber?.toLowerCase().includes(search)) || ((p.customerId?.name || p.customerId?.shortName || p.clientName || '').toLowerCase().includes(search));
+        const matchesCust = !cust || (p.customerId && (p.customerId._id === cust || p.customerId === cust));
+        
+        // 如果后端已经筛选过，前端只做搜索和客户过滤
+        if (backendFiltered) {
+            // 交付逾期和近7天完成仍需前端过滤（后端不处理这些）
+            const matchesDeliveryOverdue = !state.projectFilterDeliveryOverdue && !state.projectFilterRecentDeliveryOverdue ? true : (
+                p.deadline &&
+                new Date(p.deadline) < now &&
+                // 与后端保持一致：只统计pending和in_progress状态的项目
+                (p.status === 'pending' || p.status === 'in_progress') &&
+                // 如果是近7天交付逾期，需要限制deadline在近7天内
+                (!state.projectFilterRecentDeliveryOverdue || (new Date(p.deadline) >= sevenDaysAgo))
+            );
+            const matchesRecentCompleted = !state.projectFilterRecentCompleted || (
+                p.status === 'completed' &&
+                p.completedAt &&
+                new Date(p.completedAt) >= sevenDaysAgo
+            );
+            return matchesSearch && matchesCust && matchesDeliveryOverdue && matchesRecentCompleted;
+        }
+        
+        // 否则，前端需要完整过滤（兼容手动筛选）
+        const matchesStatus = (state.projectFilterDeliveryOverdue || state.projectFilterRecentDeliveryOverdue || state.projectFilterRecentCompleted)
+            ? true
+            : (!status || p.status === status);
         const matchesBiz = !biz || p.businessType === biz;
-        const matchesCust = !cust || (p.customerId && p.customerId._id === cust);
-        const matchesMonth = !state.projectFilterMonth || (p.createdAt && new Date(p.createdAt).toISOString().slice(0,7) === state.projectFilterMonth);
-        const matchesDeliveryOverdue = !state.projectFilterDeliveryOverdue || (p.deadline && new Date(p.deadline) < now && p.status !== 'completed');
-        return matchesSearch && matchesStatus && matchesBiz && matchesCust && matchesMonth && matchesDeliveryOverdue;
+        // 月份筛选：与后端 dashboard 保持一致
+        // - 交付逾期或近7天完成跳转时不过滤月份（看全局）
+        // - 否则：已完成项目用 completedAt 所在月份，未完成项目用 createdAt 所在月份
+        let matchesMonth = true;
+        if (!(state.projectFilterDeliveryOverdue || state.projectFilterRecentDeliveryOverdue || state.projectFilterRecentCompleted)) {
+            if (state.projectFilterMonth) {
+                const monthStr = state.projectFilterMonth;
+                const createdMonth = p.createdAt ? new Date(p.createdAt).toISOString().slice(0, 7) : null;
+                const completedMonth = p.completedAt ? new Date(p.completedAt).toISOString().slice(0, 7) : null;
+                if (p.status === 'completed') {
+                    matchesMonth = !!completedMonth && completedMonth === monthStr;
+                } else {
+                    matchesMonth = !!createdMonth && createdMonth === monthStr;
+                }
+            } else {
+                matchesMonth = true;
+            }
+        }
+        const matchesDeliveryOverdue = !state.projectFilterDeliveryOverdue && !state.projectFilterRecentDeliveryOverdue ? true : (
+            p.deadline &&
+            new Date(p.deadline) < now &&
+            // 与后端保持一致：只统计pending和in_progress状态的项目
+            (p.status === 'pending' || p.status === 'in_progress') &&
+            // 如果是近7天交付逾期，需要限制deadline在近7天内
+            (!state.projectFilterRecentDeliveryOverdue || (new Date(p.deadline) >= sevenDaysAgo))
+        );
+        const matchesRecentCompleted = !state.projectFilterRecentCompleted || (
+            p.status === 'completed' &&
+            p.completedAt &&
+            new Date(p.completedAt) >= sevenDaysAgo
+        );
+        return matchesSearch && matchesStatus && matchesBiz && matchesCust && matchesMonth && matchesDeliveryOverdue && matchesRecentCompleted;
+    });
+
+    console.log('[Projects] renderProjects filters:', {
+        search,
+        status,
+        biz,
+        cust,
+        projectFilterMonth: state.projectFilterMonth,
+        projectFilterDeliveryOverdue: state.projectFilterDeliveryOverdue,
+        projectFilterRecentCompleted: state.projectFilterRecentCompleted,
+        totalCache: (state.allProjectsCache || []).length,
+        filteredCount: filtered.length
     });
     const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
     if (state.projectPage > totalPages) state.projectPage = totalPages;
@@ -2646,11 +2825,20 @@ export function nextProjectPage() {
     const now = new Date();
     const filtered = (state.allProjectsCache || []).filter(p => {
         const matchesSearch = !search || (p.projectName?.toLowerCase().includes(search)) || (p.projectNumber?.toLowerCase().includes(search)) || ((p.customerId?.name || p.clientName || '').toLowerCase().includes(search));
-        const matchesStatus = !status || p.status === status;
+        const matchesStatus = (state.projectFilterDeliveryOverdue || state.projectFilterRecentDeliveryOverdue) ? true : (!status || p.status === status);
         const matchesBiz = !biz || p.businessType === biz;
         const matchesCust = !cust || (p.customerId && p.customerId._id === cust);
         const matchesMonth = !state.projectFilterMonth || (p.createdAt && new Date(p.createdAt).toISOString().slice(0,7) === state.projectFilterMonth);
-        const matchesDeliveryOverdue = !state.projectFilterDeliveryOverdue || (p.deadline && new Date(p.deadline) < now && p.status !== 'completed');
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        const matchesDeliveryOverdue = (!state.projectFilterDeliveryOverdue && !state.projectFilterRecentDeliveryOverdue) || (
+            p.deadline && 
+            new Date(p.deadline) < now && 
+            // 与后端保持一致：只统计pending和in_progress状态的项目
+            (p.status === 'pending' || p.status === 'in_progress') &&
+            // 如果是近7天交付逾期，需要限制deadline在近7天内
+            (!state.projectFilterRecentDeliveryOverdue || (new Date(p.deadline) >= sevenDaysAgo))
+        );
         return matchesSearch && matchesStatus && matchesBiz && matchesCust && matchesMonth && matchesDeliveryOverdue;
     });
     const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));

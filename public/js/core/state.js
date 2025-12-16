@@ -17,7 +17,12 @@ export const state = {
     // UI状态
     projectPage: 1,
     projectFilterMonth: '',
-    salesFinanceView: false
+    projectFilterDeliveryOverdue: false,
+    projectFilterRecentDeliveryOverdue: false, // 近7天交付逾期
+    projectFilterRecentCompleted: false,
+    salesFinanceView: false,
+    // 后端筛选条件（用于判断前端是否需要再次过滤）
+    backendFilters: null
 };
 
 // Actions

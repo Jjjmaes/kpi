@@ -1,7 +1,8 @@
 import { apiFetch } from '../core/api.js';
 import { showSection } from '../core/ui.js';
-import { showToast, showAlert, getStatusText, getBusinessTypeText, getRoleText } from '../core/utils.js';
+import { showToast, showAlert, getStatusText, getBusinessTypeText, getRoleText, hasPermission } from '../core/utils.js';
 import { state } from '../core/state.js';
+import { loadProjects, renderProjects } from './project.js';
 
 // Chart.js 实例列表，避免内存泄漏
 let chartInstances = [];
@@ -324,7 +325,7 @@ function renderDashboardCards(data) {
                 </div>
             </div>
             ` : ''}
-            <div class="card stat-card stat-info" data-click="navigateFromDashboardCard('projects')">
+            <div class="card stat-card stat-info" data-click="navigateFromDashboardCard('recentCompleted')">
                 <div class="stat-icon">📅</div>
                 <div class="stat-content">
                     <div class="card-title">近7天完成</div>
@@ -340,7 +341,7 @@ function renderDashboardCards(data) {
                     <div class="card-desc">近7天逾期回款项目</div>
                 </div>
             </div>
-            <div class="card stat-card stat-danger" data-click="navigateFromDashboardCard('deliveryOverdue')">
+            <div class="card stat-card stat-danger" data-click="navigateFromDashboardCard('recentDeliveryOverdue')">
                 <div class="stat-icon">🚨</div>
                 <div class="stat-content">
                     <div class="card-title">近7天交付预警</div>
@@ -668,18 +669,59 @@ function renderDashboardCharts(data) {
     if (el) el.innerHTML = `<div class="chart-grid">${charts.join('')}</div>`;
 }
 
-export function navigateFromDashboardCard(target, overrideStatus) {
+export async function navigateFromDashboardCard(target, overrideStatus) {
     const dashMonth = document.getElementById('dashboardMonth')?.value || '';
     const dashStatus = document.getElementById('dashboardStatus')?.value || '';
     const dashBiz = document.getElementById('dashboardBusinessType')?.value || '';
+    const dashRole = document.getElementById('dashboardRole')?.value || '';
 
-    const applyProjectFilters = () => {
+    const applyProjectFilters = async () => {
+        console.log('[Dashboard→Projects] applyProjectFilters params', { dashMonth, dashStatus, dashBiz, dashRole, overrideStatus, target });
         state.projectFilterMonth = dashMonth || '';
+        // 重置项目列表页码与搜索条件，避免之前的搜索导致空结果
+        state.projectPage = 1;
+        const searchInput = document.getElementById('projectSearch');
+        if (searchInput) searchInput.value = '';
+
         const statusSel = document.getElementById('projectStatusFilter');
         const bizSel = document.getElementById('projectBizFilter');
-        if (statusSel && (overrideStatus || dashStatus !== undefined)) statusSel.value = overrideStatus || dashStatus;
+        // 如果overrideStatus有值，优先使用overrideStatus；否则使用dashStatus
+        const finalStatus = overrideStatus !== undefined && overrideStatus !== null ? overrideStatus : dashStatus;
+        if (statusSel && finalStatus !== undefined && finalStatus !== '') {
+            statusSel.value = finalStatus;
+        } else if (statusSel && overrideStatus !== undefined && overrideStatus !== null) {
+            // 即使finalStatus是空字符串，如果overrideStatus明确传递了值，也要设置
+            statusSel.value = overrideStatus;
+        }
         if (bizSel && dashBiz !== undefined) bizSel.value = dashBiz;
-        window.renderProjects?.();
+
+        console.log('[Dashboard→Projects] state flags before render', {
+            projectFilterMonth: state.projectFilterMonth,
+            projectFilterDeliveryOverdue: state.projectFilterDeliveryOverdue,
+            projectFilterRecentCompleted: state.projectFilterRecentCompleted,
+            finalStatus
+        });
+
+        // 构建与 dashboard 相同的筛选条件
+        const filters = {};
+        if (dashMonth) filters.month = dashMonth;
+        // 优先使用overrideStatus，如果overrideStatus没有值，再使用dashStatus
+        if (overrideStatus !== undefined && overrideStatus !== null && overrideStatus !== '') {
+            filters.status = overrideStatus;
+        } else if (dashStatus) {
+            filters.status = dashStatus;
+        }
+        if (dashBiz) filters.businessType = dashBiz;
+        if (dashRole) filters.role = dashRole;
+
+        // 始终重新加载项目，使用与 dashboard 相同的筛选条件
+        console.log('[Dashboard→Projects] loading projects with filters', filters);
+        try {
+            await loadProjects(filters);
+            renderProjects();
+        } catch (err) {
+            console.error('[Dashboard→Projects] loadProjects failed', err);
+        }
     };
 
     const applyFinanceMonth = (fieldId) => {
@@ -692,7 +734,19 @@ export function navigateFromDashboardCard(target, overrideStatus) {
     switch (target) {
         case 'projects':
             showSection('projects');
+            // 默认从看板跳转时关闭特殊过滤
             state.projectFilterDeliveryOverdue = false;
+            state.projectFilterRecentCompleted = false;
+            applyProjectFilters();
+            break;
+        case 'recentCompleted':
+            showSection('projects');
+            state.projectFilterDeliveryOverdue = false;
+            state.projectFilterRecentCompleted = true;
+            {
+                const statusSel = document.getElementById('projectStatusFilter');
+                if (statusSel) statusSel.value = 'completed';
+            }
             applyProjectFilters();
             break;
         case 'paymentOverdue':
@@ -710,10 +764,41 @@ export function navigateFromDashboardCard(target, overrideStatus) {
             window.loadPaymentRecordsProjects?.();
             break;
         case 'receivables':
-            showSection('finance');
-            window.showFinanceSection?.('receivables');
-            applyFinanceMonth('financeMonth');
-            window.loadReceivables?.();
+            // 检查用户是否有财务查看权限
+            const hasFinanceView = hasPermission('finance.view');
+            if (!hasFinanceView) {
+                // 销售角色：只能查看自己创建的项目回款记录
+                // 先设置销售视图标记，避免finance.onEnter覆盖
+                state.salesFinanceView = true;
+                // 直接跳转到财务模块
+                showSection('finance');
+                // 使用setTimeout确保DOM已更新，并且finance.onEnter已执行
+                setTimeout(() => {
+                    // 再次确保设置销售视图标记（防止被覆盖）
+                    state.salesFinanceView = true;
+                    if (window.showFinanceSection) {
+                        window.showFinanceSection('paymentRecords');
+                    }
+                    applyFinanceMonth('paymentMonth');
+                    if (window.loadPaymentRecordsProjects) {
+                        window.loadPaymentRecordsProjects();
+                    }
+                }, 100);
+            } else {
+                // 财务/管理员：可以查看应收对账
+                // 确保清除销售视图标记
+                state.salesFinanceView = false;
+                showSection('finance');
+                setTimeout(() => {
+                    if (window.showFinanceSection) {
+                        window.showFinanceSection('receivables');
+                    }
+                    applyFinanceMonth('financeMonth');
+                    if (window.loadReceivables) {
+                        window.loadReceivables();
+                    }
+                }, 100);
+            }
             break;
         case 'deliveryOverdue':
             showSection('projects');
@@ -722,6 +807,19 @@ export function navigateFromDashboardCard(target, overrideStatus) {
                 if (statusSel) statusSel.value = overrideStatus || dashStatus || 'in_progress';
             }
             state.projectFilterDeliveryOverdue = true;
+            state.projectFilterRecentDeliveryOverdue = false; // 不使用近7天限制
+            state.projectFilterRecentCompleted = false;
+            applyProjectFilters();
+            break;
+        case 'recentDeliveryOverdue':
+            showSection('projects');
+            state.projectFilterDeliveryOverdue = false; // 不使用全部交付逾期
+            state.projectFilterRecentDeliveryOverdue = true; // 使用近7天交付逾期
+            state.projectFilterRecentCompleted = false;
+            {
+                const statusSel = document.getElementById('projectStatusFilter');
+                if (statusSel) statusSel.value = '';
+            }
             applyProjectFilters();
             break;
         case 'kpi':

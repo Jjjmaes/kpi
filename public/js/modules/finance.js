@@ -2,7 +2,7 @@
 import { apiFetch } from '../core/api.js';
 import { state } from '../core/state.js';
 import { showModal, closeModal } from '../core/ui.js';
-import { showToast, showAlert, getStatusText, getStatusBadgeClass, getBusinessTypeText, getRoleText } from '../core/utils.js';
+import { showToast, showAlert, getStatusText, getStatusBadgeClass, getBusinessTypeText, getRoleText, hasPermission } from '../core/utils.js';
 import { API_BASE } from '../core/config.js';
 
 // 缓存与分页状态（模块私有）
@@ -652,7 +652,8 @@ export async function loadPaymentRecordsProjects() {
     const status = document.getElementById('paymentStatusFilter')?.value || '';
     const paymentStatus = document.getElementById('paymentProjectPaymentStatus')?.value || '';
     const customerId = document.getElementById('paymentCustomer')?.value || '';
-    const salesId = isFinanceRole() ? (document.getElementById('paymentSales')?.value || '') : (state.currentUser?._id || '');
+    // 销售角色不需要传递salesId，后端会自动过滤为自己创建的项目
+    const salesId = isFinanceRole() ? (document.getElementById('paymentSales')?.value || '') : '';
 
     const params = new URLSearchParams();
     if (status) params.append('status', status);
@@ -669,17 +670,25 @@ export async function loadPaymentRecordsProjects() {
         params.append('dueBefore', end.toISOString());
     }
     if (customerId) params.append('customerId', customerId);
-    if (salesId) params.append('salesId', salesId);
-
-    const res = await apiFetch(`/finance/receivables?${params.toString()}`);
-    const data = await res.json();
-    if (!data.success) {
-        showAlert('paymentProjectsList', data.message || '加载失败', 'error');
-        return;
+    // 只有财务/管理员才传递salesId参数
+    if (salesId && isFinanceRole()) {
+        params.append('salesId', salesId);
     }
-    paymentRecordsProjectsCache = data.data || [];
-    paymentRecordsProjectsPage = 1;
-    renderPaymentRecordsProjects();
+
+    try {
+        const res = await apiFetch(`/finance/receivables?${params.toString()}`);
+        const data = await res.json();
+        if (!data.success) {
+            showAlert('paymentProjectsList', data.message || '加载失败', 'error');
+            return;
+        }
+        paymentRecordsProjectsCache = data.data || [];
+        paymentRecordsProjectsPage = 1;
+        renderPaymentRecordsProjects();
+    } catch (error) {
+        console.error('[loadPaymentRecordsProjects] 加载失败:', error);
+        showAlert('paymentProjectsList', '加载失败: ' + error.message, 'error');
+    }
 }
 
 export function renderPaymentRecordsProjects() {
@@ -1291,8 +1300,15 @@ async function loadInvoiceRecordsForProject(projectId) {
 // ============ 财务模块导航与报表/对账/待办（补齐拆分遗漏） ============
 
 export function showFinanceSection(sectionName) {
+    // 检查用户是否有财务查看权限（如果没有权限，强制设置为销售视图）
+    const hasFinanceView = hasPermission('finance.view');
+    if (!hasFinanceView) {
+        state.salesFinanceView = true;
+    }
+    
     // 销售只允许查看回款列表（由系统配置/状态控制）
-    if (state.salesFinanceView && !isFinanceRole()) {
+    const isSalesView = state.salesFinanceView && !isFinanceRole();
+    if (isSalesView) {
         sectionName = 'paymentRecords';
     }
 
@@ -1300,6 +1316,27 @@ export function showFinanceSection(sectionName) {
     document.querySelectorAll('.finance-section-content').forEach(el => {
         el.style.display = 'none';
     });
+
+    // 根据权限显示/隐藏导航卡片
+    const financeNav = document.getElementById('financeNavCards');
+    if (financeNav) {
+        const navCards = financeNav.querySelectorAll('.finance-nav-card');
+        navCards.forEach(card => {
+            const cardSection = card.dataset.section;
+            // 销售只能看到回款记录，其他卡片都隐藏
+            if (isSalesView) {
+                if (cardSection === 'paymentRecords') {
+                    card.style.display = 'block';
+                } else {
+                    card.style.display = 'none';
+                }
+            } else {
+                // 财务/管理员可以看到所有卡片
+                card.style.display = 'block';
+            }
+        });
+        financeNav.style.display = 'grid';
+    }
 
     // 激活当前卡片
     document.querySelectorAll('.finance-nav-card').forEach(card => {
@@ -1310,12 +1347,10 @@ export function showFinanceSection(sectionName) {
     const target = document.getElementById(`financeSection-${sectionName}`);
     if (target) target.style.display = 'block';
 
-    // 始终显示导航卡片（用户友好的设计）
-    const financeNav = document.getElementById('financeNavCards');
-    if (financeNav) financeNav.style.display = 'grid';
-
     const financeTitle = document.querySelector('#finance h2');
-    if (financeTitle) financeTitle.textContent = '财务管理';
+    if (financeTitle) {
+        financeTitle.textContent = isSalesView ? '我的回款记录' : '财务管理';
+    }
 
     // 销售视图：限制筛选条件（仅自己/自己的客户）
     const paymentSales = document.getElementById('paymentSales');
@@ -1340,7 +1375,7 @@ export function showFinanceSection(sectionName) {
         if (invoiceCustomer) invoiceCustomer.disabled = false;
     }
 
-    if (state.salesFinanceView && !isFinanceRole()) {
+    if (isSalesView) {
         // salesFinanceView 由后端/系统配置决定，这里只做前端限制
         // 默认加载回款项目列表
         loadPaymentRecordsProjects();

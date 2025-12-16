@@ -35,8 +35,8 @@ router.get('/receivables', allowViewFinance, async (req, res) => {
     if (financeViewPerm === true || financeViewPerm === 'all') {
       // 可以查看所有财务数据，财务/管理员可按销售筛选
       if (salesId && isAdminOrFinance) baseConditions.createdBy = salesId;
-    } else if (financeViewPerm === 'sales') {
-      // 只能查看自己创建的项目
+    } else if (financeViewPerm === 'sales' || (!financeViewPerm && (currentRole === 'sales' || currentRole === 'part_time_sales'))) {
+      // 只能查看自己创建的项目（销售角色即使没有finance.view权限，也可以查看自己的项目回款）
       baseConditions.createdBy = req.user._id;
     } else {
       // 无权限，返回空结果

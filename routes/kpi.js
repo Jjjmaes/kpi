@@ -68,13 +68,57 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
     if (businessType) projectQuery.businessType = businessType;
     if (customerId) projectQuery.customerId = customerId;
 
-    // 时间范围：已完成用 completedAt，未完成用 createdAt
-    projectQuery.$or = [
-      { completedAt: { $gte: startDate, $lte: endDate } },
-      { completedAt: { $exists: false }, createdAt: { $gte: startDate, $lte: endDate } }
-    ];
+  // 如果前端选择了特定角色（dashboardRole 下拉），按该角色进一步限定项目范围（基于当前用户在该角色下参与或创建的项目）
+  if (role) {
+    let roleProjectIds = [];
+    if (role === 'sales') {
+      // 销售：本人创建的项目 + 作为销售成员的项目
+      const salesMemberProjects = await ProjectMember.find({ userId: req.user._id, role: 'sales' }).distinct('projectId');
+      const createdProjects = await Project.find({ createdBy: req.user._id }).distinct('_id');
+      roleProjectIds = [...new Set([...salesMemberProjects.map(String), ...createdProjects.map(String)])];
+    } else {
+      // 其他角色：仅本人作为该角色成员参与的项目
+      const memberProjects = await ProjectMember.find({ userId: req.user._id, role }).distinct('projectId');
+      roleProjectIds = memberProjects.map(String);
+    }
 
-    const projects = await Project.find(projectQuery).populate('createdBy', 'roles');
+    // 将角色过滤与现有可见性过滤求交集
+    if (projectQuery._id && projectQuery._id.$in) {
+      const allowedSet = new Set(roleProjectIds);
+      const intersected = projectQuery._id.$in.map(String).filter(id => allowedSet.has(id));
+      projectQuery._id = { $in: intersected };
+    } else if (roleProjectIds.length > 0) {
+      projectQuery._id = { $in: roleProjectIds };
+    } else {
+      // 没有符合角色的项目，确保查询结果为空
+      projectQuery._id = { $in: [] };
+    }
+  }
+
+    // 时间范围：统一使用 createdAt 判断当月项目数（避免跨月重复统计）
+    projectQuery.createdAt = { $gte: startDate, $lte: endDate };
+
+    let projects = await Project.find(projectQuery).populate('createdBy', 'roles');
+
+    // 再次基于 dashboardRole 对项目进行用户侧过滤（防止查询条件未生效或遗漏）
+    if (role) {
+      let allowedIds = [];
+      if (role === 'sales') {
+        const salesMemberProjects = await ProjectMember.find({ userId: req.user._id, role: 'sales' }).distinct('projectId');
+        const createdProjects = await Project.find({ createdBy: req.user._id }).distinct('_id');
+        allowedIds = [...new Set([...salesMemberProjects.map(String), ...createdProjects.map(String)])];
+      } else {
+        const memberProjects = await ProjectMember.find({ userId: req.user._id, role }).distinct('projectId');
+        allowedIds = memberProjects.map(String);
+      }
+      if (allowedIds.length > 0) {
+        const allowedSet = new Set(allowedIds.map(String));
+        projects = projects.filter(p => allowedSet.has(p._id.toString()));
+      } else {
+        projects = [];
+      }
+    }
+
     const projectCount = projects.length;
     const totalProjectAmount = canViewAmount
       ? projects.reduce((sum, p) => sum + (p.projectAmount || 0), 0)
@@ -349,11 +393,8 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
         if (businessType) trendProjectQuery.businessType = businessType;
         if (customerId) trendProjectQuery.customerId = customerId;
         
-        // 时间范围
-        trendProjectQuery.$or = [
-          { completedAt: { $gte: trendStartDate, $lte: trendEndDate } },
-          { completedAt: { $exists: false }, createdAt: { $gte: trendStartDate, $lte: trendEndDate } }
-        ];
+        // 时间范围：统一使用 createdAt 判断当月项目（与 dashboard 保持一致）
+        trendProjectQuery.createdAt = { $gte: trendStartDate, $lte: trendEndDate };
         
         const trendProjects = await Project.find(trendProjectQuery);
         const trendAmount = trendProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0);
@@ -409,7 +450,12 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
 
     // 交付逾期预警：未完成且deadline已过
     const deliveryWarnings = projects
-      .filter(p => p.status !== 'completed' && p.deadline && p.deadline < now)
+      .filter(p => {
+        // 只统计未完成且未取消的项目，且交付时间已过
+        const status = (p.status || '').toLowerCase();
+        const isActive = status === 'pending' || status === 'in_progress';
+        return isActive && p.deadline && p.deadline < now;
+      })
       .map(p => ({
         projectId: p._id,
         projectName: p.projectName,
