@@ -7,6 +7,9 @@ const mongoose = require('mongoose');
 const path = require('path'); // 【新增】引入 path 模块用于处理绝对路径
 
 const app = express();
+// 【新增】配置 Express 信任 Nginx 反向代理
+// '1' 表示信任第一层代理（即你的 Nginx）
+app.set('trust proxy', 1);
 
 // 安全中间件
 app.use(helmet({
