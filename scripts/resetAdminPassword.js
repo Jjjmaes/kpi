@@ -12,7 +12,7 @@ async function resetAdminPassword() {
   const newPassword = newPasswordArg || 'admin123';
 
   try {
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/kpi');
+    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/kpi_system');
     console.log('✅ 数据库连接成功');
 
     const admin = await User.findOne({ username });

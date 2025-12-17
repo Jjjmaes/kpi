@@ -9,7 +9,7 @@ const User = require('../models/User');
 async function initAdmin() {
   try {
     // 连接数据库
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/kpi');
+    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/kpi_system');
     console.log('✅ 数据库连接成功');
 
     // 检查是否已存在管理员
@@ -22,7 +22,7 @@ async function initAdmin() {
     // 创建管理员
     const admin = await User.create({
       username: 'admin',
-      password: 'admin123', // 生产环境请修改！
+      password: '!QAZ2wsx', // 生产环境请修改！
       name: '系统管理员',
       email: 'admin@example.com',
       roles: ['admin']
