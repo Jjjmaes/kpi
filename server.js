@@ -148,21 +148,44 @@ app.get('/api/server-info', (req, res) => {
     });
 });
 
+// 【修改开始】
 
-// 【新增】SPA 后备路由 (Fallback Route)
-// 捕获所有未被 /api/ 路由匹配到的请求，并返回 index.html
-app.get('*', (req, res) => {
-    // 强制使用绝对路径返回 index.html
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-}); 
+// 1. 临时 404 处理 (仅用于 API 路径未找到)
 
+// 放在这里，确保任何未匹配到的 /api/ 路由可以被我们的 notFoundHandler 捕获。
 
-// 404 处理（必须在所有路由之后，错误处理之前）
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
-// 注意：由于 app.get('*') 已经捕获了大部分 404，此 handler 主要用于处理 /api/ 路由内部的 404 
+
+// 2. SPA 后备路由：仅捕获非 /api/ 开头的 GET 请求
+
+// 我们不使用 app.get('*') 来避免捕获未匹配到的 API 路由
+
+// 而是让 notFoundHandler 来处理 API 404
+
+app.use((req, res, next) => {
+    // 检查请求是否不是以 /api/ 开头 并且 方法是 GET (因为前端只会用 GET 请求静态文件)
+    // 尽管 Express static 已经处理了静态文件，这一层是处理 SPA 路由的 /dashboard, /user/123 等路径
+    if (!req.url.startsWith('/api/') && req.method === 'GET') {
+        // 返回 index.html，让前端路由处理
+        return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    }
+    next();
+});
+
+// 3. 404 处理
+
+// 放在 app.use(notFoundHandler) 这里的 notFoundHandler
+
+// 将只捕获：
+
+//   a) 未被 /api/ 路由明确匹配的 API 请求 (例如 POST /api/auth/xxx)
+
+//   b) 未被上面的 app.use 捕获的其他 GET 请求
+
 app.use(notFoundHandler); 
 
-// 统一错误处理中间件（必须在最后）
+// 4. 统一错误处理中间件（必须在最后）
+
 app.use(errorHandler);
 
 
