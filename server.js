@@ -97,10 +97,6 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/backup', backupRoutes);
-// 根路径响应 - 解决 kpi.fanyiworld.com/ 404 问题
-app.get('/', (req, res) => {
-  res.json({ success: true, message: 'KPI API Service is running and responsive.' });
-});
 
 // 健康检查
 app.get('/health', (req, res) => {
