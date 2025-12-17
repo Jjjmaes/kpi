@@ -29,6 +29,13 @@ router.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body;
 
+    // 添加调试日志（生产环境可以移除）
+    console.log('[Login] 登录请求:', { 
+      username, 
+      hasPassword: !!password,
+      timestamp: new Date().toISOString()
+    });
+
     if (!username || !password) {
       return res.status(400).json({ 
         success: false, 
@@ -42,6 +49,7 @@ router.post('/login', async (req, res) => {
 
     const user = await User.findOne({ username, isActive: true });
     if (!user) {
+      console.log('[Login] 用户未找到或已禁用:', username);
       return res.status(401).json({ 
         success: false, 
         error: {
@@ -52,8 +60,15 @@ router.post('/login', async (req, res) => {
       });
     }
 
+    console.log('[Login] 用户找到:', { 
+      username: user.username, 
+      isActive: user.isActive,
+      hasPassword: !!user.password 
+    });
+
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
+      console.log('[Login] 密码验证失败:', username);
       return res.status(401).json({ 
         success: false, 
         error: {
@@ -63,6 +78,8 @@ router.post('/login', async (req, res) => {
         }
       });
     }
+
+    console.log('[Login] 登录成功:', username);
 
     // 兼容历史用户：若未设置标记，则要求修改密码
     if (user.passwordMustChange === undefined) {

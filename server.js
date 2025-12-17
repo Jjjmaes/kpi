@@ -6,6 +6,14 @@ const rateLimit = require('express-rate-limit');
 const mongoose = require('mongoose');
 const path = require('path'); // 【新增】引入 path 模块用于处理绝对路径
 
+// 调试：输出关键配置信息（生产环境可以移除或改为仅错误时输出）
+console.log('[Server] 启动配置检查:');
+console.log('  - 工作目录:', process.cwd());
+console.log('  - 脚本目录:', __dirname);
+console.log('  - MongoDB URI:', process.env.MONGODB_URI ? '已配置' : '使用默认值');
+console.log('  - JWT Secret:', process.env.JWT_SECRET ? '已配置' : '使用默认值（不安全）');
+console.log('  - PORT:', process.env.PORT || 3000);
+
 const app = express();
 // 【新增】配置 Express 信任 Nginx 反向代理
 // '1' 表示信任第一层代理（即你的 Nginx）
@@ -150,23 +158,25 @@ app.get('/api/server-info', (req, res) => {
 
 // 【修改开始】
 
-// 1. 临时 404 处理 (仅用于 API 路径未找到)
-
-// 放在这里，确保任何未匹配到的 /api/ 路由可以被我们的 notFoundHandler 捕获。
+// 1. 引入错误处理中间件
 
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 
-// 2. SPA 后备路由：仅捕获非 /api/ 开头的 GET 请求
+// 2. SPA 后备路由：仅捕获非 /api/ 开头的 GET 请求，且不是静态文件请求
 
 // 我们不使用 app.get('*') 来避免捕获未匹配到的 API 路由
 
 // 而是让 notFoundHandler 来处理 API 404
 
+// 注意：express.static 已经处理了静态文件，如果文件存在会直接返回，不会继续执行
+// 只有当静态文件不存在时，才会继续执行到这里，此时返回 index.html 用于 SPA 路由
+
 app.use((req, res, next) => {
-    // 检查请求是否不是以 /api/ 开头 并且 方法是 GET (因为前端只会用 GET 请求静态文件)
-    // 尽管 Express static 已经处理了静态文件，这一层是处理 SPA 路由的 /dashboard, /user/123 等路径
+    // 只处理非 /api/ 开头的 GET 请求
+    // 排除静态文件扩展名（这些应该由 express.static 处理）
     if (!req.url.startsWith('/api/') && req.method === 'GET') {
-        // 返回 index.html，让前端路由处理
+        // 检查是否是静态文件请求（如果静态文件不存在，express.static 不会响应，继续到这里）
+        // 此时返回 index.html，让前端路由处理
         return res.sendFile(path.join(__dirname, 'public', 'index.html'));
     }
     next();
@@ -180,7 +190,7 @@ app.use((req, res, next) => {
 
 //   a) 未被 /api/ 路由明确匹配的 API 请求 (例如 POST /api/auth/xxx)
 
-//   b) 未被上面的 app.use 捕获的其他 GET 请求
+//   b) 未被上面的 app.use 捕获的其他非 GET 请求
 
 app.use(notFoundHandler); 
 

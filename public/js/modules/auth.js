@@ -315,7 +315,9 @@ export function bindAuthEvents() {
                     showMainApp();
                 }
             } else {
-                showAlert('loginAlert', data.message, 'error');
+                // 处理统一错误格式：错误消息可能在 data.message 或 data.error.message
+                const errorMessage = data.error?.message || data.message || '登录失败';
+                showAlert('loginAlert', errorMessage, 'error');
             }
         } catch (err) {
             showAlert('loginAlert', '登录失败', 'error');
