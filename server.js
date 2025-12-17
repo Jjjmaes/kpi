@@ -4,30 +4,31 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const mongoose = require('mongoose');
+const path = require('path'); // 【新增】引入 path 模块用于处理绝对路径
 
 const app = express();
 
 // 安全中间件
 app.use(helmet({
-  contentSecurityPolicy: false, // 允许内联脚本（前端使用）
-  crossOriginEmbedderPolicy: false
+    contentSecurityPolicy: false, // 允许内联脚本（前端使用）
+    crossOriginEmbedderPolicy: false
 }));
 
 // 速率限制：API请求限制
 const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15分钟
-  max: 1000, // 限制每个IP 15分钟内最多1000次请求
-  message: { success: false, message: '请求过于频繁，请稍后再试' },
-  standardHeaders: true,
-  legacyHeaders: false,
+    windowMs: 15 * 60 * 1000, // 15分钟
+    max: 1000, // 限制每个IP 15分钟内最多1000次请求
+    message: { success: false, message: '请求过于频繁，请稍后再试' },
+    standardHeaders: true,
+    legacyHeaders: false,
 });
 
 // 登录接口更严格的限制
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15分钟
-  max: 20, // 限制每个IP 15分钟内最多20次登录尝试
-  message: { success: false, message: '登录尝试过于频繁，请15分钟后再试' },
-  skipSuccessfulRequests: true, // 成功请求不计入限制
+    windowMs: 15 * 60 * 1000, // 15分钟
+    max: 20, // 限制每个IP 15分钟内最多20次登录尝试
+    message: { success: false, message: '登录尝试过于频繁，请15分钟后再试' },
+    skipSuccessfulRequests: true, // 成功请求不计入限制
 });
 
 // 应用速率限制到API路由
@@ -36,40 +37,41 @@ app.use('/api/auth/login', authLimiter);
 
 // CORS配置：生产环境建议配置白名单
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-  : null; // null 表示未配置，允许所有来源
+    ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+    : null; // null 表示未配置，允许所有来源
 
 app.use(cors({
-  origin: (origin, callback) => {
-    // 允许无origin的请求（如移动应用、Postman、同源请求等）
-    if (!origin) return callback(null, true);
-    
-    // 如果未配置白名单（ALLOWED_ORIGINS环境变量），允许所有来源
-    if (!allowedOrigins) {
-      return callback(null, true);
-    }
-    
-    // 检查是否在白名单中
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    
-    // 记录被拒绝的请求以便调试
-    console.warn(`⚠️  CORS拒绝请求: ${origin}`);
-    console.warn(`   允许的来源: ${allowedOrigins.join(', ')}`);
-    console.warn(`   提示: 如果这是合法请求，请在 .env 文件中添加: ALLOWED_ORIGINS=${origin}`);
-    
-    callback(new Error(`不允许的来源: ${origin}。请在服务器 .env 文件中配置 ALLOWED_ORIGINS 环境变量，添加允许的域名/IP，例如: ALLOWED_ORIGINS=http://${origin.replace(/^https?:\/\//, '')},https://${origin.replace(/^https?:\/\//, '')}`));
-  },
-  credentials: true,
-  optionsSuccessStatus: 200
+    origin: (origin, callback) => {
+        // 允许无origin的请求（如移动应用、Postman、同源请求等）
+        if (!origin) return callback(null, true);
+        
+        // 如果未配置白名单（ALLOWED_ORIGINS环境变量），允许所有来源
+        if (!allowedOrigins) {
+            return callback(null, true);
+        }
+        
+        // 检查是否在白名单中
+        if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        
+        // 记录被拒绝的请求以便调试
+        console.warn(`⚠️  CORS拒绝请求: ${origin}`);
+        console.warn(`    允许的来源: ${allowedOrigins.join(', ')}`);
+        console.warn(`    提示: 如果这是合法请求，请在 .env 文件中添加: ALLOWED_ORIGINS=${origin}`);
+        
+        callback(new Error(`不允许的来源: ${origin}。请在服务器 .env 文件中配置 ALLOWED_ORIGINS 环境变量，添加允许的域名/IP，例如: ALLOWED_ORIGINS=http://${origin.replace(/^https?:\/\//, '')},https://${origin.replace(/^https?:\/\//, '')}`));
+    },
+    credentials: true,
+    optionsSuccessStatus: 200
 }));
 
 app.use(express.json({ limit: '10mb' })); // 限制请求体大小
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // 静态文件服务
-app.use(express.static('public'));
+// 【修改】使用绝对路径，防止 CWD 变化导致找不到文件
+app.use(express.static(path.join(__dirname, 'public'))); 
 
 // 路由
 const authRoutes = require('./routes/auth');
@@ -85,6 +87,7 @@ const auditRoutes = require('./routes/audit');
 const notificationRoutes = require('./routes/notifications');
 const backupRoutes = require('./routes/backup');
 
+// API 路由
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/projects', projectRoutes);
@@ -100,110 +103,120 @@ app.use('/api/backup', backupRoutes);
 
 // 健康检查
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', message: 'KPI System is running' });
+    res.json({ status: 'ok', message: 'KPI System is running' });
 });
 
 // 获取服务器信息（用于前端自动配置API地址）
 app.get('/api/server-info', (req, res) => {
-  const os = require('os');
-  const protocol = req.protocol;
-  const host = req.get('host');
-  
-  // 获取本机IP地址
-  function getLocalIP() {
-    const interfaces = os.networkInterfaces();
-    for (const name of Object.keys(interfaces)) {
-      for (const iface of interfaces[name]) {
-        if (iface.family === 'IPv4' && !iface.internal) {
-          return iface.address;
+    const os = require('os');
+    const protocol = req.protocol;
+    const host = req.get('host');
+    
+    // 获取本机IP地址
+    function getLocalIP() {
+        const interfaces = os.networkInterfaces();
+        for (const name of Object.keys(interfaces)) {
+            for (const iface of interfaces[name]) {
+                if (iface.family === 'IPv4' && !iface.internal) {
+                    return iface.address;
+                }
+            }
         }
-      }
+        return 'localhost';
     }
-    return 'localhost';
-  }
-  
-  const localIP = getLocalIP();
-  const port = process.env.PORT || 3000;
-  
-  res.json({
-    success: true,
-    data: {
-      protocol,
-      host,
-      localIP,
-      port,
-      accessUrls: {
-        local: `${protocol}://localhost:${port}`,
-        network: `${protocol}://${localIP}:${port}`,
-        current: `${protocol}://${host}`,
-        domain: process.env.DOMAIN ? `${protocol}://${process.env.DOMAIN}` : null
-      }
-    }
-  });
+    
+    const localIP = getLocalIP();
+    const port = process.env.PORT || 3000;
+    
+    res.json({
+        success: true,
+        data: {
+            protocol,
+            host,
+            localIP,
+            port,
+            accessUrls: {
+                local: `${protocol}://localhost:${port}`,
+                network: `${protocol}://${localIP}:${port}`,
+                current: `${protocol}://${host}`,
+                domain: process.env.DOMAIN ? `${protocol}://${process.env.DOMAIN}` : null
+            }
+        }
+    });
 });
 
-// 连接MongoDB
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/kpi_system', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(async () => {
-  console.log('✅ MongoDB connected');
-  
-  // 确保备份目录存在
-  const fs = require('fs').promises;
-  const path = require('path');
-  const backupDir = path.join(__dirname, 'backups');
-  try {
-    await fs.mkdir(backupDir, { recursive: true });
-    console.log('✅ Backup directory ready:', backupDir);
-  } catch (error) {
-    console.error('⚠️ Failed to create backup directory:', error.message);
-  }
 
-  // 启动Cron任务
-  const { scheduleMonthlyKPICalculation, scheduleDailyBackup } = require('./services/cronService');
-  scheduleMonthlyKPICalculation();
-  scheduleDailyBackup();
-  console.log('✅ Cron tasks scheduled');
-})
-.catch(err => {
-  console.error('❌ MongoDB connection error:', err);
-  process.exit(1);
-});
+// 【新增】SPA 后备路由 (Fallback Route)
+// 捕获所有未被 /api/ 路由匹配到的请求，并返回 index.html
+app.get('*', (req, res) => {
+    // 强制使用绝对路径返回 index.html
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+}); 
+
 
 // 404 处理（必须在所有路由之后，错误处理之前）
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
-app.use(notFoundHandler);
+// 注意：由于 app.get('*') 已经捕获了大部分 404，此 handler 主要用于处理 /api/ 路由内部的 404 
+app.use(notFoundHandler); 
 
 // 统一错误处理中间件（必须在最后）
 app.use(errorHandler);
+
+
+// 连接MongoDB
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/kpi_system', {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+})
+.then(async () => {
+    console.log('✅ MongoDB connected');
+    
+    // 确保备份目录存在
+    const fs = require('fs').promises;
+    const path = require('path');
+    const backupDir = path.join(__dirname, 'backups');
+    try {
+        await fs.mkdir(backupDir, { recursive: true });
+        console.log('✅ Backup directory ready:', backupDir);
+    } catch (error) {
+        console.error('⚠️ Failed to create backup directory:', error.message);
+    }
+
+    // 启动Cron任务
+    const { scheduleMonthlyKPICalculation, scheduleDailyBackup } = require('./services/cronService');
+    scheduleMonthlyKPICalculation();
+    scheduleDailyBackup();
+    console.log('✅ Cron tasks scheduled');
+})
+.catch(err => {
+    console.error('❌ MongoDB connection error:', err);
+    process.exit(1);
+});
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0'; // 监听所有网络接口，允许局域网和域名访问
 
 app.listen(PORT, HOST, () => {
-  console.log(`🚀 Server running on http://${HOST}:${PORT}`);
-  console.log(`📡 Accessible from:`);
-  console.log(`   - Local: http://localhost:${PORT}`);
-  console.log(`   - Network: http://${getLocalIP()}:${PORT}`);
-  if (process.env.DOMAIN) {
-    console.log(`   - Domain: ${process.env.DOMAIN}`);
-  }
+    console.log(`🚀 Server running on http://${HOST}:${PORT}`);
+    console.log(`📡 Accessible from:`);
+    console.log(`    - Local: http://localhost:${PORT}`);
+    console.log(`    - Network: http://${getLocalIP()}:${PORT}`);
+    if (process.env.DOMAIN) {
+        console.log(`    - Domain: ${process.env.DOMAIN}`);
+    }
 });
 
 // 获取本机IP地址（用于显示局域网访问地址）
 function getLocalIP() {
-  const os = require('os');
-  const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]) {
-      // 跳过内部（即127.0.0.1）和非IPv4地址
-      if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
-      }
+    const os = require('os');
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            // 跳过内部（即127.0.0.1）和非IPv4地址
+            if (iface.family === 'IPv4' && !iface.internal) {
+                return iface.address;
+            }
+        }
     }
-  }
-  return 'localhost';
+    return 'localhost';
 }
-
