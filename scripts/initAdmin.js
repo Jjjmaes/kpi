@@ -9,7 +9,7 @@ const User = require('../models/User');
 async function initAdmin() {
   try {
     // 连接数据库
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/kpi_system');
+    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/kpi');
     console.log('✅ 数据库连接成功');
 
     // 检查是否已存在管理员
