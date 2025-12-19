@@ -77,8 +77,52 @@ export async function loadUsersForProjectMembers() {
     }
 }
 
-export function showCreateUserModal() {
+// 从角色表加载可用角色（仅加载一次，缓存在 state）
+async function loadAvailableRolesForUser() {
+    if (state.availableRoles && Array.isArray(state.availableRoles) && state.availableRoles.length > 0) {
+        return state.availableRoles;
+    }
+    try {
+        const res = await apiFetch('/roles');
+        const data = await res.json();
+        if (data.success) {
+            // 仅保留启用状态的角色
+            const roles = (data.data || []).filter(r => r.isActive);
+            state.availableRoles = roles;
+            return roles;
+        }
+    } catch (error) {
+        console.error('加载角色列表失败:', error);
+    }
+    return [];
+}
+
+function buildRoleCheckboxesHtml(selectedRoles = []) {
+    const roles = state.availableRoles || [];
+    if (!roles.length) {
+        return '<div style="color:#999;font-size:12px;">暂无可用角色，请先在“角色管理”中配置。</div>';
+    }
+    return roles.map(role => {
+        const checked = selectedRoles.includes(role.code) ? 'checked' : '';
+        const label = role.name || role.code;
+        const description = role.description ? `（${role.description}）` : '';
+        return `
+            <label style="display: flex; align-items: center; gap: 5px; font-weight: normal;">
+                <input type="checkbox" name="roles" value="${role.code}" ${checked}>
+                <span>${label}${description}</span>
+            </label>
+        `;
+    }).join('');
+}
+
+export async function showCreateUserModal() {
     console.log('showCreateUserModal 被调用');
+    
+    // 先加载角色列表
+    await loadAvailableRolesForUser();
+
+    const rolesHtml = buildRoleCheckboxesHtml();
+
     const content = `
         <form id="createUserForm" data-submit="createUser(event)">
             <div class="form-group">
@@ -111,12 +155,7 @@ export function showCreateUserModal() {
             <div class="form-group">
                 <label>角色 *</label>
                 <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px;">
-                    ${['admin', 'finance', 'sales', 'pm', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout'].map(role => `
-                        <label style="display: flex; align-items: center; gap: 5px; font-weight: normal;">
-                            <input type="checkbox" name="roles" value="${role}">
-                            ${getRoleText(role)}
-                        </label>
-                    `).join('')}
+                    ${rolesHtml}
                 </div>
             </div>
             <div class="action-buttons">
@@ -222,6 +261,11 @@ export async function createUser(e) {
 export async function editUser(userId) {
     const user = (state.allUsers || []).find(u => u._id === userId);
     if (!user) return;
+
+    // 确保角色列表已加载
+    await loadAvailableRolesForUser();
+    const rolesHtml = buildRoleCheckboxesHtml(user.roles || []);
+
     const content = `
         <form id="editUserForm" data-submit="updateUser(event, '${userId}')">
             <div class="form-group">
@@ -239,12 +283,7 @@ export async function editUser(userId) {
             <div class="form-group">
                 <label>角色 *</label>
                 <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px;">
-                    ${['admin', 'finance', 'sales', 'pm', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout'].map(role => `
-                        <label style="display: flex; align-items: center; gap: 5px; font-weight: normal;">
-                            <input type="checkbox" name="roles" value="${role}" ${(user.roles || []).includes(role) ? 'checked' : ''}>
-                            ${getRoleText(role)}
-                        </label>
-                    `).join('')}
+                    ${rolesHtml}
                 </div>
             </div>
             <div class="form-group">
