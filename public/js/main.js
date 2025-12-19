@@ -8,10 +8,10 @@ import { showSection, closeModal } from './core/ui.js';
 // 导入业务模块
 import { initAuth, checkAuth, showLogin, showMainApp, logout, bindAuthEvents, submitForcePasswordChange } from './modules/auth.js';
 import { loadDashboard, navigateFromDashboardCard } from './modules/dashboard.js';
-import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectPayments, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, createProject, updateProject, setLayoutCost, addMember, showAddMemberModal, showPaymentModalForProject, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter, showAddMemberModalForCreate, addMemberForCreate, removeCreateProjectMember, toggleCreateTranslatorFields, filterCreateUsersByRole, validateCreateMemberLayoutCost, updateCreateProjectMembersList, onMemberRoleChange, onCreateMemberRoleChange, toggleTranslatorFields, filterUsersByRole, validateAddMemberLayoutCost, closeAddMemberModalAndReturnToCreate, addInlineMemberForCreate, onInlineCreateMemberRoleChange, filterInlineCreateUsersByRole, validateInlineCreateMemberLayoutCost } from './modules/project.js';
+import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectPayments, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, createProject, updateProject, setLayoutCost, addMember, showAddMemberModal, showPaymentModalForProject, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter, showAddMemberModalForCreate, addMemberForCreate, removeCreateProjectMember, toggleCreateTranslatorFields, filterCreateUsersByRole, validateCreateMemberLayoutCost, updateCreateProjectMembersList, onMemberRoleChange, onCreateMemberRoleChange, toggleTranslatorFields, filterUsersByRole, validateAddMemberLayoutCost, closeAddMemberModalAndReturnToCreate, addInlineMemberForCreate, onInlineCreateMemberRoleChange, filterInlineCreateUsersByRole, validateInlineCreateMemberLayoutCost, quickRequestInvoice, viewProjectInvoiceRequest, selectAllProjectsForInvoice, deselectAllProjectsForInvoice, batchRequestInvoice, toggleProjectForInvoice, toggleSelectAllProjects } from './modules/project.js';
 import { loadCustomers, searchCustomers, showCreateCustomerModal, showCreateCustomerModalFromProject, editCustomer, deleteCustomer, createCustomer, updateCustomer, updateCustomerInfo, addCustomerContactRow, removeCustomerContactRow } from './modules/customer.js';
 import { loadKPI, exportKPI, generateMonthlyKPI, showEvaluateModal, submitEvaluation } from './modules/kpi.js';
-import { loadReceivables, renderReceivables, exportReceivables, loadInvoiceProjects, renderInvoiceProjects, addInvoice, addInvoiceForProject, loadPaymentRecordsProjects, renderPaymentRecordsProjects, addPaymentRecord, addPaymentRecordForProject, loadPaymentRecords, clearPaymentRecordFilter, showFinanceSection, loadFinanceSummary, exportFinanceSummary, loadPendingKpi, reviewKpiRecord, rejectKpiRecord, batchReviewKpiRecords, selectAllPendingKpi, deselectAllPendingKpi, toggleSelectAllPendingKpi, loadReconciliation, exportReconciliation, togglePaymentRecords, toggleInvoiceRecords, clearPaymentRecordsFilters, removePaymentRecord, jumpReceivablePage, prevReceivablePage, nextReceivablePage, jumpPaymentRecordsProjectsPage, prevPaymentRecordsProjectsPage, nextPaymentRecordsProjectsPage, jumpInvoiceProjectsPage, prevInvoiceProjectsPage, nextInvoiceProjectsPage, backToFinanceNav, showProjectSelector, filterProjectSelector, selectProject } from './modules/finance.js';
+import { loadReceivables, renderReceivables, exportReceivables, loadInvoiceProjects, renderInvoiceProjects, addInvoice, addInvoiceForProject, loadPaymentRecordsProjects, renderPaymentRecordsProjects, addPaymentRecord, addPaymentRecordForProject, loadPaymentRecords, clearPaymentRecordFilter, showFinanceSection, loadFinanceSummary, exportFinanceSummary, loadPendingKpi, reviewKpiRecord, rejectKpiRecord, batchReviewKpiRecords, selectAllPendingKpi, deselectAllPendingKpi, toggleSelectAllPendingKpi, loadReconciliation, exportReconciliation, togglePaymentRecords, toggleInvoiceRecords, clearPaymentRecordsFilters, removePaymentRecord, jumpReceivablePage, prevReceivablePage, nextReceivablePage, jumpPaymentRecordsProjectsPage, prevPaymentRecordsProjectsPage, nextPaymentRecordsProjectsPage, jumpInvoiceProjectsPage, prevInvoiceProjectsPage, nextInvoiceProjectsPage, backToFinanceNav, showProjectSelector, filterProjectSelector, selectProject, loadInvoiceRequests, renderInvoiceRequests, loadMyInvoiceRequests, renderMyInvoiceRequests, viewInvoiceRequest, approveInvoiceRequest, rejectInvoiceRequest, deleteInvoiceRequest, showCreateInvoiceRequestModal, jumpInvoiceRequestPage, prevInvoiceRequestPage, nextInvoiceRequestPage, jumpMyInvoiceRequestPage, prevMyInvoiceRequestPage, nextMyInvoiceRequestPage } from './modules/finance.js';
 import { loadUsers, loadUsersForSelect, showCreateUserModal, editUser, deleteUser, resetUserPassword, copyPasswordToClipboard, createUser, updateUser, loadProfile, updateProfileInfo, updateProfilePassword } from './modules/user.js';
 import { loadLanguages, showCreateLanguageModal, showEditLanguageModal, createLanguage, updateLanguage } from './modules/language.js';
 import { loadBackups, createBackup, cleanupOldBackups, restoreBackup, deleteBackupFile } from './modules/backup.js';
@@ -521,6 +521,30 @@ const ACTIONS = Object.freeze({
     // Finance（含列表渲染中动态按钮）
     showFinanceSection: (name) => showFinanceSection(name),
     loadReceivables: () => loadReceivables(),
+    // 发票申请
+    loadInvoiceRequests: () => loadInvoiceRequests(),
+    renderInvoiceRequests: () => renderInvoiceRequests(),
+    loadMyInvoiceRequests: () => loadMyInvoiceRequests(),
+    renderMyInvoiceRequests: () => renderMyInvoiceRequests(),
+    viewInvoiceRequest: (id) => viewInvoiceRequest(id),
+    approveInvoiceRequest: (id) => approveInvoiceRequest(id),
+    rejectInvoiceRequest: (id) => rejectInvoiceRequest(id),
+    deleteInvoiceRequest: (id) => deleteInvoiceRequest(id),
+    showCreateInvoiceRequestModal: () => showCreateInvoiceRequestModal(),
+    jumpInvoiceRequestPage: (page, max) => jumpInvoiceRequestPage(page, max),
+    prevInvoiceRequestPage: () => prevInvoiceRequestPage(),
+    nextInvoiceRequestPage: () => nextInvoiceRequestPage(),
+    jumpMyInvoiceRequestPage: (page, max) => jumpMyInvoiceRequestPage(page, max),
+    prevMyInvoiceRequestPage: () => prevMyInvoiceRequestPage(),
+    nextMyInvoiceRequestPage: () => nextMyInvoiceRequestPage(),
+    // 项目相关
+    quickRequestInvoice: (projectId) => quickRequestInvoice(projectId),
+    viewProjectInvoiceRequest: (requestId) => viewProjectInvoiceRequest(requestId),
+    selectAllProjectsForInvoice: () => selectAllProjectsForInvoice(),
+    deselectAllProjectsForInvoice: () => deselectAllProjectsForInvoice(),
+    batchRequestInvoice: () => batchRequestInvoice(),
+    toggleProjectForInvoice: (event) => toggleProjectForInvoice(event),
+    toggleSelectAllProjects: (event) => toggleSelectAllProjects(event),
     renderReceivables: () => renderReceivables(),
     exportReceivables: () => exportReceivables(),
     loadPaymentRecordsProjects: () => loadPaymentRecordsProjects(),
@@ -686,14 +710,19 @@ async function dispatchAction(expr, event, element) {
     // 检查是否有需要传递event的参数
     const hasEventArg = args.some(arg => arg && arg.__passEvent === true);
     
-    // 调试信息 - 添加 createUser 相关的调试
-    if (fnName === 'createUser' || fnName === 'showCreateProjectModal' || fnName === 'viewProject' || fnName === 'showFinanceSection') {
+    // 调试信息 - 添加关键操作的调试
+    if (fnName === 'createUser' || fnName === 'showCreateProjectModal' || fnName === 'viewProject' || fnName === 'showFinanceSection' || 
+        fnName === 'selectAllProjectsForInvoice' || fnName === 'batchRequestInvoice' || fnName === 'toggleProjectForInvoice' ||
+        fnName === 'deselectAllProjectsForInvoice') {
         console.log('Parsed action:', { fnName, args, hasEventArg });
     }
     
     const fn = ACTIONS[fnName];
     if (!fn) {
-        console.warn('Action not found in ACTIONS:', fnName, 'Available actions:', Object.keys(ACTIONS).filter(k => k.includes('view') || k.includes('Project') || k.includes('Create') || k.includes('User')));
+        console.warn('Action not found in ACTIONS:', fnName, 'Available actions:', Object.keys(ACTIONS).filter(k => 
+            k.includes('view') || k.includes('Project') || k.includes('Create') || k.includes('User') || 
+            k.includes('Invoice') || k.includes('selectAll') || k.includes('batch') || k.includes('deselect')
+        ));
         return;
     }
 
@@ -706,8 +735,10 @@ async function dispatchAction(expr, event, element) {
             return arg;
         });
 
-        // 调试信息 - 添加 createUser 相关的调试
-        if (fnName === 'createUser' || fnName === 'viewProject' || fnName === 'showCreateProjectModal' || fnName === 'showFinanceSection' || fnName === 'addPaymentRecordForProject' || fnName === 'addInvoiceForProject') {
+        // 调试信息 - 添加关键操作的调试
+        if (fnName === 'createUser' || fnName === 'viewProject' || fnName === 'showCreateProjectModal' || fnName === 'showFinanceSection' || 
+            fnName === 'addPaymentRecordForProject' || fnName === 'addInvoiceForProject' ||
+            fnName === 'selectAllProjectsForInvoice' || fnName === 'batchRequestInvoice' || fnName === 'toggleProjectForInvoice') {
             console.log('Calling', fnName, 'with args:', processedArgs);
         }
 
@@ -734,8 +765,9 @@ function bindDeclarativeHandlers() {
         if (el) {
             const expr = el.getAttribute('data-click');
             if (expr) {
-                // 调试信息
-                if (expr.includes('showCreateProjectModal') || expr.includes('viewProject') || expr.includes('showFinanceSection')) {
+                // 调试信息（关键操作）
+                if (expr.includes('showCreateProjectModal') || expr.includes('viewProject') || expr.includes('showFinanceSection') ||
+                    expr.includes('selectAllProjectsForInvoice') || expr.includes('batchRequestInvoice') || expr.includes('deselectAllProjectsForInvoice')) {
                     console.log('Click detected on element with data-click:', expr, 'Element:', el);
                 }
                 dispatchAction(expr, e, el);
@@ -760,6 +792,10 @@ function bindDeclarativeHandlers() {
         let el = e.target?.closest?.('[data-change]');
         if (el) {
             const expr = el.getAttribute('data-change');
+            // 调试日志（仅对关键操作）
+            if (expr && (expr.includes('toggleProjectForInvoice') || expr.includes('toggleSelectAll'))) {
+                console.log('Change detected on element with data-change:', expr, 'Element:', el, 'Checked:', el.checked);
+            }
             dispatchAction(expr, e, el);
             return;
         }

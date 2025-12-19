@@ -97,6 +97,7 @@ const customerRoutes = require('./routes/customers');
 const auditRoutes = require('./routes/audit');
 const notificationRoutes = require('./routes/notifications');
 const backupRoutes = require('./routes/backup');
+const invoiceRequestRoutes = require('./routes/invoiceRequests');
 
 // API 路由
 app.use('/api/auth', authRoutes);
@@ -111,6 +112,7 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/backup', backupRoutes);
+app.use('/api/invoice-requests', invoiceRequestRoutes);
 
 // 健康检查
 app.get('/health', (req, res) => {

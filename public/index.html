@@ -183,6 +183,16 @@
                         <div class="finance-nav-title">新增发票</div>
                         <div class="finance-nav-desc">录入新的发票信息</div>
                     </div>
+                    <div class="finance-nav-card" data-click="showFinanceSection('invoiceRequests')" data-section="invoiceRequests" id="invoiceRequestsNavCard" style="display:none;">
+                        <div class="finance-nav-icon">📝</div>
+                        <div class="finance-nav-title">发票申请审批</div>
+                        <div class="finance-nav-desc">审批销售提交的发票申请</div>
+                    </div>
+                    <div class="finance-nav-card" data-click="showFinanceSection('myInvoiceRequests')" data-section="myInvoiceRequests" id="myInvoiceRequestsNavCard" style="display:none;">
+                        <div class="finance-nav-icon">📋</div>
+                        <div class="finance-nav-title">我的发票申请</div>
+                        <div class="finance-nav-desc">查看我提交的发票申请</div>
+                    </div>
                     <div class="finance-nav-card" data-click="showFinanceSection('reconciliation')" data-section="reconciliation">
                         <div class="finance-nav-icon">🔍</div>
                         <div class="finance-nav-title">回款与发票对账</div>
@@ -375,6 +385,57 @@
                         <input type="text" id="invoiceNote" placeholder="备注" style="padding:6px; width:150px;">
                         <button data-click="addInvoice()" style="padding:6px 12px;">新增发票</button>
                     </div>
+                    </div>
+                </div>
+                
+                <!-- 发票申请审批（财务侧） -->
+                <div id="financeSection-invoiceRequests" class="finance-section-content" style="display: none;">
+                    <div class="card" style="margin-bottom:16px;">
+                        <div class="card-title">发票申请审批</div>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
+                            <select id="invoiceRequestStatusFilter" style="padding:6px;" data-change="loadInvoiceRequests()">
+                                <option value="">全部状态</option>
+                                <option value="pending">待审批</option>
+                                <option value="approved">已批准</option>
+                                <option value="rejected">已拒绝</option>
+                            </select>
+                            <select id="invoiceRequestCreatedByFilter" style="padding:6px; min-width:160px;" data-change="loadInvoiceRequests()">
+                                <option value="">全部申请人</option>
+                            </select>
+                            <select id="invoiceRequestCustomerFilter" style="padding:6px; min-width:160px;" data-change="loadInvoiceRequests()">
+                                <option value="">全部客户</option>
+                            </select>
+                            <select id="invoiceRequestPageSize" style="padding:6px;" data-change="renderInvoiceRequests()">
+                                <option value="10">每页10</option>
+                                <option value="20">每页20</option>
+                                <option value="50">每页50</option>
+                            </select>
+                            <button data-click="loadInvoiceRequests()" style="padding:6px 12px;">刷新</button>
+                        </div>
+                        <div id="invoiceRequestsList"></div>
+                    </div>
+                </div>
+                
+                <!-- 我的发票申请（销售侧） -->
+                <div id="financeSection-myInvoiceRequests" class="finance-section-content" style="display: none;">
+                    <div class="card" style="margin-bottom:16px;">
+                        <div class="card-title">我的发票申请</div>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;align-items:center;">
+                            <button data-click="showCreateInvoiceRequestModal()" style="padding:6px 12px;background:#667eea;color:white;border:none;border-radius:4px;cursor:pointer;">➕ 申请开票</button>
+                            <select id="myInvoiceRequestStatusFilter" style="padding:6px;" data-change="loadMyInvoiceRequests()">
+                                <option value="">全部状态</option>
+                                <option value="pending">待审批</option>
+                                <option value="approved">已批准</option>
+                                <option value="rejected">已拒绝</option>
+                            </select>
+                            <select id="myInvoiceRequestPageSize" style="padding:6px;" data-change="renderMyInvoiceRequests()">
+                                <option value="10">每页10</option>
+                                <option value="20">每页20</option>
+                                <option value="50">每页50</option>
+                            </select>
+                            <button data-click="loadMyInvoiceRequests()" style="padding:6px 12px;">刷新</button>
+                        </div>
+                        <div id="myInvoiceRequestsList"></div>
                     </div>
                 </div>
                 

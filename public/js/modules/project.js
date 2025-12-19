@@ -2950,6 +2950,10 @@ export async function loadProjects(filters = {}) {
                 projectFilterDeliveryOverdue: state.projectFilterDeliveryOverdue,
                 projectFilterRecentCompleted: state.projectFilterRecentCompleted
             });
+            
+            // 加载项目的发票申请状态
+            await loadProjectInvoiceRequestStatuses();
+            
             renderProjects();
             // fillFinanceProjectSelects 在后续批次完成
         } else {
@@ -2959,6 +2963,44 @@ export async function loadProjects(filters = {}) {
         console.error('加载项目失败:', error);
         // showAlert 在此批未引入，先用 toast
         showToast('加载项目失败: ' + error.message, 'error');
+    }
+}
+
+// 加载项目的发票申请状态
+async function loadProjectInvoiceRequestStatuses() {
+    try {
+        const projects = state.allProjectsCache || [];
+        if (projects.length === 0) {
+            state.projectInvoiceRequestStatuses = {};
+            return;
+        }
+        
+        const projectIds = projects.map(p => p._id?.toString() || p._id).filter(Boolean);
+        if (projectIds.length === 0) {
+            state.projectInvoiceRequestStatuses = {};
+            return;
+        }
+        
+        // 批量查询发票申请状态
+        const params = new URLSearchParams();
+        params.append('projectIds', projectIds.join(','));
+        
+        const response = await apiFetch(`/invoice-requests/by-projects?${params.toString()}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            state.projectInvoiceRequestStatuses = data.data || {};
+            console.log('[Projects] 发票申请状态加载完成:', {
+                totalProjects: projectIds.length,
+                statusCount: Object.keys(state.projectInvoiceRequestStatuses).length
+            });
+        } else {
+            console.warn('[Projects] 加载发票申请状态失败:', data);
+            state.projectInvoiceRequestStatuses = {};
+        }
+    } catch (error) {
+        console.error('[Projects] 加载发票申请状态异常:', error);
+        state.projectInvoiceRequestStatuses = {};
     }
 }
 
@@ -3090,10 +3132,45 @@ export function renderProjects() {
     const start = (state.projectPage - 1) * pageSize;
     const pageData = filtered.slice(start, start + pageSize);
     const showAmount = canViewProjectAmount();
+    // 判断是否为销售/兼职销售角色
+    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    const isSalesRole = currentRole === 'sales' || currentRole === 'part_time_sales';
+    
+    // 调试信息
+    console.log('[Projects] 角色和权限检查:', {
+        currentRole,
+        isSalesRole,
+        currentUser: state.currentUser?._id,
+        userRoles: state.currentUser?.roles,
+        pageDataCount: pageData.length,
+        projects: pageData.map(p => ({
+            id: p._id,
+            name: p.projectName,
+            status: p.status,
+            createdBy: p.createdBy?._id || p.createdBy
+        }))
+    });
+    
+    // 批量申请开票的选中项目ID列表（存储在模块级别）
+    if (!window.selectedProjectsForInvoice) {
+        window.selectedProjectsForInvoice = new Set();
+    }
+    
     document.getElementById('projectsList').innerHTML = `
+        ${isSalesRole ? `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+                <button class="btn-small" data-click="selectAllProjectsForInvoice()" style="background:#667eea;color:white;border:none;padding:6px 12px;">全选</button>
+                <button class="btn-small" data-click="deselectAllProjectsForInvoice()" style="background:#ccc;color:white;border:none;padding:6px 12px;">取消全选</button>
+                <span id="selectedProjectsCount" style="color:#666;font-size:14px;">已选择 0 个项目</span>
+            </div>
+            <button class="btn-small" data-click="batchRequestInvoice()" id="batchRequestInvoiceBtn" disabled style="background:#10b981;color:white;border:none;padding:6px 12px;">批量申请开票</button>
+        </div>
+        ` : ''}
         <table class="table-sticky">
                     <thead>
                         <tr>
+                            ${isSalesRole ? '<th style="width:50px;"><input type="checkbox" id="selectAllProjectsCheckbox" data-change="toggleSelectAllProjects(event)"></th>' : ''}
                             <th>项目编号</th>
                             <th>项目名称</th>
                             <th>客户名称</th>
@@ -3105,18 +3182,85 @@ export function renderProjects() {
                         </tr>
                     </thead>
                     <tbody>
-                ${(pageData.length ? pageData : []).map(p => `
+                ${(pageData.length ? pageData : []).map(p => {
+                    // 只有销售/兼职销售创建的项目且状态为进行中或已完成时，才显示申请开票相关功能
+                    // 处理 createdBy 可能是对象（有 _id）或字符串ID的情况
+                    const projectCreatedBy = p.createdBy?._id || p.createdBy;
+                    const currentUserId = state.currentUser?._id;
+                    
+                    // 调试信息（仅对第一个项目输出）
+                    if (pageData.indexOf(p) === 0) {
+                        console.log('[Projects] 项目权限检查:', {
+                            projectId: p._id,
+                            projectName: p.projectName,
+                            projectStatus: p.status,
+                            projectCreatedBy,
+                            currentUserId,
+                            isSalesRole,
+                            canRequestInvoice: isSalesRole && 
+                                currentUserId && 
+                                projectCreatedBy && 
+                                (projectCreatedBy.toString() === currentUserId.toString()) &&
+                                (p.status === 'in_progress' || p.status === 'completed')
+                        });
+                    }
+                    
+                    const projectIdStr = (p._id?.toString() || p._id || '').toString();
+                    
+                    // 检查项目是否有发票申请状态
+                    const invoiceRequestStatus = state.projectInvoiceRequestStatuses?.[projectIdStr];
+                    const hasPendingRequest = invoiceRequestStatus?.status === 'pending';
+                    const hasApprovedRequest = invoiceRequestStatus?.status === 'approved';
+                    const hasRejectedRequest = invoiceRequestStatus?.status === 'rejected';
+                    
+                    // 判断是否可以申请开票：
+                    // 1. 必须是销售/兼职销售角色
+                    // 2. 必须是当前用户创建的项目
+                    // 3. 项目状态必须是进行中或已完成
+                    // 4. 不能有待审批或已批准的申请（已拒绝的可以重新申请）
+                    const canRequestInvoice = isSalesRole && 
+                        currentUserId && 
+                        projectCreatedBy && 
+                        (projectCreatedBy.toString() === currentUserId.toString()) &&
+                        (p.status === 'in_progress' || p.status === 'completed') &&
+                        !hasPendingRequest &&
+                        !hasApprovedRequest;
+                    
+                    const isSelected = window.selectedProjectsForInvoice.has(projectIdStr);
+                    
+                    // 生成发票申请状态标签
+                    let invoiceStatusBadge = '';
+                    if (hasPendingRequest) {
+                        invoiceStatusBadge = '<span class="badge" style="background:#f59e0b;color:white;margin-left:4px;">待审批</span>';
+                    } else if (hasApprovedRequest) {
+                        const invoiceNumber = invoiceRequestStatus?.linkedInvoiceNumber;
+                        invoiceStatusBadge = `<span class="badge" style="background:#10b981;color:white;margin-left:4px;">已批准${invoiceNumber ? ` (${invoiceNumber})` : ''}</span>`;
+                    } else if (hasRejectedRequest) {
+                        invoiceStatusBadge = '<span class="badge" style="background:#ef4444;color:white;margin-left:4px;">已拒绝</span>';
+                    }
+                    
+                    return `
                     <tr class="row-striped">
+                            ${isSalesRole ? `
+                                <td>
+                                    ${canRequestInvoice ? `<input type="checkbox" class="project-invoice-checkbox" data-project-id="${projectIdStr}" ${isSelected ? 'checked' : ''} data-change="toggleProjectForInvoice(event)">` : ''}
+                                </td>
+                            ` : ''}
                                 <td>${p.projectNumber || '-'}</td>
-                                <td>${p.projectName}</td>
+                                <td>${p.projectName}${invoiceStatusBadge || ''}</td>
                                 <td>${p.customerId?.name || p.clientName}</td>
                                 <td>${getBusinessTypeText(p.businessType)}</td>
                                 ${showAmount ? `<td>¥${p.projectAmount?.toLocaleString()}</td>` : ''}
                                 <td>${p.deadline ? new Date(p.deadline).toLocaleDateString() : '-'}</td>
                                 <td><span class="badge ${getStatusBadgeClass(p.status)}">${getStatusText(p.status)}</span></td>
-                        <td><button class="btn-small" data-click="viewProject('${p._id || ''}')">查看</button></td>
+                        <td style="display:flex;gap:4px;flex-wrap:wrap;">
+                            <button class="btn-small" data-click="viewProject('${p._id || ''}')">查看</button>
+                            ${canRequestInvoice ? `<button class="btn-small" data-click="quickRequestInvoice('${p._id || ''}')" style="background:#667eea;color:white;border:none;">申请开票</button>` : ''}
+                            ${hasPendingRequest || hasApprovedRequest || hasRejectedRequest ? `<button class="btn-small" data-click="viewProjectInvoiceRequest('${invoiceRequestStatus?.requestId || ''}')" style="background:#8b5cf6;color:white;border:none;">查看申请</button>` : ''}
+                        </td>
                             </tr>
-                `).join('') || `<tr><td colspan="${showAmount ? 8 : 7}" style="text-align:center;">暂无项目</td></tr>`}
+                `;
+                }).join('') || `<tr><td colspan="${isSalesRole ? (showAmount ? 9 : 8) : (showAmount ? 8 : 7)}" style="text-align:center;">暂无项目</td></tr>`}
                     </tbody>
                 </table>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
@@ -3126,12 +3270,249 @@ export function renderProjects() {
             <input type="number" min="1" max="${totalPages}" value="${state.projectPage}" style="width:70px;padding:6px;" data-change="jumpProjectPage(this.value, ${totalPages})">
         </div>
     `;
+    
+    // 初始化选中项目计数（复选框事件通过 data-change 声明式处理）
+    if (isSalesRole) {
+        updateSelectedProjectsCount();
+    }
 }
 
 export function jumpProjectPage(val, total) {
     const page = Math.min(Math.max(parseInt(val || 1, 10), 1), total);
     state.projectPage = page;
     renderProjects();
+}
+
+// 更新选中项目计数
+function updateSelectedProjectsCount() {
+    const count = window.selectedProjectsForInvoice?.size || 0;
+    const countSpan = document.getElementById('selectedProjectsCount');
+    const batchBtn = document.getElementById('batchRequestInvoiceBtn');
+    
+    if (countSpan) {
+        countSpan.textContent = `已选择 ${count} 个项目`;
+    }
+    
+    if (batchBtn) {
+        batchBtn.disabled = count === 0;
+    }
+    
+    // 更新全选复选框状态
+    const selectAllCheckbox = document.getElementById('selectAllProjectsCheckbox');
+    if (selectAllCheckbox) {
+        const checkboxes = document.querySelectorAll('.project-invoice-checkbox');
+        const checkedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
+        selectAllCheckbox.checked = checkboxes.length > 0 && checkedCount === checkboxes.length;
+        selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < checkboxes.length;
+    }
+}
+
+// 全选项目（用于申请开票）
+export function selectAllProjectsForInvoice() {
+    console.log('[Projects] selectAllProjectsForInvoice 被调用');
+    if (!window.selectedProjectsForInvoice) {
+        window.selectedProjectsForInvoice = new Set();
+    }
+    
+    const checkboxes = document.querySelectorAll('.project-invoice-checkbox');
+    console.log('[Projects] 找到复选框数量:', checkboxes.length);
+    
+    checkboxes.forEach(cb => {
+        cb.checked = true;
+        const projectId = cb.dataset.projectId;
+        if (projectId) {
+            window.selectedProjectsForInvoice.add(projectId);
+        }
+    });
+    
+    const selectAllCheckbox = document.getElementById('selectAllProjectsCheckbox');
+    if (selectAllCheckbox) {
+        selectAllCheckbox.checked = checkboxes.length > 0;
+        selectAllCheckbox.indeterminate = false;
+    } else {
+        console.warn('[Projects] 未找到全选复选框元素');
+    }
+    
+    updateSelectedProjectsCount();
+    console.log('[Projects] 已选择项目数量:', window.selectedProjectsForInvoice.size);
+}
+
+// 取消全选项目
+export function deselectAllProjectsForInvoice() {
+    if (!window.selectedProjectsForInvoice) {
+        window.selectedProjectsForInvoice = new Set();
+    }
+    
+    const checkboxes = document.querySelectorAll('.project-invoice-checkbox');
+    checkboxes.forEach(cb => {
+        cb.checked = false;
+        window.selectedProjectsForInvoice.delete(cb.dataset.projectId);
+    });
+    
+    const selectAllCheckbox = document.getElementById('selectAllProjectsCheckbox');
+    if (selectAllCheckbox) {
+        selectAllCheckbox.checked = false;
+        selectAllCheckbox.indeterminate = false;
+    }
+    
+    updateSelectedProjectsCount();
+}
+
+// 切换单个项目的选中状态（通过事件对象获取checkbox状态）
+export function toggleProjectForInvoice(event) {
+    if (!window.selectedProjectsForInvoice) {
+        window.selectedProjectsForInvoice = new Set();
+    }
+    
+    // 从事件对象获取checkbox元素和状态
+    const checkbox = event?.target;
+    if (checkbox && checkbox.classList.contains('project-invoice-checkbox')) {
+        const projectId = checkbox.dataset.projectId;
+        const isChecked = checkbox.checked;
+        
+        if (projectId) {
+            if (isChecked) {
+                window.selectedProjectsForInvoice.add(projectId);
+            } else {
+                window.selectedProjectsForInvoice.delete(projectId);
+            }
+            updateSelectedProjectsCount();
+        }
+    }
+}
+
+// 切换全选状态（通过事件对象获取checkbox状态）
+export function toggleSelectAllProjects(event) {
+    const selectAllCheckbox = event?.target || document.getElementById('selectAllProjectsCheckbox');
+    if (selectAllCheckbox) {
+        if (selectAllCheckbox.checked) {
+            selectAllProjectsForInvoice();
+        } else {
+            deselectAllProjectsForInvoice();
+        }
+    }
+}
+
+// 批量申请开票
+export async function batchRequestInvoice() {
+    console.log('[Projects] batchRequestInvoice 被调用');
+    const selectedIds = Array.from(window.selectedProjectsForInvoice || []);
+    console.log('[Projects] 选中的项目ID:', selectedIds);
+    
+    if (selectedIds.length === 0) {
+        showToast('请至少选择一个项目', 'error');
+        return;
+    }
+    
+    // 保存选中的项目ID，供 showCreateInvoiceRequestModal 使用
+    window.pendingSelectedProjectsForInvoice = new Set(selectedIds);
+    
+    // 导入发票申请相关函数
+    const { showCreateInvoiceRequestModal } = await import('./finance.js');
+    
+    try {
+        // 打开申请表单
+        await showCreateInvoiceRequestModal();
+        
+        // 预选所有选中的项目（使用 setTimeout 确保 DOM 已渲染）
+        setTimeout(() => {
+            const projectsSelect = document.getElementById('invoiceRequestProjects');
+            if (projectsSelect && window.pendingSelectedProjectsForInvoice) {
+                // 清除之前的选择
+                Array.from(projectsSelect.options).forEach(opt => opt.selected = false);
+                
+                // 选中所有已选项目
+                window.pendingSelectedProjectsForInvoice.forEach(projectId => {
+                    const option = Array.from(projectsSelect.options).find(opt => opt.value === projectId || opt.value === projectId.toString());
+                    if (option) {
+                        option.selected = true;
+                    }
+                });
+                
+                // 触发change事件以更新金额提示
+                projectsSelect.dispatchEvent(new Event('change'));
+                
+                // 自动计算总金额
+                const selectedOptions = Array.from(projectsSelect.selectedOptions);
+                const totalAmount = selectedOptions.reduce((sum, opt) => {
+                    return sum + (parseFloat(opt.dataset.amount) || 0);
+                }, 0);
+                
+                const amountInput = document.getElementById('invoiceRequestAmount');
+                if (amountInput && totalAmount > 0) {
+                    amountInput.value = totalAmount;
+                }
+                
+                // 清空临时变量
+                delete window.pendingSelectedProjectsForInvoice;
+            }
+        }, 100);
+        
+        // 清空选择
+        window.selectedProjectsForInvoice.clear();
+        updateSelectedProjectsCount();
+    } catch (error) {
+        showToast('操作失败: ' + error.message, 'error');
+        delete window.pendingSelectedProjectsForInvoice;
+    }
+}
+
+// 查看项目的发票申请详情
+export async function viewProjectInvoiceRequest(requestId) {
+    if (!requestId) {
+        showToast('申请ID无效', 'error');
+        return;
+    }
+    
+    try {
+        const { viewInvoiceRequest } = await import('./finance.js');
+        await viewInvoiceRequest(requestId);
+    } catch (error) {
+        console.error('[Projects] 查看发票申请失败:', error);
+        showToast('查看申请失败: ' + error.message, 'error');
+    }
+}
+
+// 快速申请开票（从项目列表发起，单项目）
+export async function quickRequestInvoice(projectId) {
+    // 导入发票申请相关函数
+    const { showCreateInvoiceRequestModal } = await import('./finance.js');
+    
+    // 先获取项目信息，然后打开申请表单并预选该项目
+    try {
+        const res = await apiFetch(`/projects/${projectId}`);
+        const data = await res.json();
+        
+        if (!data.success) {
+            showToast('获取项目信息失败', 'error');
+            return;
+        }
+        
+        const project = data.data;
+        
+        // 打开申请表单
+        await showCreateInvoiceRequestModal();
+        
+        // 预选该项目
+        const projectsSelect = document.getElementById('invoiceRequestProjects');
+        if (projectsSelect) {
+            // 找到对应的选项并选中
+            const option = Array.from(projectsSelect.options).find(opt => opt.value === projectId);
+            if (option) {
+                option.selected = true;
+                // 触发change事件以更新金额提示
+                projectsSelect.dispatchEvent(new Event('change'));
+            }
+            
+            // 自动填充申请金额为项目金额
+            const amountInput = document.getElementById('invoiceRequestAmount');
+            if (amountInput && project.projectAmount) {
+                amountInput.value = project.projectAmount;
+            }
+        }
+    } catch (error) {
+        showToast('操作失败: ' + error.message, 'error');
+    }
 }
 
 export function prevProjectPage() {

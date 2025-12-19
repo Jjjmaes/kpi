@@ -1326,16 +1326,20 @@ export function showFinanceSection(sectionName) {
             const navCards = financeNav.querySelectorAll('.finance-nav-card');
             navCards.forEach(card => {
                 const cardSection = card.dataset.section;
-                // 销售只能看到回款记录，其他卡片都隐藏
+                // 销售只能看到回款记录和我的发票申请，其他卡片都隐藏
                 if (isSalesView) {
-                    if (cardSection === 'paymentRecords') {
+                    if (cardSection === 'paymentRecords' || cardSection === 'myInvoiceRequests') {
                         card.style.display = 'block';
                     } else {
                         card.style.display = 'none';
                     }
                 } else {
-                    // 财务/管理员可以看到所有卡片
-                    card.style.display = 'block';
+                    // 财务/管理员可以看到所有卡片（除了我的发票申请）
+                    if (cardSection === 'myInvoiceRequests') {
+                        card.style.display = 'none';
+                    } else {
+                        card.style.display = 'block';
+                    }
                 }
             });
             financeNav.style.display = 'grid';
@@ -1386,6 +1390,9 @@ export function showFinanceSection(sectionName) {
         return;
     }
 
+    // 根据权限显示/隐藏发票申请相关导航卡片
+    updateInvoiceRequestNavVisibility();
+    
     // 按区块触发加载
     switch (sectionName) {
         case 'receivables':
@@ -1418,6 +1425,12 @@ export function showFinanceSection(sectionName) {
                 }
             }, 0);
             loadFinanceSummary();
+            break;
+        case 'invoiceRequests':
+            loadInvoiceRequests();
+            break;
+        case 'myInvoiceRequests':
+            loadMyInvoiceRequests();
             break;
         default:
             break;
@@ -2286,4 +2299,962 @@ export function selectProject(projectId, projectNumber, projectName, customerNam
 
 // 导出验证：确保所有分页函数都已导出
 // prevPaymentRecordsProjectsPage, nextPaymentRecordsProjectsPage 已在第631和638行导出
+
+// ============ 发票申请功能 ============
+
+// 发票申请缓存和分页
+let invoiceRequestsCache = [];
+let invoiceRequestPage = 1;
+
+let myInvoiceRequestsCache = [];
+let myInvoiceRequestPage = 1;
+
+// 根据权限更新导航卡片可见性
+function updateInvoiceRequestNavVisibility() {
+    const invoiceRequestsCard = document.getElementById('invoiceRequestsNavCard');
+    const myInvoiceRequestsCard = document.getElementById('myInvoiceRequestsNavCard');
+    
+    if (isFinanceRole()) {
+        // 财务/管理员：显示"发票申请审批"
+        if (invoiceRequestsCard) invoiceRequestsCard.style.display = 'block';
+        if (myInvoiceRequestsCard) myInvoiceRequestsCard.style.display = 'none';
+    } else if (state.currentUser?.roles?.some(r => ['sales', 'part_time_sales'].includes(r))) {
+        // 销售/兼职销售：显示"我的发票申请"
+        if (invoiceRequestsCard) invoiceRequestsCard.style.display = 'none';
+        if (myInvoiceRequestsCard) myInvoiceRequestsCard.style.display = 'block';
+    } else {
+        // 其他角色：隐藏
+        if (invoiceRequestsCard) invoiceRequestsCard.style.display = 'none';
+        if (myInvoiceRequestsCard) myInvoiceRequestsCard.style.display = 'none';
+    }
+}
+
+// 加载发票申请列表（财务侧）
+export async function loadInvoiceRequests() {
+    try {
+        const status = document.getElementById('invoiceRequestStatusFilter')?.value || '';
+        const createdBy = document.getElementById('invoiceRequestCreatedByFilter')?.value || '';
+        const customerId = document.getElementById('invoiceRequestCustomerFilter')?.value || '';
+        const pageSize = document.getElementById('invoiceRequestPageSize')?.value || '20';
+        
+        const params = new URLSearchParams();
+        if (status) params.append('status', status);
+        if (createdBy) params.append('createdBy', createdBy);
+        if (customerId) params.append('customerId', customerId);
+        params.append('page', invoiceRequestPage);
+        params.append('pageSize', pageSize);
+        
+        const url = `/invoice-requests?${params.toString()}`;
+        console.log('[Finance] 加载发票申请列表:', url);
+        
+        const res = await apiFetch(url);
+        const data = await res.json();
+        
+        console.log('[Finance] 发票申请列表响应:', {
+            success: data.success,
+            count: data.data?.length || 0,
+            pagination: data.pagination,
+            firstItem: data.data?.[0]
+        });
+        
+        if (!data.success) {
+            showAlert('invoiceRequestsList', data.error?.message || data.message || '加载失败', 'error');
+            return;
+        }
+        
+        invoiceRequestsCache = data.data || [];
+        renderInvoiceRequests(data.pagination);
+    } catch (error) {
+        console.error('[Finance] 加载发票申请列表失败:', error);
+        showAlert('invoiceRequestsList', '加载失败: ' + error.message, 'error');
+    }
+}
+
+// 渲染发票申请列表（财务侧）
+export function renderInvoiceRequests(pagination) {
+    const container = document.getElementById('invoiceRequestsList');
+    if (!container) return;
+    
+    if (invoiceRequestsCache.length === 0) {
+        container.innerHTML = '<div style="text-align:center;color:#666;padding:20px;">暂无发票申请</div>';
+        return;
+    }
+    
+    const statusText = {
+        pending: '待审批',
+        approved: '已批准',
+        rejected: '已拒绝'
+    };
+    
+    const statusBadge = {
+        pending: 'badge-warning',
+        approved: 'badge-success',
+        rejected: 'badge-danger'
+    };
+    
+    const invoiceTypeText = {
+        vat: '增值税发票',
+        normal: '普通发票',
+        other: '其他'
+    };
+    
+    const rows = invoiceRequestsCache.map(req => {
+        const projectsList = req.projects?.map(p => 
+            `${p.projectNumber || '-'} ${p.projectName || '-'} (¥${(p.projectAmount || 0).toLocaleString()})`
+        ).join('<br>') || '-';
+        
+        const approveBtn = req.status === 'pending' ? `
+            <button class="btn-small" data-click="approveInvoiceRequest('${req._id}')" style="background:#10b981;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;margin-right:4px;">批准</button>
+            <button class="btn-small" data-click="rejectInvoiceRequest('${req._id}')" style="background:#ef4444;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;">拒绝</button>
+        ` : '';
+        
+        const rejectReason = req.status === 'rejected' && req.rejectReason ? 
+            `<div style="color:#ef4444;font-size:12px;margin-top:4px;">拒绝原因：${req.rejectReason}</div>` : '';
+        
+        const linkedInvoice = req.linkedInvoiceId ? 
+            `<div style="font-size:12px;color:#10b981;margin-top:4px;">已创建发票：${req.linkedInvoiceId.invoiceNumber || req.linkedInvoiceId}</div>` : '';
+        
+        return `
+            <tr>
+                <td>${new Date(req.createdAt).toLocaleString('zh-CN')}</td>
+                <td>${req.createdBy?.name || req.createdBy?.username || '-'}</td>
+                <td>${req.customerId?.name || '-'}</td>
+                <td style="max-width:300px;">${projectsList}</td>
+                <td>¥${(req.amount || 0).toLocaleString()}</td>
+                <td>${invoiceTypeText[req.invoiceType] || req.invoiceType}</td>
+                <td>${req.invoiceInfo?.title || '-'}</td>
+                <td><span class="badge ${statusBadge[req.status]}">${statusText[req.status]}</span></td>
+                <td>${req.approvedBy ? (req.approvedBy.name || req.approvedBy.username) : '-'}</td>
+                <td>${req.approvedAt ? new Date(req.approvedAt).toLocaleString('zh-CN') : '-'}</td>
+                <td>
+                    ${approveBtn}
+                    <button class="btn-small" data-click="viewInvoiceRequest('${req._id}')" style="background:#667eea;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;">详情</button>
+                    ${rejectReason}
+                    ${linkedInvoice}
+                </td>
+            </tr>
+        `;
+    }).join('');
+    
+    const paginationHtml = pagination ? `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;">
+            <div>共 ${pagination.total} 条，第 ${pagination.page}/${pagination.totalPages} 页</div>
+            <div style="display:flex;gap:8px;">
+                <button data-click="jumpInvoiceRequestPage(1, ${pagination.totalPages})" ${invoiceRequestPage <= 1 ? 'disabled' : ''} style="padding:4px 8px;">首页</button>
+                <button data-click="prevInvoiceRequestPage()" ${invoiceRequestPage <= 1 ? 'disabled' : ''} style="padding:4px 8px;">上一页</button>
+                <button data-click="nextInvoiceRequestPage()" ${invoiceRequestPage >= pagination.totalPages ? 'disabled' : ''} style="padding:4px 8px;">下一页</button>
+                <button data-click="jumpInvoiceRequestPage(${pagination.totalPages}, ${pagination.totalPages})" ${invoiceRequestPage >= pagination.totalPages ? 'disabled' : ''} style="padding:4px 8px;">末页</button>
+            </div>
+        </div>
+    ` : '';
+    
+    container.innerHTML = `
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>申请时间</th>
+                    <th>申请人</th>
+                    <th>客户</th>
+                    <th>项目</th>
+                    <th>申请金额</th>
+                    <th>发票类型</th>
+                    <th>发票抬头</th>
+                    <th>状态</th>
+                    <th>审批人</th>
+                    <th>审批时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+        ${paginationHtml}
+    `;
+}
+
+// 加载我的发票申请列表（销售侧）
+export async function loadMyInvoiceRequests() {
+    try {
+        const status = document.getElementById('myInvoiceRequestStatusFilter')?.value || '';
+        const pageSize = document.getElementById('myInvoiceRequestPageSize')?.value || '20';
+        
+        const params = new URLSearchParams();
+        if (status) params.append('status', status);
+        params.append('page', myInvoiceRequestPage);
+        params.append('pageSize', pageSize);
+        
+        const res = await apiFetch(`/invoice-requests/my?${params.toString()}`);
+        const data = await res.json();
+        
+        if (!data.success) {
+            showAlert('myInvoiceRequestsList', data.error?.message || data.message || '加载失败', 'error');
+            return;
+        }
+        
+        myInvoiceRequestsCache = data.data || [];
+        renderMyInvoiceRequests(data.pagination);
+    } catch (error) {
+        showAlert('myInvoiceRequestsList', '加载失败: ' + error.message, 'error');
+    }
+}
+
+// 渲染我的发票申请列表（销售侧）
+export function renderMyInvoiceRequests(pagination) {
+    const container = document.getElementById('myInvoiceRequestsList');
+    if (!container) return;
+    
+    if (myInvoiceRequestsCache.length === 0) {
+        container.innerHTML = '<div style="text-align:center;color:#666;padding:20px;">暂无发票申请</div>';
+        return;
+    }
+    
+    const statusText = {
+        pending: '待审批',
+        approved: '已批准',
+        rejected: '已拒绝'
+    };
+    
+    const statusBadge = {
+        pending: 'badge-warning',
+        approved: 'badge-success',
+        rejected: 'badge-danger'
+    };
+    
+    const invoiceTypeText = {
+        vat: '增值税发票',
+        normal: '普通发票',
+        other: '其他'
+    };
+    
+    const rows = myInvoiceRequestsCache.map(req => {
+        const projectsList = req.projects?.map(p => 
+            `${p.projectNumber || '-'} ${p.projectName || '-'} (¥${(p.projectAmount || 0).toLocaleString()})`
+        ).join('<br>') || '-';
+        
+        const rejectReason = req.status === 'rejected' && req.rejectReason ? 
+            `<div style="color:#ef4444;font-size:12px;margin-top:4px;">拒绝原因：${req.rejectReason}</div>` : '';
+        
+        const linkedInvoice = req.linkedInvoiceId ? 
+            `<div style="font-size:12px;color:#10b981;margin-top:4px;">已创建发票：${req.linkedInvoiceId.invoiceNumber || req.linkedInvoiceId}</div>` : '';
+        
+        const deleteBtn = req.status === 'pending' ? 
+            `<button class="btn-small" data-click="deleteInvoiceRequest('${req._id}')" style="background:#ef4444;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;margin-left:4px;">删除</button>` : '';
+        
+        return `
+            <tr>
+                <td>${new Date(req.createdAt).toLocaleString('zh-CN')}</td>
+                <td>${req.customerId?.name || '-'}</td>
+                <td style="max-width:300px;">${projectsList}</td>
+                <td>¥${(req.amount || 0).toLocaleString()}</td>
+                <td>${invoiceTypeText[req.invoiceType] || req.invoiceType}</td>
+                <td>${req.invoiceInfo?.title || '-'}</td>
+                <td><span class="badge ${statusBadge[req.status]}">${statusText[req.status]}</span></td>
+                <td>${req.approvedBy ? (req.approvedBy.name || req.approvedBy.username) : '-'}</td>
+                <td>${req.approvedAt ? new Date(req.approvedAt).toLocaleString('zh-CN') : '-'}</td>
+                <td>
+                    <button class="btn-small" data-click="viewInvoiceRequest('${req._id}')" style="background:#667eea;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;">详情</button>
+                    ${deleteBtn}
+                    ${rejectReason}
+                    ${linkedInvoice}
+                </td>
+            </tr>
+        `;
+    }).join('');
+    
+    const paginationHtml = pagination ? `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;">
+            <div>共 ${pagination.total} 条，第 ${pagination.page}/${pagination.totalPages} 页</div>
+            <div style="display:flex;gap:8px;">
+                <button data-click="jumpMyInvoiceRequestPage(1, ${pagination.totalPages})" ${myInvoiceRequestPage <= 1 ? 'disabled' : ''} style="padding:4px 8px;">首页</button>
+                <button data-click="prevMyInvoiceRequestPage()" ${myInvoiceRequestPage <= 1 ? 'disabled' : ''} style="padding:4px 8px;">上一页</button>
+                <button data-click="nextMyInvoiceRequestPage()" ${myInvoiceRequestPage >= pagination.totalPages ? 'disabled' : ''} style="padding:4px 8px;">下一页</button>
+                <button data-click="jumpMyInvoiceRequestPage(${pagination.totalPages}, ${pagination.totalPages})" ${myInvoiceRequestPage >= pagination.totalPages ? 'disabled' : ''} style="padding:4px 8px;">末页</button>
+            </div>
+        </div>
+    ` : '';
+    
+    container.innerHTML = `
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>申请时间</th>
+                    <th>客户</th>
+                    <th>项目</th>
+                    <th>申请金额</th>
+                    <th>发票类型</th>
+                    <th>发票抬头</th>
+                    <th>状态</th>
+                    <th>审批人</th>
+                    <th>审批时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+        ${paginationHtml}
+    `;
+}
+
+// 分页函数 - 发票申请（财务侧）
+export function jumpInvoiceRequestPage(page, maxPage) {
+    invoiceRequestPage = Math.max(1, Math.min(parseInt(page), maxPage));
+    loadInvoiceRequests();
+}
+
+export function prevInvoiceRequestPage() {
+    if (invoiceRequestPage > 1) {
+        invoiceRequestPage--;
+        loadInvoiceRequests();
+    }
+}
+
+export function nextInvoiceRequestPage() {
+    invoiceRequestPage++;
+    loadInvoiceRequests();
+}
+
+// 分页函数 - 我的发票申请（销售侧）
+export function jumpMyInvoiceRequestPage(page, maxPage) {
+    myInvoiceRequestPage = Math.max(1, Math.min(parseInt(page), maxPage));
+    loadMyInvoiceRequests();
+}
+
+export function prevMyInvoiceRequestPage() {
+    if (myInvoiceRequestPage > 1) {
+        myInvoiceRequestPage--;
+        loadMyInvoiceRequests();
+    }
+}
+
+export function nextMyInvoiceRequestPage() {
+    myInvoiceRequestPage++;
+    loadMyInvoiceRequests();
+}
+
+// 查看发票申请详情
+export async function viewInvoiceRequest(requestId) {
+    try {
+        const res = await apiFetch(`/invoice-requests/${requestId}`);
+        const data = await res.json();
+        
+        if (!data.success) {
+            showToast(data.error?.message || data.message || '加载失败', 'error');
+            return;
+        }
+        
+        const req = data.data;
+        const projectsList = req.projects?.map(p => 
+            `<div style="margin-bottom:8px;">
+                <strong>${p.projectNumber || '-'}</strong> ${p.projectName || '-'}<br>
+                <span style="color:#666;font-size:12px;">金额：¥${(p.projectAmount || 0).toLocaleString()}</span>
+            </div>`
+        ).join('') || '-';
+        
+        const statusText = {
+            pending: '待审批',
+            approved: '已批准',
+            rejected: '已拒绝'
+        };
+        
+        const invoiceTypeText = {
+            vat: '增值税发票',
+            normal: '普通发票',
+            other: '其他'
+        };
+        
+        const modalContent = `
+            <div style="padding:20px;">
+                <h3 style="margin-bottom:16px;">发票申请详情</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+                    <div>
+                        <strong>申请时间：</strong>${new Date(req.createdAt).toLocaleString('zh-CN')}
+                    </div>
+                    <div>
+                        <strong>申请人：</strong>${req.createdBy?.name || req.createdBy?.username || '-'}
+                    </div>
+                    <div>
+                        <strong>客户：</strong>${req.customerId?.name || '-'}
+                    </div>
+                    <div>
+                        <strong>状态：</strong><span class="badge ${req.status === 'pending' ? 'badge-warning' : req.status === 'approved' ? 'badge-success' : 'badge-danger'}">${statusText[req.status]}</span>
+                    </div>
+                    <div>
+                        <strong>申请金额：</strong>¥${(req.amount || 0).toLocaleString()}
+                    </div>
+                    <div>
+                        <strong>发票类型：</strong>${invoiceTypeText[req.invoiceType] || req.invoiceType}
+                    </div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <strong>关联项目：</strong>
+                    <div style="margin-top:8px;padding:12px;background:#f5f5f5;border-radius:4px;">
+                        ${projectsList}
+                    </div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <strong>开票信息：</strong>
+                    <div style="margin-top:8px;padding:12px;background:#f5f5f5;border-radius:4px;">
+                        <div><strong>发票抬头：</strong>${req.invoiceInfo?.title || '-'}</div>
+                        ${req.invoiceInfo?.taxNumber ? `<div><strong>税号：</strong>${req.invoiceInfo.taxNumber}</div>` : ''}
+                        ${req.invoiceInfo?.address ? `<div><strong>地址：</strong>${req.invoiceInfo.address}</div>` : ''}
+                        ${req.invoiceInfo?.phone ? `<div><strong>电话：</strong>${req.invoiceInfo.phone}</div>` : ''}
+                        ${req.invoiceInfo?.bank ? `<div><strong>开户银行：</strong>${req.invoiceInfo.bank}</div>` : ''}
+                        ${req.invoiceInfo?.bankAccount ? `<div><strong>银行账号：</strong>${req.invoiceInfo.bankAccount}</div>` : ''}
+                    </div>
+                </div>
+                ${req.note ? `<div style="margin-bottom:16px;"><strong>备注：</strong>${req.note}</div>` : ''}
+                ${req.status === 'rejected' && req.rejectReason ? `
+                    <div style="margin-bottom:16px;padding:12px;background:#fee;border-left:4px solid #ef4444;">
+                        <strong>拒绝原因：</strong>${req.rejectReason}
+                    </div>
+                ` : ''}
+                ${req.approvedBy ? `
+                    <div style="margin-bottom:16px;">
+                        <strong>审批人：</strong>${req.approvedBy.name || req.approvedBy.username || '-'}<br>
+                        <strong>审批时间：</strong>${req.approvedAt ? new Date(req.approvedAt).toLocaleString('zh-CN') : '-'}
+                    </div>
+                ` : ''}
+                ${req.linkedInvoiceId ? `
+                    <div style="margin-bottom:16px;padding:12px;background:#efe;border-left:4px solid #10b981;">
+                        <strong>已创建发票：</strong>${req.linkedInvoiceId.invoiceNumber || req.linkedInvoiceId}<br>
+                        <span style="font-size:12px;color:#666;">金额：¥${(req.linkedInvoiceId.amount || 0).toLocaleString()}，开票日期：${req.linkedInvoiceId.issueDate ? new Date(req.linkedInvoiceId.issueDate).toLocaleDateString() : '-'}</span>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+        
+        showModal({ title: '发票申请详情', body: modalContent });
+    } catch (error) {
+        showToast('加载失败: ' + error.message, 'error');
+    }
+}
+
+// 审批通过发票申请
+export async function approveInvoiceRequest(requestId) {
+    try {
+        // 先获取申请详情
+        const detailRes = await apiFetch(`/invoice-requests/${requestId}`);
+        const detailData = await detailRes.json();
+        
+        if (!detailData.success) {
+            showToast(detailData.error?.message || '加载申请详情失败', 'error');
+            return;
+        }
+        
+        const request = detailData.data;
+        
+        // 如果只有一个项目，直接创建发票
+        if (request.projects.length === 1) {
+            const project = request.projects[0];
+            const modalContent = `
+                <div style="padding:20px;">
+                    <form id="approveInvoiceRequestForm">
+                        <div class="form-group">
+                            <label>项目：</label>
+                            <input type="text" value="${project.projectNumber || '-'} ${project.projectName || '-'}" readonly style="background:#f5f5f5;">
+                            <input type="hidden" id="approveProjectId" value="${project._id}">
+                        </div>
+                        <div class="form-group">
+                            <label>发票号 <span style="color:red;">*</span>：</label>
+                            <input type="text" id="approveInvoiceNumber" required style="width:100%;padding:8px;">
+                        </div>
+                        <div class="form-group">
+                            <label>开票日期 <span style="color:red;">*</span>：</label>
+                            <input type="date" id="approveIssueDate" required style="width:100%;padding:8px;" value="${new Date().toISOString().split('T')[0]}">
+                        </div>
+                        <div class="form-group">
+                            <label>申请金额：</label>
+                            <input type="text" value="¥${(request.amount || 0).toLocaleString()}" readonly style="background:#f5f5f5;">
+                        </div>
+                        <div class="form-group">
+                            <label>备注：</label>
+                            <textarea id="approveInvoiceNote" style="width:100%;padding:8px;min-height:60px;">${request.note || ''}</textarea>
+                        </div>
+                        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+                            <button type="button" data-click="closeModal()" style="padding:8px 16px;background:#ccc;color:white;border:none;border-radius:4px;cursor:pointer;">取消</button>
+                            <button type="submit" style="padding:8px 16px;background:#10b981;color:white;border:none;border-radius:4px;cursor:pointer;">批准并创建发票</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            
+            showModal({ title: '批准发票申请', body: modalContent });
+            
+            // 绑定表单提交
+            const form = document.getElementById('approveInvoiceRequestForm');
+            if (form) {
+                form.onsubmit = async (e) => {
+                    e.preventDefault();
+                    await submitApproveInvoiceRequest(requestId);
+                };
+            }
+        } else {
+            // 多个项目，只批准不创建发票
+            if (confirm('该申请包含多个项目，批准后将不会自动创建发票。是否批准？')) {
+                const res = await apiFetch(`/invoice-requests/${requestId}/approve`, {
+                    method: 'POST',
+                    body: JSON.stringify({})
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    showToast('申请已批准', 'success');
+                    closeModal();
+                    loadInvoiceRequests();
+                    await refreshProjectsList();
+                } else {
+                    showToast(data.error?.message || data.message || '批准失败', 'error');
+                }
+            }
+        }
+    } catch (error) {
+        showToast('操作失败: ' + error.message, 'error');
+    }
+}
+
+// 提交批准申请
+async function submitApproveInvoiceRequest(requestId) {
+    try {
+        const projectId = document.getElementById('approveProjectId')?.value;
+        const invoiceNumber = document.getElementById('approveInvoiceNumber')?.value;
+        const issueDate = document.getElementById('approveIssueDate')?.value;
+        const note = document.getElementById('approveInvoiceNote')?.value || '';
+        
+        if (!invoiceNumber || !issueDate) {
+            showToast('请填写发票号和开票日期', 'error');
+            return;
+        }
+        
+        const res = await apiFetch(`/invoice-requests/${requestId}/approve`, {
+            method: 'POST',
+            body: JSON.stringify({
+                projectId,
+                invoiceNumber,
+                issueDate,
+                note
+            })
+        });
+        const data = await res.json();
+        
+        if (data.success) {
+            showToast('申请已批准，发票已创建', 'success');
+            closeModal();
+            loadInvoiceRequests();
+            await refreshProjectsList();
+        } else {
+            showToast(data.error?.message || data.message || '批准失败', 'error');
+        }
+    } catch (error) {
+        showToast('操作失败: ' + error.message, 'error');
+    }
+}
+
+// 拒绝发票申请
+export async function rejectInvoiceRequest(requestId) {
+    const modalContent = `
+        <div style="padding:20px;">
+            <form id="rejectInvoiceRequestForm">
+                <div class="form-group">
+                    <label>拒绝原因 <span style="color:red;">*</span>：</label>
+                    <textarea id="rejectReason" required style="width:100%;padding:8px;min-height:100px;" placeholder="请填写拒绝原因..."></textarea>
+                </div>
+                <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+                    <button type="button" data-click="closeModal()" style="padding:8px 16px;background:#ccc;color:white;border:none;border-radius:4px;cursor:pointer;">取消</button>
+                    <button type="submit" style="padding:8px 16px;background:#ef4444;color:white;border:none;border-radius:4px;cursor:pointer;">确认拒绝</button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    showModal({ title: '拒绝发票申请', body: modalContent });
+    
+    const form = document.getElementById('rejectInvoiceRequestForm');
+    if (form) {
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            const rejectReason = document.getElementById('rejectReason')?.value;
+            if (!rejectReason || !rejectReason.trim()) {
+                showToast('请填写拒绝原因', 'error');
+                return;
+            }
+            
+            try {
+                const res = await apiFetch(`/invoice-requests/${requestId}/reject`, {
+                    method: 'POST',
+                    body: JSON.stringify({ rejectReason: rejectReason.trim() })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    showToast('申请已拒绝', 'success');
+                    closeModal();
+                    loadInvoiceRequests();
+                    await refreshProjectsList();
+                } else {
+                    showToast(data.error?.message || data.message || '拒绝失败', 'error');
+                }
+            } catch (error) {
+                showToast('操作失败: ' + error.message, 'error');
+            }
+        };
+    }
+}
+
+// 刷新项目列表（重新加载发票申请状态）
+async function refreshProjectsList() {
+    try {
+        const { loadProjects } = await import('./project.js');
+        if (loadProjects) {
+            const filters = {};
+            const statusFilter = document.getElementById('projectStatusFilter')?.value;
+            const bizFilter = document.getElementById('projectBizFilter')?.value;
+            if (statusFilter) filters.status = statusFilter;
+            if (bizFilter) filters.businessType = bizFilter;
+            await loadProjects(filters);
+        }
+    } catch (error) {
+        console.warn('[Finance] 刷新项目列表失败:', error);
+    }
+}
+
+// 删除发票申请
+export async function deleteInvoiceRequest(requestId) {
+    if (!confirm('确定要删除此申请吗？')) return;
+    
+    try {
+        const res = await apiFetch(`/invoice-requests/${requestId}`, {
+            method: 'DELETE'
+        });
+        const data = await res.json();
+        
+        if (data.success) {
+            showToast('申请已删除', 'success');
+            loadMyInvoiceRequests();
+            // 如果当前在财务审批页面，也刷新财务列表
+            const invoiceRequestsSection = document.getElementById('financeSection-invoiceRequests');
+            if (invoiceRequestsSection && invoiceRequestsSection.style.display !== 'none') {
+                loadInvoiceRequests();
+            }
+            // 刷新项目列表
+            await refreshProjectsList();
+        } else {
+            showToast(data.error?.message || data.message || '删除失败', 'error');
+        }
+    } catch (error) {
+        showToast('删除失败: ' + error.message, 'error');
+    }
+}
+
+// 显示创建发票申请模态框
+export async function showCreateInvoiceRequestModal() {
+    // 先加载用户的项目列表
+    // 注意：后端不支持多个status值，所以不传status参数，在前端过滤
+    try {
+        const res = await apiFetch('/projects?pageSize=100');
+        const data = await res.json();
+        
+        if (!data.success) {
+            showToast('加载项目列表失败', 'error');
+            return;
+        }
+        
+        // 处理 createdBy 可能是对象（有 _id）或字符串ID的情况
+        const currentUserId = state.currentUser?._id;
+        
+        // 先过滤状态：只保留进行中或已完成的项目
+        const eligibleProjects = (data.data || []).filter(p => 
+            p.status === 'in_progress' || p.status === 'completed'
+        );
+        
+        // 详细调试：检查第一个项目的数据格式
+        if (eligibleProjects && eligibleProjects.length > 0) {
+            const firstProject = eligibleProjects[0];
+            console.log('[Finance] 第一个符合状态的项目数据示例:', {
+                projectId: firstProject._id,
+                projectName: firstProject.projectName,
+                status: firstProject.status,
+                createdBy: firstProject.createdBy,
+                createdByType: typeof firstProject.createdBy,
+                createdById: firstProject.createdBy?._id,
+                createdByString: firstProject.createdBy?.toString(),
+                currentUserId,
+                currentUserIdType: typeof currentUserId
+            });
+        }
+        
+        // 再过滤创建者：只保留当前用户创建的项目
+        const projects = eligibleProjects.filter(p => {
+            const projectCreatedBy = p.createdBy?._id || p.createdBy;
+            const projectCreatedByStr = projectCreatedBy?.toString();
+            const currentUserIdStr = currentUserId?.toString();
+            const matches = currentUserId && 
+                   projectCreatedBy && 
+                   (projectCreatedByStr === currentUserIdStr);
+            
+            // 调试：输出不匹配的原因
+            if (!matches && currentUserId) {
+                console.log('[Finance] 项目不匹配:', {
+                    projectId: p._id,
+                    projectName: p.projectName,
+                    projectCreatedBy,
+                    projectCreatedByStr,
+                    currentUserIdStr,
+                    match: projectCreatedByStr === currentUserIdStr
+                });
+            }
+            
+            return matches;
+        });
+        
+        console.log('[Finance] showCreateInvoiceRequestModal 项目过滤:', {
+            totalProjects: data.data?.length || 0,
+            filteredProjects: projects.length,
+            currentUserId,
+            currentUserIdStr: currentUserId?.toString(),
+            pendingSelectedIds: window.pendingSelectedProjectsForInvoice ? Array.from(window.pendingSelectedProjectsForInvoice) : [],
+            sampleProjectCreatedBy: data.data?.[0]?.createdBy
+        });
+        
+        if (projects.length === 0) {
+            // 如果过滤后没有项目，检查是否是所有项目都不匹配
+            if (data.data && data.data.length > 0) {
+                console.warn('[Finance] 所有项目都被过滤掉了，可能是用户ID不匹配');
+                console.warn('[Finance] 当前用户ID:', currentUserId);
+                console.warn('[Finance] 项目 createdBy 示例:', data.data.slice(0, 3).map(p => ({
+                    projectId: p._id,
+                    createdBy: p.createdBy,
+                    createdById: p.createdBy?._id || p.createdBy
+                })));
+            }
+            showToast('您没有可申请开票的项目', 'error');
+            return;
+        }
+        
+        const projectsOptions = projects.map(p => {
+            const projectId = (p._id?.toString() || p._id || '').toString();
+            // 检查是否有待预选的项目（支持多种ID格式匹配）
+            const shouldPreselect = window.pendingSelectedProjectsForInvoice && 
+                (window.pendingSelectedProjectsForInvoice.has(projectId) || 
+                 window.pendingSelectedProjectsForInvoice.has(p._id) ||
+                 Array.from(window.pendingSelectedProjectsForInvoice).some(id => {
+                     const idStr = id?.toString() || id;
+                     return idStr === projectId || idStr === p._id?.toString() || idStr === p._id;
+                 }));
+            
+            if (window.pendingSelectedProjectsForInvoice && window.pendingSelectedProjectsForInvoice.size > 0) {
+                console.log('[Finance] 项目选项检查:', {
+                    projectId,
+                    projectName: p.projectName,
+                    shouldPreselect,
+                    pendingSelectedIds: Array.from(window.pendingSelectedProjectsForInvoice)
+                });
+            }
+            
+            return `<option value="${projectId}" data-amount="${p.projectAmount || 0}" data-customer="${p.customerId || ''}" ${shouldPreselect ? 'selected' : ''}>${p.projectNumber || '-'} ${p.projectName || '-'} (¥${(p.projectAmount || 0).toLocaleString()})</option>`;
+        }).join('');
+        
+        const modalContent = `
+            <div style="padding:20px;max-width:600px;">
+                <form id="createInvoiceRequestForm">
+                    <div class="form-group">
+                        <label>选择项目 <span style="color:red;">*</span>（可多选）：</label>
+                        <select id="invoiceRequestProjects" multiple required style="width:100%;padding:8px;min-height:120px;">
+                            ${projectsOptions}
+                        </select>
+                        <div style="font-size:12px;color:#666;margin-top:4px;">按住 Ctrl/Cmd 键可多选</div>
+                    </div>
+                    <div class="form-group">
+                        <label>申请金额 <span style="color:red;">*</span>：</label>
+                        <input type="number" id="invoiceRequestAmount" step="0.01" min="0" required style="width:100%;padding:8px;" placeholder="请输入申请开票金额">
+                        <div id="invoiceRequestAmountHint" style="font-size:12px;color:#666;margin-top:4px;"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>发票类型 <span style="color:red;">*</span>：</label>
+                        <select id="invoiceRequestType" required style="width:100%;padding:8px;">
+                            <option value="vat">增值税发票</option>
+                            <option value="normal">普通发票</option>
+                            <option value="other">其他</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>发票抬头 <span style="color:red;">*</span>：</label>
+                        <input type="text" id="invoiceRequestTitle" required style="width:100%;padding:8px;" placeholder="请输入发票抬头">
+                    </div>
+                    <div class="form-group">
+                        <label>税号：</label>
+                        <input type="text" id="invoiceRequestTaxNumber" style="width:100%;padding:8px;" placeholder="请输入税号">
+                    </div>
+                    <div class="form-group">
+                        <label>地址：</label>
+                        <input type="text" id="invoiceRequestAddress" style="width:100%;padding:8px;" placeholder="请输入地址">
+                    </div>
+                    <div class="form-group">
+                        <label>电话：</label>
+                        <input type="text" id="invoiceRequestPhone" style="width:100%;padding:8px;" placeholder="请输入电话">
+                    </div>
+                    <div class="form-group">
+                        <label>开户银行：</label>
+                        <input type="text" id="invoiceRequestBank" style="width:100%;padding:8px;" placeholder="请输入开户银行">
+                    </div>
+                    <div class="form-group">
+                        <label>银行账号：</label>
+                        <input type="text" id="invoiceRequestBankAccount" style="width:100%;padding:8px;" placeholder="请输入银行账号">
+                    </div>
+                    <div class="form-group">
+                        <label>备注：</label>
+                        <textarea id="invoiceRequestNote" style="width:100%;padding:8px;min-height:60px;" placeholder="请输入备注"></textarea>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+                        <button type="button" data-click="closeModal()" style="padding:8px 16px;background:#ccc;color:white;border:none;border-radius:4px;cursor:pointer;">取消</button>
+                        <button type="submit" style="padding:8px 16px;background:#667eea;color:white;border:none;border-radius:4px;cursor:pointer;">提交申请</button>
+                    </div>
+                </form>
+            </div>
+        `;
+        
+        showModal({ title: '申请开票', body: modalContent });
+        
+        // 绑定项目选择变化事件，自动计算最大金额
+        const projectsSelect = document.getElementById('invoiceRequestProjects');
+        const amountInput = document.getElementById('invoiceRequestAmount');
+        const amountHint = document.getElementById('invoiceRequestAmountHint');
+        
+        if (projectsSelect && amountInput && amountHint) {
+            // 如果有预选的项目，自动计算总金额
+            const selectedOptions = Array.from(projectsSelect.selectedOptions);
+            if (selectedOptions.length > 0) {
+                const totalAmount = selectedOptions.reduce((sum, opt) => {
+                    return sum + (parseFloat(opt.dataset.amount) || 0);
+                }, 0);
+                amountHint.textContent = `所选项目总金额：¥${totalAmount.toLocaleString()}，申请金额不能超过此金额`;
+                if (totalAmount > 0) {
+                    amountInput.value = totalAmount;
+                }
+            }
+            
+            projectsSelect.onchange = () => {
+                const selected = Array.from(projectsSelect.selectedOptions);
+                const totalAmount = selected.reduce((sum, opt) => {
+                    return sum + (parseFloat(opt.dataset.amount) || 0);
+                }, 0);
+                amountHint.textContent = `所选项目总金额：¥${totalAmount.toLocaleString()}，申请金额不能超过此金额`;
+            };
+        }
+        
+        // 清空临时变量
+        if (window.pendingSelectedProjectsForInvoice) {
+            delete window.pendingSelectedProjectsForInvoice;
+        }
+        
+        // 绑定表单提交
+        const form = document.getElementById('createInvoiceRequestForm');
+        if (form) {
+            console.log('[Finance] 绑定表单提交事件');
+            form.onsubmit = async (e) => {
+                e.preventDefault();
+                console.log('[Finance] 表单提交事件触发');
+                await submitCreateInvoiceRequest();
+            };
+            // 也添加 submit 事件监听器（双重保险）
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                console.log('[Finance] 表单 submit 事件触发');
+                await submitCreateInvoiceRequest();
+            });
+        } else {
+            console.warn('[Finance] 未找到表单元素 createInvoiceRequestForm');
+        }
+    } catch (error) {
+        showToast('加载失败: ' + error.message, 'error');
+    }
+}
+
+// 提交创建发票申请
+async function submitCreateInvoiceRequest() {
+    console.log('[Finance] submitCreateInvoiceRequest 函数被调用');
+    try {
+        const projectsSelect = document.getElementById('invoiceRequestProjects');
+        if (!projectsSelect) {
+            console.error('[Finance] 未找到项目选择框');
+            showToast('表单元素未找到，请刷新页面重试', 'error');
+            return;
+        }
+        
+        const selectedProjects = Array.from(projectsSelect.selectedOptions).map(opt => opt.value);
+        console.log('[Finance] 选中的项目:', selectedProjects);
+        
+        if (selectedProjects.length === 0) {
+            showToast('请至少选择一个项目', 'error');
+            return;
+        }
+        
+        const amount = parseFloat(document.getElementById('invoiceRequestAmount')?.value);
+        console.log('[Finance] 申请金额:', amount);
+        
+        if (!amount || amount <= 0) {
+            showToast('申请金额必须大于0', 'error');
+            return;
+        }
+        
+        const invoiceType = document.getElementById('invoiceRequestType')?.value;
+        const title = document.getElementById('invoiceRequestTitle')?.value?.trim();
+        
+        if (!title) {
+            showToast('请填写发票抬头', 'error');
+            return;
+        }
+        
+        const invoiceInfo = {
+            title,
+            taxNumber: document.getElementById('invoiceRequestTaxNumber')?.value?.trim() || '',
+            address: document.getElementById('invoiceRequestAddress')?.value?.trim() || '',
+            phone: document.getElementById('invoiceRequestPhone')?.value?.trim() || '',
+            bank: document.getElementById('invoiceRequestBank')?.value?.trim() || '',
+            bankAccount: document.getElementById('invoiceRequestBankAccount')?.value?.trim() || ''
+        };
+        
+        const note = document.getElementById('invoiceRequestNote')?.value?.trim() || '';
+        
+        const requestData = {
+            projects: selectedProjects,
+            amount,
+            invoiceType,
+            invoiceInfo,
+            note
+        };
+        
+        console.log('[Finance] 提交发票申请数据:', requestData);
+        
+        const res = await apiFetch('/invoice-requests', {
+            method: 'POST',
+            body: JSON.stringify(requestData)
+        });
+        
+        console.log('[Finance] API 响应状态:', res.status, res.statusText);
+        
+        const data = await res.json();
+        console.log('[Finance] 提交发票申请响应:', data);
+        
+        if (data.success) {
+            showToast('发票申请已提交', 'success');
+            closeModal();
+            // 刷新销售自己的列表
+            loadMyInvoiceRequests();
+            // 如果当前在财务审批页面，也刷新财务列表
+            const invoiceRequestsSection = document.getElementById('financeSection-invoiceRequests');
+            if (invoiceRequestsSection && invoiceRequestsSection.style.display !== 'none') {
+                console.log('[Finance] 刷新财务审批列表');
+                loadInvoiceRequests();
+            }
+            // 刷新项目列表
+            await refreshProjectsList();
+        } else {
+            const errorMsg = data.error?.message || data.message || '提交失败';
+            console.error('[Finance] 提交失败:', errorMsg);
+            showToast(errorMsg, 'error');
+        }
+    } catch (error) {
+        console.error('[Finance] 提交发票申请异常:', error);
+        showToast('提交失败: ' + error.message, 'error');
+    }
+}
 
