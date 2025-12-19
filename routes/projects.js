@@ -245,7 +245,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
   // 获取项目成员
   const members = await ProjectMember.find({ projectId: project._id })
-    .populate('userId', 'name username email roles');
+    .populate('userId', 'name username email roles employmentType');
 
   const isDeliveryOnly = isDeliveryOnlyUser(req.user, req.currentRole);
   const projectData = isDeliveryOnly ? scrubCustomerInfo(project) : project.toObject();

@@ -565,8 +565,15 @@
 
             <!-- 权限配置 -->
             <div id="permissions" class="section">
-                <h2>角色权限配置</h2>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h2>角色权限配置</h2>
+                    <div style="display: flex; gap: 10px;">
+                        <button data-click="loadRoles()" class="btn-small">刷新列表</button>
+                        <button data-click="showCreateRoleModal()" class="btn-primary">创建新角色</button>
+                    </div>
+                </div>
                 <div id="permissionsAlert"></div>
+                <div id="rolesList" style="margin-top: 20px;"></div>
                 <div id="permissionsConfig" style="margin-top: 20px;"></div>
             </div>
 

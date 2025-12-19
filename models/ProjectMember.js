@@ -16,6 +16,12 @@ const projectMemberSchema = new mongoose.Schema({
     enum: ['translator', 'reviewer', 'pm', 'sales', 'admin_staff', 'part_time_sales', 'layout'],
     required: true
   },
+  // 专/兼职快照：在添加成员时从用户带入，便于历史追溯
+  employmentType: {
+    type: String,
+    enum: ['full_time', 'part_time'],
+    default: 'full_time'
+  },
   // 翻译类型（仅翻译角色需要）
   translatorType: {
     type: String,

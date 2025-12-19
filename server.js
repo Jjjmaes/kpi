@@ -98,6 +98,7 @@ const auditRoutes = require('./routes/audit');
 const notificationRoutes = require('./routes/notifications');
 const backupRoutes = require('./routes/backup');
 const invoiceRequestRoutes = require('./routes/invoiceRequests');
+const roleRoutes = require('./routes/roles');
 
 // API 路由
 app.use('/api/auth', authRoutes);
@@ -113,6 +114,7 @@ app.use('/api/audit', auditRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/backup', backupRoutes);
 app.use('/api/invoice-requests', invoiceRequestRoutes);
+app.use('/api/roles', roleRoutes);
 
 // 健康检查
 app.get('/health', (req, res) => {
@@ -208,6 +210,10 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/kpi_syste
 })
 .then(async () => {
     console.log('✅ MongoDB connected');
+    
+    // 初始化权限配置（从数据库加载）
+    const { initPermissions } = require('./config/permissions');
+    initPermissions(mongoose);
     
     // 确保备份目录存在
     const fs = require('fs').promises;

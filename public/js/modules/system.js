@@ -201,9 +201,21 @@ export async function loadPermissionsConfig() {
             return;
         }
 
-        const PERMISSIONS = data.data.permissions;
-        const ROLE_NAMES = data.data.roleNames;
+        const PERMISSIONS = data.data?.permissions || {};
+        const ROLE_NAMES = data.data?.roleNames || {};
+        
+        if (!PERMISSIONS || typeof PERMISSIONS !== 'object') {
+            console.error('[System] 权限配置数据格式错误:', data.data);
+            showAlert('permissionsAlert', '权限配置数据格式错误', 'error');
+            return;
+        }
+        
         const roles = Object.keys(PERMISSIONS);
+        
+        if (roles.length === 0) {
+            showAlert('permissionsAlert', '未找到任何角色配置', 'error');
+            return;
+        }
         
         const permissionKeys = [
             'project.view', 'project.edit', 'project.create', 'project.delete', 'project.member.manage',

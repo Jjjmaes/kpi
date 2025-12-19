@@ -14,7 +14,7 @@ export async function loadUsers() {
                     <thead>
                         <tr>
                             <th>姓名</th><th>用户名</th><th>邮箱</th><th>电话</th>
-                            <th>角色</th><th>状态</th><th>操作</th>
+                            <th>角色</th><th>专/兼职</th><th>状态</th><th>操作</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -25,6 +25,7 @@ export async function loadUsers() {
                                 <td>${u.email}</td>
                                 <td>${u.phone || '-'}</td>
                                 <td>${(u.roles || []).map(r => getRoleText(r)).join(', ')}</td>
+                                <td>${u.employmentType === 'part_time' ? '兼职' : '专职'}</td>
                                 <td><span class="badge ${u.isActive ? 'badge-success' : 'badge-danger'}">${u.isActive ? '激活' : '禁用'}</span></td>
                                 <td>
                                     <button class="btn-small" data-click="editUser('${u._id}')">编辑</button>
@@ -101,6 +102,13 @@ export function showCreateUserModal() {
                 <input type="tel" name="phone" placeholder="请输入联系电话">
             </div>
             <div class="form-group">
+                <label>专/兼职</label>
+                <select name="employmentType">
+                    <option value="full_time" selected>专职</option>
+                    <option value="part_time">兼职</option>
+                </select>
+            </div>
+            <div class="form-group">
                 <label>角色 *</label>
                 <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px;">
                     ${['admin', 'finance', 'sales', 'pm', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout'].map(role => `
@@ -169,7 +177,8 @@ export async function createUser(e) {
         name: formData.get('name'),
         email: formData.get('email'),
         phone: formData.get('phone') || '',
-        roles
+        roles,
+        employmentType: formData.get('employmentType') || 'full_time'
     };
     
     // 验证必填字段
@@ -245,6 +254,13 @@ export async function editUser(userId) {
                     <option value="false" ${!user.isActive ? 'selected' : ''}>禁用</option>
                 </select>
             </div>
+            <div class="form-group">
+                <label>专/兼职</label>
+                <select name="employmentType">
+                    <option value="full_time" ${user.employmentType !== 'part_time' ? 'selected' : ''}>专职</option>
+                    <option value="part_time" ${user.employmentType === 'part_time' ? 'selected' : ''}>兼职</option>
+                </select>
+            </div>
             <div class="action-buttons">
                 <button type="submit">更新</button>
                 <button type="button" data-click="closeModal()">取消</button>
@@ -267,7 +283,8 @@ export async function updateUser(e, userId) {
         email: formData.get('email'),
         phone: formData.get('phone') || '',
         roles,
-        isActive: formData.get('isActive') === 'true'
+        isActive: formData.get('isActive') === 'true',
+        employmentType: formData.get('employmentType') || 'full_time'
     };
     try {
         const res = await apiFetch(`/users/${userId}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -285,7 +302,8 @@ export async function updateUser(e, userId) {
 }
 
 export async function resetUserPassword(userId, userName) {
-    if (!confirm(`确定要重置用户 "${userName}" 的密码吗？\n\n重置后，系统将生成一个新密码，用户首次登录时需要修改密码。`)) {
+    const resolvedName = userName || (state.allUsers || []).find(u => u._id === userId)?.name || '该用户';
+    if (!confirm(`确定要重置用户 "${resolvedName}" 的密码吗？\n\n重置后，系统将生成一个新密码，用户首次登录时需要修改密码。`)) {
         return;
     }
     try {

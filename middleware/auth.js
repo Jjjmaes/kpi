@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const { PERMISSIONS, getPermission, getDefaultRole } = require('../config/permissions');
+const { getPermissionSync, getDefaultRoleSync, getPermission, getDefaultRole } = require('../config/permissions');
 
 // JWT验证中间件
 const authenticate = async (req, res, next) => {
@@ -49,7 +49,8 @@ const authenticate = async (req, res, next) => {
       req.currentRole = requestedRole;
     } else {
       // 如果没有提供 X-Role，使用默认角色（向后兼容）
-      req.currentRole = getDefaultRole(userRoles) || (userRoles.length > 0 ? userRoles[0] : null);
+      // 使用同步版本以保持性能
+      req.currentRole = getDefaultRoleSync(userRoles) || (userRoles.length > 0 ? userRoles[0] : null);
     }
     
     next();
@@ -136,7 +137,7 @@ const getCurrentPermission = (req, permission) => {
   if (!req.currentRole) {
     return false;
   }
-  return getPermission(req.currentRole, permission);
+  return getPermissionSync(req.currentRole, permission);
 };
 
 module.exports = { 

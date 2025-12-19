@@ -409,6 +409,7 @@ export async function showCreateProjectModal() {
             </div>
 
             ${isPartTimeSalesRole ? `
+            <!-- 当前登录人本身是兼职销售：必须录入自己的分成信息，无需再勾选 -->
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
                 <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">兼职销售（当前角色）</h4>
                 <input type="hidden" name="partTimeSales.isPartTime" value="on">
@@ -427,7 +428,9 @@ export async function showCreateProjectModal() {
                     <div id="partTimeSalesCommissionPreview" style="font-size:12px;color:#0369a1;margin-top:4px;">当前预估佣金：--</div>
                 </div>
             </div>
-            ` : isSalesRole ? '' : `
+            ` : (
+                // 普通销售账号不允许在这里配置“兼职销售”，由管理员/PM 在需要时启用
+                isSalesRole ? '' : `
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
                 <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">兼职销售</h4>
                 <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
@@ -449,7 +452,8 @@ export async function showCreateProjectModal() {
                     <div id="partTimeSalesCommissionPreview" style="font-size:12px;color:#0369a1;margin-top:4px;">当前预估佣金：--</div>
                 </div>
             </div>
-            `}
+            `
+            )}
 
             ${!(state.currentUser?.roles || []).some(r => r === 'sales' || r === 'part_time_sales') ? `
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
@@ -1357,10 +1361,12 @@ export async function viewProject(projectId) {
                         ${project.members && Array.isArray(project.members) && project.members.length > 0 ? project.members.map(m => {
                             // 处理 userId 可能是对象或字符串的情况
                             const userName = (m.userId && typeof m.userId === 'object') ? m.userId.name : (m.userId || '未知用户');
+                            const memberEmploymentType = m.employmentType || (m.userId && typeof m.userId === 'object' ? m.userId.employmentType : null);
+                            const employmentLabel = memberEmploymentType === 'part_time' ? '兼职' : '专职';
                             const roleText = getRoleText(m.role);
                             return `<div class="member-item" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #f5f5f5; border-radius: 4px;">
                                 <div class="member-info" style="flex: 1;">
-                                    <strong>${userName}</strong> - ${roleText}
+                                    <strong>${userName}</strong> - ${roleText} <span style="color:#6b7280;">(${employmentLabel})</span>
                                     ${m.role === 'translator' ? ` (${m.translatorType === 'deepedit' ? '深度编辑' : 'MTPE'}, 字数占比: ${((m.wordRatio || 1) * 100).toFixed(0)}%)` : ''}
                                     ${m.role === 'layout' && m.layoutCost ? ` (排版费用: ¥${(m.layoutCost || 0).toFixed(2)})` : ''}
                                 </div>
@@ -1741,7 +1747,10 @@ export function filterInlineCreateUsersByRole() {
     }
     
     userIdSelect.innerHTML = '<option value="">请选择用户</option>' +
-        filteredUsers.map(u => `<option value="${u._id}">${u.name}${u.username ? ' (' + u.username + ')' : ''}</option>`).join('');
+        filteredUsers.map(u => {
+            const employmentLabel = u.employmentType === 'part_time' ? '兼职' : '专职';
+            return `<option value="${u._id}">${u.name}${u.username ? ' (' + u.username + ')' : ''} - ${employmentLabel}</option>`;
+        }).join('');
 }
 
 // 内联添加成员：验证排版费用
@@ -1813,9 +1822,11 @@ export function addInlineMemberForCreate() {
         }
     }
     
+    const userInfo = (state.allUsers || []).find(u => u._id === userId);
     const member = {
         userId,
-        role
+        role,
+        employmentType: userInfo?.employmentType || 'full_time'
     };
     
     if (role === 'translator') {
@@ -1889,6 +1900,7 @@ export function updateCreateProjectMembersList() {
         const user = (state.allUsers || []).find(u => u._id === member.userId);
         const userName = user ? user.name : '未知用户';
         const roleText = roleTextMap[member.role] || member.role;
+        const employmentLabel = (member.employmentType || user?.employmentType) === 'part_time' ? '兼职' : '专职';
         let extraInfo = '';
         if (member.role === 'translator') {
             extraInfo = ` (${member.translatorType === 'mtpe' ? 'MTPE' : '深度编辑'}, 占比: ${(member.wordRatio || 1.0).toFixed(2)})`;
@@ -1898,7 +1910,7 @@ export function updateCreateProjectMembersList() {
         return `
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; background: white; border-radius: 4px; margin-bottom: 8px;">
                 <span style="font-size: 13px;">
-                    <strong>${userName}</strong> - ${roleText}${extraInfo}
+                    <strong>${userName}</strong> - ${roleText} <span style="color:#6b7280;">(${employmentLabel})</span>${extraInfo}
                 </span>
                 <button type="button" class="btn-small" data-click="removeCreateProjectMember(${index})" style="background: #ff4444; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer;">删除</button>
             </div>
@@ -3201,7 +3213,8 @@ export function renderProjects() {
                                 currentUserId && 
                                 projectCreatedBy && 
                                 (projectCreatedBy.toString() === currentUserId.toString()) &&
-                                (p.status === 'in_progress' || p.status === 'completed')
+                                // 前端仅排除已取消项目，其余状态都允许尝试申请发票
+                                (p.status !== 'cancelled' && p.status !== 'canceled')
                         });
                     }
                     
@@ -3216,13 +3229,13 @@ export function renderProjects() {
                     // 判断是否可以申请开票：
                     // 1. 必须是销售/兼职销售角色
                     // 2. 必须是当前用户创建的项目
-                    // 3. 项目状态必须是进行中或已完成
+                    // 3. 项目状态不能是“已取消”（其余状态均可发起申请）
                     // 4. 不能有待审批或已批准的申请（已拒绝的可以重新申请）
                     const canRequestInvoice = isSalesRole && 
                         currentUserId && 
                         projectCreatedBy && 
                         (projectCreatedBy.toString() === currentUserId.toString()) &&
-                        (p.status === 'in_progress' || p.status === 'completed') &&
+                        (p.status !== 'cancelled' && p.status !== 'canceled') &&
                         !hasPendingRequest &&
                         !hasApprovedRequest;
                     

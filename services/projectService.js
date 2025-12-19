@@ -439,6 +439,12 @@ class ProjectService {
       throw new AppError('用户ID和角色不能为空', 400, 'INVALID_INPUT');
     }
 
+    const memberUser = await User.findById(userId).select('employmentType roles name');
+    if (!memberUser) {
+      throw new AppError('指定的用户不存在', 404, 'USER_NOT_FOUND');
+    }
+    const employmentType = memberUser.employmentType || 'full_time';
+
     const project = await Project.findById(projectId);
     if (!project) {
       throw new AppError('项目不存在', 404, 'PROJECT_NOT_FOUND');
@@ -520,6 +526,7 @@ class ProjectService {
       projectId,
       userId,
       role,
+      employmentType,
       translatorType: role === 'translator' ? (translatorType || 'mtpe') : undefined,
       wordRatio: role === 'translator' ? (wordRatio || 1.0) : 1.0,
       ratio_locked: ratio

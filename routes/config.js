@@ -173,22 +173,40 @@ router.get('/history', async (req, res) => {
   }
 });
 
-// 获取权限配置
+// 获取权限配置（从数据库读取）
 router.get('/permissions', async (req, res) => {
   try {
-    const { PERMISSIONS, ROLE_NAMES } = require('../config/permissions');
+    // 从数据库读取权限配置
+    const { getPermissions, getRoleNames } = require('../config/permissions');
+    const permissions = await getPermissions();
+    const roleNames = await getRoleNames();
+    
     res.json({
       success: true,
       data: {
-        permissions: PERMISSIONS,
-        roleNames: ROLE_NAMES
+        permissions: permissions || {},
+        roleNames: roleNames || {}
       }
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    console.error('[Config] 获取权限配置失败:', error);
+    // 如果数据库未初始化，尝试使用默认配置
+    try {
+      const { getDefaultPermissions } = require('../config/permissions');
+      const defaultPerms = getDefaultPermissions();
+      res.json({
+        success: true,
+        data: {
+          permissions: defaultPerms.permissions || {},
+          roleNames: defaultPerms.names || {}
+        }
+      });
+    } catch (fallbackError) {
+      res.status(500).json({ 
+        success: false, 
+        message: error.message 
+      });
+    }
   }
 });
 

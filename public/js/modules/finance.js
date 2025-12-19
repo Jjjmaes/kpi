@@ -2960,9 +2960,9 @@ export async function showCreateInvoiceRequestModal() {
         // 处理 createdBy 可能是对象（有 _id）或字符串ID的情况
         const currentUserId = state.currentUser?._id;
         
-        // 先过滤状态：只保留进行中或已完成的项目
+        // 先过滤状态：只排除已取消的项目，其余状态都允许申请发票
         const eligibleProjects = (data.data || []).filter(p => 
-            p.status === 'in_progress' || p.status === 'completed'
+            p.status !== 'cancelled' && p.status !== 'canceled'
         );
         
         // 详细调试：检查第一个项目的数据格式
@@ -3145,7 +3145,7 @@ export async function showCreateInvoiceRequestModal() {
             delete window.pendingSelectedProjectsForInvoice;
         }
         
-        // 绑定表单提交
+        // 绑定表单提交（仅绑定一次，避免重复提交）
         const form = document.getElementById('createInvoiceRequestForm');
         if (form) {
             console.log('[Finance] 绑定表单提交事件');
@@ -3154,12 +3154,6 @@ export async function showCreateInvoiceRequestModal() {
                 console.log('[Finance] 表单提交事件触发');
                 await submitCreateInvoiceRequest();
             };
-            // 也添加 submit 事件监听器（双重保险）
-            form.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                console.log('[Finance] 表单 submit 事件触发');
-                await submitCreateInvoiceRequest();
-            });
         } else {
             console.warn('[Finance] 未找到表单元素 createInvoiceRequestForm');
         }

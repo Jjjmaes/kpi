@@ -28,9 +28,16 @@ const userSchema = new mongoose.Schema({
   },
   roles: [{
     type: String,
-    enum: ['admin', 'finance', 'sales', 'pm', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout'],
-    required: true
+    required: true,
+    // 移除硬编码的 enum，改为在保存时验证角色是否存在
+    // 验证逻辑在 userService 中处理
   }],
+  // 专/兼职标记：full_time / part_time
+  employmentType: {
+    type: String,
+    enum: ['full_time', 'part_time'],
+    default: 'full_time'
+  },
   isActive: {
     type: Boolean,
     default: true

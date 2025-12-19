@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const Role = require('../models/Role');
 const { AppError } = require('../middleware/errorHandler');
 
 /**
@@ -52,15 +53,41 @@ class UserService {
   }
 
   /**
+   * 验证角色是否存在且启用
+   */
+  async validateRoles(roles) {
+    if (!roles || roles.length === 0) {
+      throw new AppError('至少需要分配一个角色', 400, 'VALIDATION_ERROR');
+    }
+
+    const validRoles = await Role.find({ 
+      code: { $in: roles }, 
+      isActive: true 
+    });
+    
+    const validRoleCodes = validRoles.map(r => r.code);
+    const invalidRoles = roles.filter(r => !validRoleCodes.includes(r));
+    
+    if (invalidRoles.length > 0) {
+      throw new AppError(`以下角色不存在或已禁用: ${invalidRoles.join(', ')}`, 400, 'INVALID_ROLES');
+    }
+
+    return true;
+  }
+
+  /**
    * 创建用户
    */
   async createUser(userData) {
-    const { username, password, name, email, phone, roles } = userData;
+    const { username, password, name, email, phone, roles, employmentType } = userData;
 
     // 验证必填字段
     if (!username || !password || !name || !email || !roles || roles.length === 0) {
       throw new AppError('请填写所有必填字段', 400, 'VALIDATION_ERROR');
     }
+
+    // 验证角色
+    await this.validateRoles(roles);
 
     // 检查用户名或邮箱是否已存在
     const existingUser = await User.findOne({ 
@@ -77,6 +104,12 @@ class UserService {
       throw new AppError(pwdError, 400, 'INVALID_PASSWORD');
     }
 
+    // 验证专/兼职
+    const normalizedEmploymentType = employmentType || 'full_time';
+    if (!['full_time', 'part_time'].includes(normalizedEmploymentType)) {
+      throw new AppError('employmentType 无效，必须是 full_time 或 part_time', 400, 'INVALID_EMPLOYMENT_TYPE');
+    }
+
     // 创建用户
     const user = await User.create({
       username,
@@ -84,7 +117,8 @@ class UserService {
       name,
       email,
       phone: phone || '',
-      roles
+      roles,
+      employmentType: normalizedEmploymentType
     });
 
     // 返回用户信息（不包含密码）
@@ -94,7 +128,8 @@ class UserService {
       name: user.name,
       email: user.email,
       phone: user.phone,
-      roles: user.roles
+      roles: user.roles,
+      employmentType: user.employmentType
     };
   }
 
@@ -102,7 +137,7 @@ class UserService {
    * 更新用户
    */
   async updateUser(userId, updateData) {
-    const { name, email, phone, roles, isActive } = updateData;
+    const { name, email, phone, roles, isActive, employmentType } = updateData;
     
     const user = await User.findById(userId);
     if (!user) {
@@ -114,6 +149,12 @@ class UserService {
     if (email) user.email = email;
     if (phone !== undefined) user.phone = phone || '';
     if (roles) user.roles = roles;
+    if (employmentType) {
+      if (!['full_time', 'part_time'].includes(employmentType)) {
+        throw new AppError('employmentType 无效，必须是 full_time 或 part_time', 400, 'INVALID_EMPLOYMENT_TYPE');
+      }
+      user.employmentType = employmentType;
+    }
     if (typeof isActive === 'boolean') user.isActive = isActive;
     user.updatedAt = Date.now();
 
@@ -127,7 +168,8 @@ class UserService {
       email: user.email,
       phone: user.phone,
       roles: user.roles,
-      isActive: user.isActive
+      isActive: user.isActive,
+      employmentType: user.employmentType
     };
   }
 

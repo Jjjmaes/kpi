@@ -16,6 +16,7 @@ import { loadUsers, loadUsersForSelect, showCreateUserModal, editUser, deleteUse
 import { loadLanguages, showCreateLanguageModal, showEditLanguageModal, createLanguage, updateLanguage } from './modules/language.js';
 import { loadBackups, createBackup, cleanupOldBackups, restoreBackup, deleteBackupFile } from './modules/backup.js';
 import { loadConfig, loadConfigHistory, loadPermissionsConfig, savePermissionsConfig, loadOrgInfo, viewConfigChange } from './modules/system.js';
+import { loadRoles, showCreateRoleModal, viewRole, editRole, deleteRole } from './modules/role.js';
 import { startNotificationPolling, stopNotificationPolling, toggleNotificationPanel, markAllNotificationsRead, initNotificationAudio } from './modules/notification.js';
 import { loadPaymentCompletionDetail, renderPaymentCompletionDetail, pcdPrevPage, pcdNextPage, pcdJumpPage, pcdToggleProject, pcdToggleOverdue } from './modules/paymentDetail.js';
 
@@ -360,7 +361,13 @@ const SECTION_ROUTES = {
     config: { onEnter: async () => { if (hasPermission('system.config')) await loadConfig(); } },
     users: { onEnter: async () => { if (hasPermission('user.manage')) await loadUsers(); } },
     languages: { onEnter: async () => { if (hasPermission('system.config')) await loadLanguages(); } },
-    permissions: { onEnter: async () => { if (hasPermission('system.config')) await loadPermissionsConfig(); } },
+    permissions: { onEnter: async () => { 
+        if (hasPermission('system.config')) {
+            await loadRoles();
+            // 旧的权限配置表格已废弃，现在使用角色管理
+            // await loadPermissionsConfig();
+        }
+    } },
     backup: { onEnter: async () => { if (hasPermission('system.config')) await loadBackups(); } },
     profile: { onEnter: async () => { if (state.currentUser) await loadProfile(); } }
 };
@@ -493,7 +500,7 @@ const ACTIONS = Object.freeze({
     showCreateUserModal: () => showCreateUserModal(),
     editUser: (id) => editUser(id),
     deleteUser: (id) => deleteUser(id),
-    resetUserPassword: (id) => resetUserPassword(id),
+    resetUserPassword: (id, name) => resetUserPassword(id, name),
     copyPasswordToClipboard: (pwd) => copyPasswordToClipboard(pwd),
     createUser: (event) => createUser(event),
     updateUser: (event, userId) => updateUser(event, userId),
@@ -591,6 +598,13 @@ const ACTIONS = Object.freeze({
     // System / Config
     loadConfigHistory: () => loadConfigHistory(),
     viewConfigChange: (id) => viewConfigChange(id),
+    
+    // Role Management
+    loadRoles: () => loadRoles(),
+    showCreateRoleModal: () => showCreateRoleModal(),
+    viewRole: (roleId) => viewRole(roleId),
+    editRole: (roleId) => editRole(roleId),
+    deleteRole: (roleId) => deleteRole(roleId),
     loadPermissionsConfig: () => loadPermissionsConfig(),
     savePermissionsConfig: () => savePermissionsConfig(),
 
