@@ -248,8 +248,40 @@ router.get('/:id', asyncHandler(async (req, res) => {
   const members = await ProjectMember.find({ projectId: project._id })
     .populate('userId', 'name username email roles employmentType');
 
+  const rawProject = project.toObject();
+
+  // 1) 原有逻辑：对执行类角色（PM/翻译/审校/排版等）整体脱敏客户名称
   const isDeliveryOnly = isDeliveryOnlyUser(req.user, req.currentRole);
-  const projectData = isDeliveryOnly ? scrubCustomerInfo(project) : project.toObject();
+  const baseProjectData = isDeliveryOnly ? scrubCustomerInfo(project) : rawProject;
+
+  // 2) 新逻辑：客户联系人信息更严格——仅管理员或“当前以销售/兼职销售角色访问且为创建人”可见
+  const isAdmin = req.user.roles.includes('admin');
+  const currentRole = req.currentRole || (req.user.roles[0] || null);
+  const isSalesRole = currentRole === 'sales' || currentRole === 'part_time_sales';
+  const isCreator = project.createdBy && project.createdBy._id && project.createdBy._id.toString() === req.user._id.toString();
+  const canViewContact = isAdmin || (isCreator && isSalesRole);
+
+  const projectData = { ...baseProjectData };
+  if (!canViewContact) {
+    // 脱敏项目层面的联系人信息
+    if (projectData.contactInfo) {
+      projectData.contactInfo = {
+        name: '*****',
+        phone: '*****',
+        email: '*****',
+        position: ''
+      };
+    }
+    // 脱敏客户对象中的联系人/联系方式（名称可按业务需要一并脱敏）
+    if (projectData.customerId) {
+      projectData.customerId = {
+        ...projectData.customerId,
+        contactPerson: '*****',
+        phone: '*****',
+        email: '*****'
+      };
+    }
+  }
 
   res.json({
     success: true,

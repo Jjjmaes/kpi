@@ -17,6 +17,7 @@ class CustomerService {
     const userRoles = requester.roles || [];
     const currentRole = requester.currentRole || getDefaultRoleSync(userRoles);
     const isSalesRole = currentRole === 'sales' || currentRole === 'part_time_sales';
+    const isAdmin = userRoles.includes('admin');
     const customerViewPerm = getPermissionSync(currentRole, 'customer.view');
 
     // 销售与兼职销售强制只能查看自己创建的客户，防止配置误开
@@ -49,7 +50,28 @@ class CustomerService {
 
     return await Customer.find(filter)
       .populate('createdBy', 'name username')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .then(customers => {
+        return customers.map(c => {
+          const obj = c.toObject ? c.toObject() : { ...c };
+          const isOwner = c.createdBy && c.createdBy._id && c.createdBy._id.toString() === requester._id.toString();
+          // 只有管理员，或“当前以销售/兼职销售角色访问且是创建人”才能看到联系人详情
+          const canViewContact = isAdmin || (isOwner && isSalesRole);
+          if (!canViewContact) {
+            obj.contactPerson = '*****';
+            obj.phone = '*****';
+            obj.email = '*****';
+            obj.contacts = (obj.contacts || []).map(() => ({
+              name: '*****',
+              phone: '*****',
+              email: '*****',
+              position: '',
+              isPrimary: false
+            }));
+          }
+          return obj;
+        });
+      });
   }
 
   /**
@@ -67,6 +89,7 @@ class CustomerService {
     if (requester) {
       const userRoles = requester.roles || [];
       const currentRole = requester.currentRole || getDefaultRoleSync(userRoles);
+      const isAdmin = userRoles.includes('admin');
       const isSalesRole = currentRole === 'sales' || currentRole === 'part_time_sales';
       const customerViewPerm = getPermissionSync(currentRole, 'customer.view');
 
@@ -85,7 +108,27 @@ class CustomerService {
       }
     }
 
-    return customer;
+    // 按可见性脱敏联系人信息
+    const currentRole = requester.currentRole || getDefaultRoleSync(requester.roles || []);
+    const isAdminContact = requester.roles?.includes('admin');
+    const isSalesRoleContact = currentRole === 'sales' || currentRole === 'part_time_sales';
+    const isOwner = customer.createdBy && customer.createdBy._id && customer.createdBy._id.toString() === requester._id.toString();
+    const canViewContact = isAdminContact || (isOwner && isSalesRoleContact);
+    const obj = customer.toObject ? customer.toObject() : { ...customer };
+    if (!canViewContact) {
+      obj.contactPerson = '*****';
+      obj.phone = '*****';
+      obj.email = '*****';
+      obj.contacts = (obj.contacts || []).map(() => ({
+        name: '*****',
+        phone: '*****',
+        email: '*****',
+        position: '',
+        isPrimary: false
+      }));
+    }
+
+    return obj;
   }
 
   /**
