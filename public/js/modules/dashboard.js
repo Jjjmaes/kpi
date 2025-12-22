@@ -91,6 +91,14 @@ export async function loadDashboard() {
     }
 }
 
+// 统一判断当前角色是否可以查看金额（与项目列表/详情一致）
+const canViewProjectAmount = () => {
+    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    if (!currentRole) return false;
+    const allowed = ['admin', 'finance', 'sales', 'part_time_sales', 'admin_staff'];
+    return allowed.includes(currentRole);
+};
+
 function renderDashboardTodayInfo(data) {
     // 基于当前选择的角色判断，而不是用户拥有的所有角色
     const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
@@ -98,8 +106,10 @@ function renderDashboardTodayInfo(data) {
     const isAdmin = currentRole === 'admin';
     const isFinance = currentRole === 'finance';
     const isPM = currentRole === 'pm';
-    const isWorker = currentRole === 'translator' || currentRole === 'reviewer' || currentRole === 'layout';
-    const showSalesAmount = isSales && !isAdmin && !isFinance;
+    const isWorker = currentRole === 'translator' || currentRole === 'reviewer' || currentRole === 'layout' || currentRole === 'part_time_translator';
+    // 是否允许在看板卡片上显示金额
+    const canViewAmount = canViewProjectAmount();
+    const showSalesAmount = isSales && !isAdmin && !isFinance && canViewAmount;
     const showPMDelivery = isPM && !isAdmin && !isFinance;
 
     let todayInfoHtml = '';
@@ -107,7 +117,7 @@ function renderDashboardTodayInfo(data) {
     if (showSalesAmount) {
         todayInfoHtml = `
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px;">
-                ${data.todayDeals ? `
+                ${data.todayDeals && canViewAmount ? `
                 <div class="card" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none; box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3);">
                     <div style="display: flex; align-items: center; justify-content: space-between;">
                         <div>
@@ -119,7 +129,7 @@ function renderDashboardTodayInfo(data) {
                     </div>
                 </div>
                 ` : ''}
-                ${data.todayDelivery ? `
+                ${data.todayDelivery && canViewAmount ? `
                 <div class="card" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);">
                     <div style="display: flex; align-items: center; justify-content: space-between;">
                         <div>
@@ -135,7 +145,7 @@ function renderDashboardTodayInfo(data) {
         `;
     }
 
-    if (showPMDelivery && data.todayDelivery) {
+    if (showPMDelivery && data.todayDelivery && canViewAmount) {
         todayInfoHtml = `
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px;">
                 <div class="card" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border: none; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);">
@@ -227,7 +237,8 @@ function renderDashboardCards(data) {
     const isSales = currentRole === 'sales' || currentRole === 'part_time_sales';
     const isAdmin = currentRole === 'admin';
     const isFinance = currentRole === 'finance';
-    const showSalesAmount = isSales && !isAdmin && !isFinance;
+    const canViewAmount = canViewProjectAmount();
+    const showSalesAmount = isSales && !isAdmin && !isFinance && canViewAmount;
     const showKPI = data.kpiTotal !== undefined || data.kpiByRole !== undefined;
 
     const cards = `
@@ -240,7 +251,7 @@ function renderDashboardCards(data) {
                     <div class="card-desc">月份：${data.month}</div>
                 </div>
             </div>
-            ${showSalesAmount && data.totalProjectAmount !== undefined ? `
+            ${showSalesAmount && canViewAmount && data.totalProjectAmount !== undefined ? `
             <div class="card stat-card stat-success" data-click="navigateFromDashboardCard('projects')">
                 <div class="stat-icon">💰</div>
                 <div class="stat-content">
@@ -250,7 +261,7 @@ function renderDashboardCards(data) {
                 </div>
             </div>
             ` : ''}
-            ${!showSalesAmount && data.totalProjectAmount !== undefined ? `
+            ${!showSalesAmount && canViewAmount && data.totalProjectAmount !== undefined ? `
             <div class="card stat-card stat-success" data-click="navigateFromDashboardCard('projects')">
                 <div class="stat-icon">💰</div>
                 <div class="stat-content">
@@ -367,7 +378,8 @@ function renderDashboardCharts(data) {
     const isSales = currentRole === 'sales' || currentRole === 'part_time_sales';
     const isAdmin = currentRole === 'admin';
     const isFinance = currentRole === 'finance';
-    const showSalesAmount = isSales && !isAdmin && !isFinance;
+    const canViewAmount = canViewProjectAmount();
+    const showSalesAmount = isSales && !isAdmin && !isFinance && canViewAmount;
 
     const charts = [];
     let chartIndex = 0;
@@ -629,7 +641,7 @@ function renderDashboardCharts(data) {
                     data: {
                         labels: trend.map(t => t.month),
                         datasets: [{
-                            label: showSalesAmount ? '成交额' : 'KPI',
+                            label: showSalesAmount ? (canViewAmount ? '成交额' : 'KPI') : 'KPI',
                             data: trend.map(t => t.total || 0),
                             borderColor: 'rgba(46, 204, 113, 1)',
                             backgroundColor: 'rgba(46, 204, 113, 0.1)',
@@ -650,14 +662,28 @@ function renderDashboardCharts(data) {
                             legend: { display: false },
                             tooltip: {
                                 callbacks: {
-                                    label: (context) => `¥${(context.parsed.y || 0).toLocaleString()}`
+                                    label: (context) => {
+                                        const value = (context.parsed.y || 0).toLocaleString();
+                                        if (showSalesAmount && canViewAmount) {
+                                            return `¥${value}`;
+                                        }
+                                        return `${value} 分`;
+                                    }
                                 }
                             }
                         },
                         scales: {
                             y: {
                                 beginAtZero: true,
-                                ticks: { callback: (value) => '¥' + value.toLocaleString() },
+                                ticks: { 
+                                    callback: (value) => {
+                                        const v = value.toLocaleString();
+                                        if (showSalesAmount && canViewAmount) {
+                                            return '¥' + v;
+                                        }
+                                        return v;
+                                    }
+                                },
                                 grid: { color: 'rgba(0, 0, 0, 0.05)' }
                             },
                             x: { grid: { display: false } }

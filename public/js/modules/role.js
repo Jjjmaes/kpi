@@ -6,6 +6,7 @@ import { showToast, showAlert } from '../core/utils.js';
 let rolesCache = [];
 
 // 所有可用的权限列表
+// 注意：values 中包含后端支持的枚举值，false 表示无权限
 const ALL_PERMISSIONS = [
   { key: 'project.view', label: '查看项目', values: ['all', 'sales', 'assigned', false] },
   { key: 'project.edit', label: '编辑项目', values: ['all', 'sales', false] },
@@ -17,8 +18,9 @@ const ALL_PERMISSIONS = [
   { key: 'kpi.config', label: '配置KPI', values: [true, false] },
   { key: 'finance.view', label: '查看财务', values: [true, false] },
   { key: 'finance.edit', label: '编辑财务', values: [true, false] },
-  { key: 'customer.view', label: '查看客户', values: [true, false] },
-  { key: 'customer.edit', label: '编辑客户', values: [true, false] },
+  // 客户权限支持 granular 值：all/self/false
+  { key: 'customer.view', label: '查看客户', values: ['all', 'self', false] },
+  { key: 'customer.edit', label: '编辑客户', values: ['all', 'self', false] },
   { key: 'user.manage', label: '管理用户', values: [true, false] },
   { key: 'system.config', label: '系统配置', values: [true, false] },
   { key: 'role.manage', label: '管理角色', values: [true, false] }
@@ -181,9 +183,24 @@ async function submitCreateRole() {
     const permissions = {};
     document.querySelectorAll('.permission-select').forEach(select => {
       const permKey = select.dataset.permission;
-      const value = JSON.parse(select.value);
-      if (value !== false) {
-        permissions[permKey] = value;
+      const selectValue = select.value?.trim();
+      if (!permKey || selectValue === undefined) {
+        return;
+      }
+
+      try {
+        const value = JSON.parse(selectValue);
+        permissions[permKey] = value; // 即便为 false 也存入，便于配置展示
+      } catch (parseError) {
+        console.error('[Role] 解析权限值失败:', selectValue, parseError);
+        if (selectValue === 'true') {
+          permissions[permKey] = true;
+        } else if (selectValue === 'false') {
+          permissions[permKey] = false;
+        } else {
+          // 其他字符串值直接写入
+          permissions[permKey] = selectValue;
+        }
       }
     });
     
@@ -386,23 +403,20 @@ async function submitEditRole(roleId) {
         }
         
         const selectValue = select.value?.trim();
-        if (!selectValue) {
-          // 如果值为空，跳过（不设置该权限）
+        if (selectValue === undefined) {
           return;
         }
         
         try {
           const value = JSON.parse(selectValue);
-          if (value !== false && value !== null && value !== undefined) {
-            permissions[permKey] = value;
-          }
+          permissions[permKey] = value; // 包含 false，便于保留显式配置
         } catch (parseError) {
           console.error('[Role] 解析权限值失败:', selectValue, parseError);
           // 如果解析失败，尝试直接使用字符串值
           if (selectValue === 'true') {
             permissions[permKey] = true;
           } else if (selectValue === 'false') {
-            // false 值不添加到 permissions 中
+            permissions[permKey] = false;
           } else {
             permissions[permKey] = selectValue;
           }

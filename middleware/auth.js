@@ -108,7 +108,7 @@ const authorize = (...roles) => {
 
 // 基于权限表的权限检查中间件
 const requirePermission = (permission) => {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     if (!req.user || !req.currentRole) {
       return res.status(401).json({ 
         success: false, 
@@ -120,11 +120,19 @@ const requirePermission = (permission) => {
       });
     }
 
-    const permValue = getPermission(req.currentRole, permission);
-    if (!permValue || permValue === false) {
-      return res.status(403).json({ 
-        success: false, 
-        message: '权限不足' 
+    try {
+      const permValue = await getPermission(req.currentRole, permission);
+      if (!permValue || permValue === false) {
+        return res.status(403).json({ 
+          success: false, 
+          message: '权限不足' 
+        });
+      }
+    } catch (err) {
+      return res.status(500).json({
+        success: false,
+        message: '权限检查失败',
+        error: err.message
       });
     }
 

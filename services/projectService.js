@@ -3,6 +3,7 @@ const ProjectMember = require('../models/ProjectMember');
 const Customer = require('../models/Customer');
 const KpiConfig = require('../models/KpiConfig');
 const User = require('../models/User');
+const Role = require('../models/Role');
 const { createNotification, createNotificationsForUsers, NotificationTypes } = require('./notificationService');
 const { AppError } = require('../middleware/errorHandler');
 
@@ -433,7 +434,7 @@ class ProjectService {
    * 添加项目成员
    */
   async addProjectMember(projectId, memberData, user) {
-    const { userId, role, translatorType, wordRatio, layoutCost } = memberData;
+    const { userId, role, translatorType, wordRatio, layoutCost, partTimeFee } = memberData;
 
     if (!userId || !role) {
       throw new AppError('用户ID和角色不能为空', 400, 'INVALID_INPUT');
@@ -444,6 +445,12 @@ class ProjectService {
       throw new AppError('指定的用户不存在', 404, 'USER_NOT_FOUND');
     }
     const employmentType = memberUser.employmentType || 'full_time';
+
+    // 校验角色是否允许用于项目成员
+    const roleDoc = await Role.findOne({ code: role, isActive: true, canBeProjectMember: true });
+    if (!roleDoc) {
+      throw new AppError('该角色不可用于项目成员或已禁用', 400, 'INVALID_ROLE');
+    }
 
     const project = await Project.findById(projectId);
     if (!project) {
@@ -472,6 +479,17 @@ class ProjectService {
 
     // 获取项目的锁定系数（使用项目创建时的配置）
     const lockedRatios = project.locked_ratios;
+
+    // 兼职翻译费用校验（按金额结算）
+    if (role === 'part_time_translator') {
+      const fee = parseFloat(partTimeFee || 0);
+      if (!fee || fee <= 0) {
+        throw new AppError('请填写兼职翻译费用，且必须大于0', 400, 'INVALID_PART_TIME_FEE');
+      }
+      if (project.projectAmount && fee > project.projectAmount) {
+        throw new AppError('兼职翻译费用不能大于项目总金额', 400, 'INVALID_PART_TIME_FEE');
+      }
+    }
 
     // 如果是兼职排版且提供了排版费用，验证并更新项目信息
     if (role === 'layout' && layoutCost && layoutCost > 0) {
@@ -529,7 +547,10 @@ class ProjectService {
       employmentType,
       translatorType: role === 'translator' ? (translatorType || 'mtpe') : undefined,
       wordRatio: role === 'translator' ? (wordRatio || 1.0) : 1.0,
-      ratio_locked: ratio
+      ratio_locked: ratio,
+      partTimeFee: role === 'part_time_translator'
+        ? (parseFloat(partTimeFee || 0) || 0)
+        : 0
     });
 
     // 如果项目状态是pending，添加成员后自动变为scheduled

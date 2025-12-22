@@ -25,8 +25,8 @@ const { exportMonthlyKPISheet, exportUserKPIDetail } = require('../services/exce
 router.use(authenticate);
 
 // Dashboard 汇总（按权限）
-// 允许兼职销售/排版查看自己的数据
-router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout'), async (req, res) => {
+// 允许兼职销售/排版/兼职翻译查看自己的数据
+router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout', 'part_time_translator'), async (req, res) => {
   try {
     const { month, status, businessType, role, customerId } = req.query;
 
@@ -36,8 +36,9 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
     const startDate = new Date(target.getFullYear(), target.getMonth(), 1);
     const endDate = new Date(target.getFullYear(), target.getMonth() + 1, 0, 23, 59, 59);
 
-    // 使用当前角色进行权限判断
+    // 使用当前角色进行权限判断（允许回退到查询参数或用户首个角色）
     const currentRole = req.currentRole;
+    const effectiveRole = currentRole || role || ((req.user.roles || [])[0] || '');
     const kpiViewPerm = getCurrentPermission(req, 'kpi.view');
     const projectViewPerm = getCurrentPermission(req, 'project.view');
     const financeViewPerm = getCurrentPermission(req, 'finance.view');
@@ -143,152 +144,143 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
 
     // KPI 汇总 - 基于当前角色的权限
     // 先查询已生成的KPI记录
-    const kpiQuery = { month: monthStr };
-    if (kpiViewPerm === 'all') {
-      // 可以查看所有KPI，不需要过滤用户
-    } else if (kpiViewPerm === 'self') {
-      // 只看自己的KPI
-      kpiQuery.userId = req.user._id;
-    } else {
-      // 默认：只看自己的KPI
-      kpiQuery.userId = req.user._id;
-    }
-    // 如果查询参数中指定了role，使用查询参数；否则使用当前选择的角色
-    if (role) {
-      kpiQuery.role = role;
-    } else if (currentRole && currentRole !== 'admin') {
-      // 如果当前选择了特定角色，只查询该角色的KPI
-      kpiQuery.role = currentRole;
-    }
-
-    const kpiRecords = await KpiRecord.find(kpiQuery);
-    
-    // 按角色分别累加KPI（避免多角色混淆）
+    // KPI 汇总
     let kpiTotal = 0;
     const kpiByRole = {};
-    
-    // 1. 先累加已生成的KPI记录（按角色分别累加）
-    kpiRecords.forEach(r => {
-      if (!kpiByRole[r.role]) {
-        kpiByRole[r.role] = 0;
-      }
-      kpiByRole[r.role] += r.kpiValue;
-    });
-    
-    // 2. 获取用户在当前月份的所有项目成员记录（按角色分组）
-    // 如果用户选择了特定角色，只获取该角色的成员记录
-    const memberQuery = { 
-      userId: req.user._id,
-      projectId: { $in: projects.map(p => p._id) }
-    };
-    
-    // 如果当前选择了特定角色，只计算该角色的KPI
-    if (currentRole && currentRole !== 'admin') {
-      memberQuery.role = currentRole;
-    }
-    
-    const userMemberProjects = await ProjectMember.find(memberQuery)
-      .populate('projectId', 'projectName projectAmount deadline status');
-    
-    // 按项目和角色分组，避免重复计算
-    const projectRoleMap = new Map(); // key: projectId_role, value: member
-    userMemberProjects.forEach(member => {
-      if (member.projectId) {
-        const key = `${member.projectId._id.toString()}_${member.role}`;
-        projectRoleMap.set(key, member);
-      }
-    });
-    
-    // 3. 添加创建者项目（如果用户是销售角色，且当前选择了销售角色）
-    const hasSalesRole = req.user.roles && req.user.roles.includes('sales');
-    if (hasSalesRole && (!currentRole || currentRole === 'sales' || currentRole === 'admin')) {
-      projects.forEach(project => {
-        const createdById = project.createdBy?._id ? project.createdBy._id.toString() : 
-                           (project.createdBy ? project.createdBy.toString() : null);
-        if (createdById === req.user._id.toString()) {
-          const key = `${project._id.toString()}_sales`;
-          // 如果用户还没有作为销售成员添加，添加一个虚拟成员记录
-          if (!projectRoleMap.has(key)) {
-            projectRoleMap.set(key, {
-              projectId: { _id: project._id },
-              role: 'sales',
-              userId: req.user._id
-            });
-          }
-        }
+    let monthlyRoleKPIs = [];
+
+    // 特殊处理：兼职翻译在看板上显示“本月兼职费用合计”（按项目成员上的兼职费用汇总）
+    if (effectiveRole === 'part_time_translator') {
+      // 兼职翻译：按当月新增的兼职翻译成员记录汇总费用（不依赖项目金额/KPI分值）
+      const partTimeMembers = await ProjectMember.find({
+        userId: req.user._id,
+        role: 'part_time_translator',
+        createdAt: { $gte: startDate, $lte: endDate }
       });
-    }
-    
-    // 4. 实时计算KPI（批量优化，避免N+1查询）
-    // 注意：综合岗和财务岗跳过项目级计算，将在步骤5中按月汇总计算
-    
-    // 收集需要实时计算的项目ID和角色信息
-    const projectsToCalculate = [];
-    const projectRoleKeys = [];
-    
-    for (const [key, member] of projectRoleMap) {
-      const [projectId, role] = key.split('_');
+      const feeTotal = partTimeMembers.reduce((sum, m) => sum + (m.partTimeFee || 0), 0);
+      const rounded = Math.round(feeTotal * 100) / 100;
+      kpiByRole['part_time_translator'] = rounded;
+      kpiTotal = rounded;
+    } else {
+      // 通用逻辑（原有）：先用已生成的KPI记录，再补实时计算和月度角色KPI
+      const kpiQuery = { month: monthStr };
+      if (kpiViewPerm === 'all') {
+        // 可以查看所有KPI，不需要过滤用户
+      } else if (kpiViewPerm === 'self') {
+        // 只看自己的KPI
+        kpiQuery.userId = req.user._id;
+      } else {
+        // 默认：只看自己的KPI
+        kpiQuery.userId = req.user._id;
+      }
+      // 如果查询参数中指定了role，使用查询参数；否则使用当前选择的角色
+      if (role) {
+        kpiQuery.role = role;
+      } else if (currentRole && currentRole !== 'admin') {
+        // 如果当前选择了特定角色，只查询该角色的KPI
+        kpiQuery.role = currentRole;
+      }
+
+      const kpiRecords = await KpiRecord.find(kpiQuery);
+      
+      // 1. 先累加已生成的KPI记录（按角色分别累加）
+      kpiRecords.forEach(r => {
+        if (!kpiByRole[r.role]) {
+          kpiByRole[r.role] = 0;
+        }
+        kpiByRole[r.role] += r.kpiValue;
+      });
+      
+      // 2. 获取用户在当前月份的所有项目成员记录（按角色分组）
+      // 如果用户选择了特定角色，只获取该角色的成员记录
+      const memberQuery = { 
+        userId: req.user._id,
+        projectId: { $in: projects.map(p => p._id) }
+      };
       
       // 如果当前选择了特定角色，只计算该角色的KPI
-      if (currentRole && currentRole !== 'admin' && role !== currentRole) {
-        continue;
+      if (currentRole && currentRole !== 'admin') {
+        memberQuery.role = currentRole;
       }
       
-      // 综合岗和财务岗跳过项目级实时计算，将在步骤5中按月汇总计算
-      if (role === 'admin_staff' || role === 'finance') {
-        continue;
-      }
+      const userMemberProjects = await ProjectMember.find(memberQuery)
+        .populate('projectId', 'projectName projectAmount deadline status');
       
-      // 检查是否已经在kpiRecords中（避免重复计算）
-      const alreadyInRecords = kpiRecords.some(r => {
-        const rProjectId = r.projectId?._id ? r.projectId._id.toString() : 
-                          (r.projectId ? r.projectId.toString() : null);
-        return rProjectId === projectId && r.role === role;
+      // 按项目和角色分组，避免重复计算
+      const projectRoleMap = new Map(); // key: projectId_role, value: member
+      userMemberProjects.forEach(member => {
+        if (member.projectId) {
+          const key = `${member.projectId._id.toString()}_${member.role}`;
+          projectRoleMap.set(key, member);
+        }
       });
       
-      if (!alreadyInRecords) {
-        if (!projectsToCalculate.includes(projectId)) {
-          projectsToCalculate.push(projectId);
-        }
-        projectRoleKeys.push({ projectId, role, key });
-      }
-    }
-    
-    // 批量计算实时KPI（优化N+1查询）
-    if (projectsToCalculate.length > 0) {
-      try {
-        const batchResults = await calculateProjectsRealtimeBatch(projectsToCalculate);
-        
-        // 从批量结果中提取当前用户的KPI
-        for (const { projectId, role } of projectRoleKeys) {
-          const projectResult = batchResults[projectId];
-          if (projectResult && projectResult.results && projectResult.results.length > 0) {
-            // 只累加当前用户在当前项目中的当前角色的KPI
-            for (const result of projectResult.results) {
-              const resultUserId = result.userId?._id ? result.userId._id.toString() : 
-                                  (result.userId ? result.userId.toString() : null);
-              const currentUserId = req.user._id.toString();
-              
-              if (resultUserId === currentUserId && result.role === role) {
-                if (result.kpiValue && result.kpiValue > 0) {
-                  if (!kpiByRole[result.role]) {
-                    kpiByRole[result.role] = 0;
-                  }
-                  kpiByRole[result.role] += result.kpiValue;
-                }
-              }
+      // 3. 添加创建者项目（如果用户是销售角色，且当前选择了销售角色）
+      const hasSalesRole = req.user.roles && req.user.roles.includes('sales');
+      if (hasSalesRole && (!currentRole || currentRole === 'sales' || currentRole === 'admin')) {
+        projects.forEach(project => {
+          const createdById = project.createdBy?._id ? project.createdBy._id.toString() : 
+                             (project.createdBy ? project.createdBy.toString() : null);
+          if (createdById === req.user._id.toString()) {
+            const key = `${project._id.toString()}_sales`;
+            // 如果用户还没有作为销售成员添加，添加一个虚拟成员记录
+            if (!projectRoleMap.has(key)) {
+              projectRoleMap.set(key, {
+                projectId: { _id: project._id },
+                role: 'sales',
+                userId: req.user._id
+              });
             }
           }
+        });
+      }
+      
+      // 4. 实时计算KPI（批量优化，避免N+1查询）
+      // 注意：综合岗和财务岗跳过项目级计算，将在步骤5中按月汇总计算
+      
+      // 收集需要实时计算的项目ID和角色信息
+      const projectsToCalculate = [];
+      const projectRoleKeys = [];
+      
+      for (const [key, member] of projectRoleMap) {
+        const [projectId, role] = key.split('_');
+        
+        // 如果当前选择了特定角色，只计算该角色的KPI
+        if (currentRole && currentRole !== 'admin' && role !== currentRole) {
+          continue;
         }
-      } catch (error) {
-        console.error('[Dashboard] 批量计算实时KPI失败:', error.message, error.stack);
-        // 如果批量计算失败，降级为单个计算（向后兼容）
-        console.warn('[Dashboard] 降级为单个计算模式');
-        for (const { projectId, role } of projectRoleKeys) {
-          try {
-            const realtimeResult = await calculateProjectRealtime(projectId);
-            if (realtimeResult && realtimeResult.results && realtimeResult.results.length > 0) {
-              for (const result of realtimeResult.results) {
+        
+        // 综合岗和财务岗跳过项目级实时计算，将在步骤5中按月汇总计算
+        if (role === 'admin_staff' || role === 'finance') {
+          continue;
+        }
+        
+        // 检查是否已经在kpiRecords中（避免重复计算）
+        const alreadyInRecords = kpiRecords.some(r => {
+          const rProjectId = r.projectId?._id ? r.projectId._id.toString() : 
+                            (r.projectId ? r.projectId.toString() : null);
+          return rProjectId === projectId && r.role === role;
+        });
+        
+        if (!alreadyInRecords) {
+          if (!projectsToCalculate.includes(projectId)) {
+            projectsToCalculate.push(projectId);
+          }
+          projectRoleKeys.push({ projectId, role, key });
+        }
+      }
+      
+      // 批量计算实时KPI（优化N+1查询）
+      if (projectsToCalculate.length > 0) {
+        try {
+          const batchResults = await calculateProjectsRealtimeBatch(projectsToCalculate);
+          
+          // 从批量结果中提取当前用户的KPI
+          for (const { projectId, role } of projectRoleKeys) {
+            const projectResult = batchResults[projectId];
+            if (projectResult && projectResult.results && projectResult.results.length > 0) {
+              // 只累加当前用户在当前项目中的当前角色的KPI
+              for (const result of projectResult.results) {
                 const resultUserId = result.userId?._id ? result.userId._id.toString() : 
                                     (result.userId ? result.userId.toString() : null);
                 const currentUserId = req.user._id.toString();
@@ -303,107 +295,132 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
                 }
               }
             }
-          } catch (singleError) {
-            console.error(`[Dashboard] 计算项目 ${projectId} 角色 ${role} 的实时KPI失败:`, singleError.message);
+          }
+        } catch (error) {
+          console.error('[Dashboard] 批量计算实时KPI失败:', error.message, error.stack);
+          // 如果批量计算失败，降级为单个计算（向后兼容）
+          console.warn('[Dashboard] 降级为单个计算模式');
+          for (const { projectId, role } of projectRoleKeys) {
+            try {
+              const realtimeResult = await calculateProjectRealtime(projectId);
+              if (realtimeResult && realtimeResult.results && realtimeResult.results.length > 0) {
+                for (const result of realtimeResult.results) {
+                  const resultUserId = result.userId?._id ? result.userId._id.toString() : 
+                                      (result.userId ? result.userId.toString() : null);
+                  const currentUserId = req.user._id.toString();
+                  
+                  if (resultUserId === currentUserId && result.role === role) {
+                    if (result.kpiValue && result.kpiValue > 0) {
+                      if (!kpiByRole[result.role]) {
+                        kpiByRole[result.role] = 0;
+                      }
+                      kpiByRole[result.role] += result.kpiValue;
+                    }
+                  }
+                }
+              }
+            } catch (singleError) {
+              console.error(`[Dashboard] 计算项目 ${projectId} 角色 ${role} 的实时KPI失败:`, singleError.message);
+            }
           }
         }
       }
-    }
-    
-    // 5. 获取月度角色KPI（综合岗和财务岗）- 如果用户有这些角色，需要包含在KPI中
-    const monthlyRoleKPIsQuery = {
-      month: monthStr,
-      userId: req.user._id
-    };
-    
-    // 如果当前选择了特定角色，只获取该角色的月度KPI
-    if (currentRole && (currentRole === 'admin_staff' || currentRole === 'finance')) {
-      monthlyRoleKPIsQuery.role = currentRole;
-    }
-    
-    const monthlyRoleKPIs = await MonthlyRoleKPI.find(monthlyRoleKPIsQuery);
-    
-    // 将月度角色KPI加入按角色汇总（综合岗和财务岗是月度汇总，不按项目计算）
-    monthlyRoleKPIs.forEach(record => {
-      // 如果当前选择了特定角色，只累加该角色的KPI
-      if (currentRole && currentRole !== 'admin' && record.role !== currentRole) {
-        return;
+      
+      // 5. 获取月度角色KPI（综合岗和财务岗）- 如果用户有这些角色，需要包含在KPI中
+      const monthlyRoleKPIsQuery = {
+        month: monthStr,
+        userId: req.user._id
+      };
+      
+      // 如果当前选择了特定角色，只获取该角色的月度KPI
+      if (currentRole && (currentRole === 'admin_staff' || currentRole === 'finance')) {
+        monthlyRoleKPIsQuery.role = currentRole;
       }
       
-      if (!kpiByRole[record.role]) {
-        kpiByRole[record.role] = 0;
-      }
-      kpiByRole[record.role] += record.kpiValue;
-    });
-    
-    // 5.1 如果用户是综合岗或财务岗，但没有月度KPI记录，实时计算预估KPI
-    const userRoles = req.user.roles || [];
-    const hasAdminStaffRole = userRoles.includes('admin_staff');
-    const hasFinanceRole = userRoles.includes('finance');
-    
-    // 计算当月全公司项目总金额（用于综合岗和财务岗的实时计算）
-    // 注意：这里应该使用全公司所有项目，而不是当前用户可见的项目
-    const [year, monthNum] = monthStr.split('-').map(Number);
-    const monthStartDate = new Date(year, monthNum - 1, 1);
-    const monthEndDate = new Date(year, monthNum, 0, 23, 59, 59);
-    
-    const allMonthlyProjects = await Project.find({
-      createdAt: {
-        $gte: monthStartDate,
-        $lte: monthEndDate
-      }
-    });
-    const totalCompanyAmount = allMonthlyProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0);
-    
-    // 获取KPI配置
-    const KpiConfig = require('../models/KpiConfig');
-    const config = await KpiConfig.findOne().sort({ createdAt: -1 });
-    const adminRatio = config?.admin_ratio || 0;
-    
-    // 如果用户有综合岗角色，但没有月度KPI记录，实时计算预估KPI
-    if (hasAdminStaffRole && adminRatio > 0 && totalCompanyAmount > 0) {
-      const hasAdminStaffKPI = monthlyRoleKPIs.some(r => r.role === 'admin_staff');
-      if (!hasAdminStaffKPI) {
-        // 如果没有月度KPI记录，实时计算预估KPI（使用默认完成系数1.0）
-        const { calculateFinance } = require('../utils/kpiCalculator');
-        const estimatedKPI = calculateFinance(totalCompanyAmount, adminRatio, 1.0);
-        if (!kpiByRole['admin_staff']) {
-          kpiByRole['admin_staff'] = 0;
+      monthlyRoleKPIs = await MonthlyRoleKPI.find(monthlyRoleKPIsQuery);
+      
+      // 将月度角色KPI加入按角色汇总（综合岗和财务岗是月度汇总，不按项目计算）
+      monthlyRoleKPIs.forEach(record => {
+        // 如果当前选择了特定角色，只累加该角色的KPI
+        if (currentRole && currentRole !== 'admin' && record.role !== currentRole) {
+          return;
         }
-        // 只有在没有月度KPI记录时才累加实时计算的预估KPI
-        kpiByRole['admin_staff'] += estimatedKPI;
-      }
-    }
-    
-    // 如果用户有财务岗角色，但没有月度KPI记录，实时计算预估KPI
-    if (hasFinanceRole && adminRatio > 0 && totalCompanyAmount > 0) {
-      const hasFinanceKPI = monthlyRoleKPIs.some(r => r.role === 'finance');
-      if (!hasFinanceKPI) {
-        // 如果没有月度KPI记录，实时计算预估KPI（使用默认完成系数1.0）
-        const { calculateFinance } = require('../utils/kpiCalculator');
-        const estimatedKPI = calculateFinance(totalCompanyAmount, adminRatio, 1.0);
-        if (!kpiByRole['finance']) {
-          kpiByRole['finance'] = 0;
+        
+        if (!kpiByRole[record.role]) {
+          kpiByRole[record.role] = 0;
         }
-        // 只有在没有月度KPI记录时才累加实时计算的预估KPI
-        kpiByRole['finance'] += estimatedKPI;
-      }
-    }
-    
-    // 6. 根据当前选择的角色，只显示该角色的KPI
-    // 如果用户选择了特定角色，只返回该角色的KPI；否则返回所有角色的总和
-    if (currentRole && currentRole !== 'admin') {
-      // 只显示当前角色的KPI
-      kpiTotal = kpiByRole[currentRole] || 0;
-      // 清空其他角色的KPI，只保留当前角色（用于图表显示）
-      Object.keys(kpiByRole).forEach(role => {
-        if (role !== currentRole) {
-          delete kpiByRole[role];
+        kpiByRole[record.role] += record.kpiValue;
+      });
+      
+      // 5.1 如果用户是综合岗或财务岗，但没有月度KPI记录，实时计算预估KPI
+      const userRoles = req.user.roles || [];
+      const hasAdminStaffRole = userRoles.includes('admin_staff');
+      const hasFinanceRole = userRoles.includes('finance');
+      
+      // 计算当月全公司项目总金额（用于综合岗和财务岗的实时计算）
+      // 注意：这里应该使用全公司所有项目，而不是当前用户可见的项目
+      const [year, monthNum] = monthStr.split('-').map(Number);
+      const monthStartDate = new Date(year, monthNum - 1, 1);
+      const monthEndDate = new Date(year, monthNum, 0, 23, 59, 59);
+      
+      const allMonthlyProjects = await Project.find({
+        createdAt: {
+          $gte: monthStartDate,
+          $lte: monthEndDate
         }
       });
-    } else {
-      // 如果没有选择角色或选择了管理员角色，返回所有角色的总和
-      kpiTotal = Object.values(kpiByRole).reduce((sum, value) => sum + value, 0);
+      const totalCompanyAmount = allMonthlyProjects.reduce((sum, p) => sum + (p.projectAmount || 0), 0);
+      
+      // 获取KPI配置
+      const KpiConfig = require('../models/KpiConfig');
+      const config = await KpiConfig.findOne().sort({ createdAt: -1 });
+      const adminRatio = config?.admin_ratio || 0;
+      
+      // 如果用户有综合岗角色，但没有月度KPI记录，实时计算预估KPI
+      if (hasAdminStaffRole && adminRatio > 0 && totalCompanyAmount > 0) {
+        const hasAdminStaffKPI = monthlyRoleKPIs.some(r => r.role === 'admin_staff');
+        if (!hasAdminStaffKPI) {
+          // 如果没有月度KPI记录，实时计算预估KPI（使用默认完成系数1.0）
+          const { calculateFinance } = require('../utils/kpiCalculator');
+          const estimatedKPI = calculateFinance(totalCompanyAmount, adminRatio, 1.0);
+          if (!kpiByRole['admin_staff']) {
+            kpiByRole['admin_staff'] = 0;
+          }
+          // 只有在没有月度KPI记录时才累加实时计算的预估KPI
+          kpiByRole['admin_staff'] += estimatedKPI;
+        }
+      }
+      
+      // 如果用户有财务岗角色，但没有月度KPI记录，实时计算预估KPI
+      if (hasFinanceRole && adminRatio > 0 && totalCompanyAmount > 0) {
+        const hasFinanceKPI = monthlyRoleKPIs.some(r => r.role === 'finance');
+        if (!hasFinanceKPI) {
+          // 如果没有月度KPI记录，实时计算预估KPI（使用默认完成系数1.0）
+          const { calculateFinance } = require('../utils/kpiCalculator');
+          const estimatedKPI = calculateFinance(totalCompanyAmount, adminRatio, 1.0);
+          if (!kpiByRole['finance']) {
+            kpiByRole['finance'] = 0;
+          }
+          // 只有在没有月度KPI记录时才累加实时计算的预估KPI
+          kpiByRole['finance'] += estimatedKPI;
+        }
+      }
+      
+      // 6. 根据当前选择的角色，只显示该角色的KPI
+      // 如果用户选择了特定角色，只返回该角色的KPI；否则返回所有角色的总和
+      if (currentRole && currentRole !== 'admin') {
+        // 只显示当前角色的KPI
+        kpiTotal = kpiByRole[currentRole] || 0;
+        // 清空其他角色的KPI，只保留当前角色（用于图表显示）
+        Object.keys(kpiByRole).forEach(role => {
+          if (role !== currentRole) {
+            delete kpiByRole[role];
+          }
+        });
+      } else {
+        // 如果没有选择角色或选择了管理员角色，返回所有角色的总和
+        kpiTotal = Object.values(kpiByRole).reduce((sum, value) => sum + value, 0);
+      }
     }
 
     // KPI 趋势（近3个月）- 销售和兼职销售显示成交额趋势
@@ -967,8 +984,8 @@ router.post('/calculate-project/:projectId', async (req, res) => {
 });
 
 // 实时计算单个项目的每人KPI（不落库，含权限校验）
-// 允许兼职销售/排版查看自己所在项目的实时KPI
-router.get('/project/:projectId/realtime', authorize('admin', 'finance', 'pm', 'sales', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout'), async (req, res) => {
+// 允许兼职销售/排版/兼职翻译查看自己所在项目的实时KPI
+router.get('/project/:projectId/realtime', authorize('admin', 'finance', 'pm', 'sales', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout', 'part_time_translator'), async (req, res) => {
   try {
     const { projectId } = req.params;
 

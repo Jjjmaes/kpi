@@ -12,8 +12,7 @@ const projectMemberSchema = new mongoose.Schema({
     required: true
   },
   role: {
-    type: String,
-    enum: ['translator', 'reviewer', 'pm', 'sales', 'admin_staff', 'part_time_sales', 'layout'],
+    type: String, // 允许动态角色代码
     required: true
   },
   // 专/兼职快照：在添加成员时从用户带入，便于历史追溯
@@ -34,6 +33,12 @@ const projectMemberSchema = new mongoose.Schema({
     default: 1.0,
     min: 0,
     max: 1
+  },
+  // 兼职费用：目前用于兼职翻译等按金额结算的角色
+  partTimeFee: {
+    type: Number,
+    default: 0,
+    min: 0
   },
   // 锁定的系数（从项目locked_ratios复制）
   ratio_locked: {

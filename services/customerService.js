@@ -1,5 +1,6 @@
 const Customer = require('../models/Customer');
 const { AppError } = require('../middleware/errorHandler');
+const { getPermissionSync, getDefaultRoleSync } = require('../config/permissions');
 
 /**
  * 客户服务层
@@ -12,14 +13,17 @@ class CustomerService {
     const { search, isActive } = query;
     let filter = {};
 
-    // 权限过滤：销售和兼职销售只能看到自己创建的客户
-    const isAdmin = requester.roles.includes('admin');
-    const isFinance = requester.roles.includes('finance');
-    const isSales = requester.roles.includes('sales') || requester.roles.includes('part_time_sales');
-    
-    if (isSales && !isAdmin && !isFinance) {
-      // 销售只能看到自己创建的客户
+    // 基于权限配置的客户查看范围控制：customer.view = false | 'all' | 'self'
+    const userRoles = requester.roles || [];
+    const primaryRole = getDefaultRoleSync(userRoles);
+    const customerViewPerm = getPermissionSync(primaryRole, 'customer.view');
+
+    if (customerViewPerm === 'self') {
+      // 只能看到自己创建的客户
       filter.createdBy = requester._id;
+    } else if (!customerViewPerm || customerViewPerm === false) {
+      // 无查看权限，直接返回空列表
+      return [];
     }
 
     // 搜索条件
@@ -47,12 +51,28 @@ class CustomerService {
   /**
    * 获取单个客户详情
    */
-  async getCustomerById(customerId) {
+  async getCustomerById(customerId, requester) {
     const customer = await Customer.findById(customerId)
       .populate('createdBy', 'name username');
 
     if (!customer) {
       throw new AppError('客户不存在', 404, 'CUSTOMER_NOT_FOUND');
+    }
+
+    // 基于权限配置的单个客户查看控制
+    if (requester) {
+      const userRoles = requester.roles || [];
+      const primaryRole = getDefaultRoleSync(userRoles);
+      const customerViewPerm = getPermissionSync(primaryRole, 'customer.view');
+
+      if (customerViewPerm === 'self') {
+        // 只能查看自己创建的客户
+        if (!customer.createdBy || customer.createdBy._id.toString() !== requester._id.toString()) {
+          throw new AppError('只能查看自己创建的客户', 403, 'PERMISSION_DENIED');
+        }
+      } else if (!customerViewPerm || customerViewPerm === false) {
+        throw new AppError('无权查看客户信息', 403, 'PERMISSION_DENIED');
+      }
     }
 
     return customer;
@@ -143,14 +163,17 @@ class CustomerService {
       throw new AppError('客户不存在', 404, 'CUSTOMER_NOT_FOUND');
     }
 
-    // 权限检查：销售只能编辑自己创建的客户
-    const isAdmin = requester.roles.includes('admin');
-    const isSales = requester.roles.includes('sales') || requester.roles.includes('part_time_sales');
-    
-    if (isSales && !isAdmin) {
-      if (customer.createdBy.toString() !== requester._id.toString()) {
+    // 基于权限配置的客户编辑控制：customer.edit = false | 'all' | 'self'
+    const userRoles = requester.roles || [];
+    const primaryRole = getDefaultRoleSync(userRoles);
+    const customerEditPerm = getPermissionSync(primaryRole, 'customer.edit');
+
+    if (customerEditPerm === 'self') {
+      if (!customer.createdBy || customer.createdBy.toString() !== requester._id.toString()) {
         throw new AppError('只能编辑自己创建的客户', 403, 'PERMISSION_DENIED');
       }
+    } else if (!customerEditPerm || customerEditPerm === false) {
+      throw new AppError('无权编辑客户', 403, 'PERMISSION_DENIED');
     }
 
     // 如果更新名称，检查是否与其他客户重名

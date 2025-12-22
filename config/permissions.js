@@ -2,6 +2,7 @@
 // 从数据库读取角色和权限配置
 // 如果数据库未初始化，则使用内存缓存
 
+const mongoose = require('mongoose');
 const Role = require('../models/Role');
 
 // 内存缓存（用于性能优化）
@@ -9,59 +10,9 @@ let permissionsCache = null;
 let priorityCache = null;
 let nameCache = null;
 let cacheTimestamp = null;
+let loadingPromise = null;
+let mongooseRef = mongoose; // 缓存外部传入的 mongoose 实例
 const CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存
-
-// 从数据库加载权限配置
-async function loadPermissionsFromDB() {
-  try {
-    // 检查数据库连接
-    if (mongoose.connection.readyState !== 1) {
-      console.warn('[Permissions] 数据库未连接，使用默认配置');
-      return getDefaultPermissions();
-    }
-
-    const roles = await Role.find({ isActive: true });
-    
-    const permissions = {};
-    const priority = {};
-    const names = {};
-    
-    roles.forEach(role => {
-      permissions[role.code] = role.permissions || {};
-      priority[role.code] = role.priority;
-      names[role.code] = role.name;
-    });
-    
-    // 更新缓存
-    permissionsCache = permissions;
-    priorityCache = priority;
-    nameCache = names;
-    cacheTimestamp = Date.now();
-    
-    return { permissions, priority, names };
-  } catch (error) {
-    console.error('[Permissions] 加载权限配置失败:', error);
-    // 如果数据库未初始化，返回默认配置
-    return getDefaultPermissions();
-  }
-}
-
-// 获取缓存的权限配置（如果缓存有效）
-async function getCachedPermissions() {
-  const now = Date.now();
-  
-  // 如果缓存存在且未过期，直接返回
-  if (permissionsCache && cacheTimestamp && (now - cacheTimestamp) < CACHE_TTL) {
-    return {
-      permissions: permissionsCache,
-      priority: priorityCache,
-      names: nameCache
-    };
-  }
-  
-  // 否则从数据库重新加载
-  return await loadPermissionsFromDB();
-}
 
 // 默认权限配置（用于数据库未初始化时的回退）
 function getDefaultPermissions() {
@@ -127,8 +78,9 @@ function getDefaultPermissions() {
         'kpi.config': false,
         'finance.view': false,
         'finance.edit': false,
-        'customer.view': true,
-        'customer.edit': true,
+        // 客户权限：默认只能查看/编辑自己创建的客户
+        'customer.view': 'self',
+        'customer.edit': 'self',
         'user.manage': false,
         'system.config': false
       },
@@ -143,7 +95,8 @@ function getDefaultPermissions() {
         'kpi.config': false,
         'finance.view': false,
         'finance.edit': false,
-        'customer.view': true,
+        // 兼职销售：默认只能查看自己创建的客户，不允许编辑
+        'customer.view': 'self',
         'customer.edit': false,
         'user.manage': false,
         'system.config': false
@@ -238,6 +191,80 @@ function getDefaultPermissions() {
   };
 }
 
+// 从数据库加载权限配置
+async function loadPermissionsFromDB() {
+  try {
+    // 复用进行中的加载，避免并发重复查询
+    if (loadingPromise) {
+      return loadingPromise;
+    }
+    loadingPromise = (async () => {
+      // 检查数据库连接
+      const conn = (mongooseRef || mongoose).connection;
+      if (!conn || conn.readyState !== 1) {
+        console.warn('[Permissions] 数据库未连接，使用默认配置');
+        return getDefaultPermissions();
+      }
+
+      const roles = await Role.find({ isActive: true });
+      
+      const permissions = {};
+      const priority = {};
+      const names = {};
+      
+      roles.forEach(role => {
+        permissions[role.code] = role.permissions || {};
+        priority[role.code] = role.priority;
+        names[role.code] = role.name;
+      });
+      
+      // 更新缓存
+      permissionsCache = permissions;
+      priorityCache = priority;
+      nameCache = names;
+      cacheTimestamp = Date.now();
+      
+      return { permissions, priority, names };
+    })();
+    const result = await loadingPromise;
+    loadingPromise = null;
+    return result;
+  } catch (error) {
+    loadingPromise = null;
+    console.error('[Permissions] 加载权限配置失败:', error);
+    // 如果数据库未初始化，返回默认配置
+    return getDefaultPermissions();
+  }
+}
+
+// 主动刷新缓存（外部调用）
+async function refreshPermissionsCache() {
+  try {
+    const result = await loadPermissionsFromDB();
+    return result;
+  } catch (err) {
+    console.error('[Permissions] 刷新权限缓存失败:', err);
+    return getDefaultPermissions();
+  }
+}
+
+// 获取缓存的权限配置（如果缓存有效）
+async function getCachedPermissions() {
+  const now = Date.now();
+  
+  // 如果缓存存在且未过期，直接返回
+  if (permissionsCache && cacheTimestamp && (now - cacheTimestamp) < CACHE_TTL) {
+    return {
+      permissions: permissionsCache,
+      priority: priorityCache,
+      names: nameCache
+    };
+  }
+  
+  // 否则从数据库重新加载
+  return await loadPermissionsFromDB();
+}
+
 // 检查权限（异步版本）
 async function hasPermission(role, permission) {
   const { permissions } = await getCachedPermissions();
@@ -300,10 +327,11 @@ async function getRolePriority() {
 
 // 清除缓存（用于角色更新后刷新）
 function clearCache() {
-  permissionsCache = null;
-  priorityCache = null;
-  nameCache = null;
+  // 保留当前缓存以供同步读取，标记过期并触发后台刷新
   cacheTimestamp = null;
+  refreshPermissionsCache().catch(err => {
+    console.warn('[Permissions] 异步刷新权限缓存失败:', err);
+  });
 }
 
 // 同步版本（向后兼容，但会使用缓存）
@@ -356,9 +384,11 @@ function getDefaultRoleSync(userRoles) {
 }
 
 // 初始化：在服务器启动时预加载权限配置
-let mongoose;
 function initPermissions(mongooseInstance) {
-  mongoose = mongooseInstance;
+  // 如果外部传入实例，则缓存该实例供连接检查
+  if (mongooseInstance) {
+    mongooseRef = mongooseInstance;
+  }
   // 预加载权限配置
   loadPermissionsFromDB().catch(err => {
     console.warn('[Permissions] 初始化权限配置失败，将使用默认配置:', err.message);
@@ -375,6 +405,7 @@ module.exports = {
   getPermissions,
   getRolePriority,
   loadPermissionsFromDB,
+  refreshPermissionsCache,
   clearCache,
   initPermissions,
   

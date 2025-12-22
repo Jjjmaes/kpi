@@ -132,6 +132,13 @@ function calculateKPIByRole(params) {
       formula = '综合岗需要全公司总额计算';
       break;
 
+    case 'part_time_translator':
+      // 兼职翻译：按 PM 录入的翻译费用直接记入 KPI，不参与专职系数计算
+      // 此时调用方应将 projectAmount 传入为「兼职翻译费用」
+      kpiValue = projectAmount;
+      formula = `兼职翻译费用(${projectAmount})`;
+      break;
+
     default:
       throw new Error(`未知的角色类型: ${role}`);
   }

@@ -300,6 +300,13 @@ export async function loadPermissionsConfig() {
                                                 <option value="all" ${permValue === 'all' ? 'selected' : ''}>全部</option>
                                                 <option value="self" ${permValue === 'self' ? 'selected' : ''}>自己的</option>
                                             `;
+                                        } else if (permKey === 'customer.view' || permKey === 'customer.edit') {
+                                            // 客户查看/编辑：false, 'all', 'self'
+                                            options = `
+                                                <option value="false" ${permValue === false ? 'selected' : ''}>❌ 否</option>
+                                                <option value="all" ${permValue === 'all' ? 'selected' : ''}>全部</option>
+                                                <option value="self" ${permValue === 'self' ? 'selected' : ''}>自己的</option>
+                                            `;
                                         } else {
                                             // 其他权限：true/false
                                             options = `

@@ -6,14 +6,47 @@ import { loadCustomers } from './customer.js';
 import { loadLanguages } from './language.js';
 
 // --- 辅助 ---
+// 是否可以在项目相关界面看到项目金额 / 单价
+// 业务要求：项目经理、专/兼职翻译、专/兼职排版、审校都不看金额
+// 允许看金额的角色：admin、finance、sales、part_time_sales、admin_staff（可按需要调整）
 const canViewProjectAmount = () => {
-    const restricted = ['translator', 'reviewer', 'layout'];
-    if (!state.currentRole) return true;
-    return !restricted.includes(state.currentRole);
+    const role = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    if (!role) return false;
+    const allowed = ['admin', 'finance', 'sales', 'part_time_sales', 'admin_staff'];
+    return allowed.includes(role);
 };
 
 let targetLanguageRowIndex = 0;
 let currentProjectDetail = null; // 查看/编辑时缓存当前项目
+let projectMemberRolesLoadedPromise = null; // 缓存可用于项目成员的角色列表
+
+async function ensureProjectMemberRoles() {
+    if (window.projectMemberRoles && Array.isArray(window.projectMemberRoles)) {
+        return window.projectMemberRoles;
+    }
+    if (projectMemberRolesLoadedPromise) {
+        return projectMemberRolesLoadedPromise;
+    }
+    projectMemberRolesLoadedPromise = (async () => {
+        try {
+            // 使用专门的接口获取「可作为项目成员」的角色，非管理员也可访问
+            const res = await apiFetch('/roles/project-member-roles');
+            const data = await res.json();
+            if (data.success) {
+                const roles = (data.data || [])
+                    .filter(r => r.isActive && r.canBeProjectMember)
+                    .map(r => ({ value: r.code, label: r.name }));
+                window.projectMemberRoles = roles;
+                return roles;
+            }
+        } catch (err) {
+            console.error('加载项目成员角色失败:', err);
+        }
+        window.projectMemberRoles = [];
+        return [];
+    })();
+    return projectMemberRolesLoadedPromise;
+}
 
 const getProjectTypeText = (type) => {
     const typeMap = {
@@ -1364,11 +1397,17 @@ export async function viewProject(projectId) {
                             const memberEmploymentType = m.employmentType || (m.userId && typeof m.userId === 'object' ? m.userId.employmentType : null);
                             const employmentLabel = memberEmploymentType === 'part_time' ? '兼职' : '专职';
                             const roleText = getRoleText(m.role);
+                            let extraInfo = '';
+                            if (m.role === 'translator') {
+                                extraInfo = ` (${m.translatorType === 'deepedit' ? '深度编辑' : 'MTPE'}, 字数占比: ${((m.wordRatio || 1) * 100).toFixed(0)}%)`;
+                            } else if (m.role === 'layout' && m.layoutCost) {
+                                extraInfo = ` (排版费用: ¥${(m.layoutCost || 0).toFixed(2)})`;
+                            } else if (m.role === 'part_time_translator' && m.partTimeFee) {
+                                extraInfo = ` (兼职翻译费用: ¥${(m.partTimeFee || 0).toFixed(2)})`;
+                            }
                             return `<div class="member-item" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #f5f5f5; border-radius: 4px;">
                                 <div class="member-info" style="flex: 1;">
-                                    <strong>${userName}</strong> - ${roleText} <span style="color:#6b7280;">(${employmentLabel})</span>
-                                    ${m.role === 'translator' ? ` (${m.translatorType === 'deepedit' ? '深度编辑' : 'MTPE'}, 字数占比: ${((m.wordRatio || 1) * 100).toFixed(0)}%)` : ''}
-                                    ${m.role === 'layout' && m.layoutCost ? ` (排版费用: ¥${(m.layoutCost || 0).toFixed(2)})` : ''}
+                                    <strong>${userName}</strong> - ${roleText} <span style="color:#6b7280;">(${employmentLabel})</span>${extraInfo}
                                 </div>
                                 ${canManageMembers ? `<div class="member-actions" style="margin-left: 10px;"><button class="btn-small btn-danger" data-click="deleteMember('${projectId}', '${m._id}')" style="background: #dc2626; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">删除</button></div>` : ''}
                             </div>`;
@@ -1634,10 +1673,12 @@ export async function setLayoutCost(e, projectId) {
 }
 
 // 初始化内联添加成员表单
-function initInlineCreateMemberForm() {
+async function initInlineCreateMemberForm() {
     const roleSelect = document.getElementById('inlineCreateMemberRole');
     if (!roleSelect) return;
     
+    const dynamicProjectMemberRoles = await ensureProjectMemberRoles();
+
     // 获取可选择的角色 - 基于当前选择的角色判断
     const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
     const isAdmin = currentRole === 'admin';
@@ -1646,21 +1687,30 @@ function initInlineCreateMemberForm() {
     const isPartTimeSales = currentRole === 'part_time_sales';
     
     let availableRoles;
+    const baseAdminRoles = [
+        { value: 'translator', label: '翻译' },
+        { value: 'reviewer', label: '审校' },
+        { value: 'pm', label: '项目经理' },
+        { value: 'sales', label: '销售' },
+        { value: 'admin_staff', label: '综合岗' },
+        { value: 'part_time_sales', label: '兼职销售' },
+        { value: 'layout', label: '兼职排版' }
+    ];
+
     if (isAdmin) {
+        // 管理员：内置角色 + 可用于项目成员的自定义角色
         availableRoles = [
-            { value: 'translator', label: '翻译' },
-            { value: 'reviewer', label: '审校' },
-            { value: 'pm', label: '项目经理' },
-            { value: 'sales', label: '销售' },
-            { value: 'admin_staff', label: '综合岗' },
-            { value: 'part_time_sales', label: '兼职销售' },
-            { value: 'layout', label: '兼职排版' }
+            ...baseAdminRoles,
+            ...dynamicProjectMemberRoles
+                .filter(r => !baseAdminRoles.some(b => b.value === r.value))
         ];
     } else if (currentRole === 'pm') {
         availableRoles = [
             { value: 'translator', label: '翻译' },
             { value: 'reviewer', label: '审校' },
-            { value: 'layout', label: '兼职排版' }
+            { value: 'layout', label: '兼职排版' },
+            ...dynamicProjectMemberRoles
+                .filter(r => ['translator', 'reviewer', 'layout'].includes(r.value))
         ];
     } else if (isSales || isPartTimeSales) {
         // 当前角色为销售/兼职销售：只能添加项目经理
@@ -1893,7 +1943,8 @@ export function updateCreateProjectMembersList() {
         'sales': '销售',
         'admin_staff': '综合岗',
         'part_time_sales': '兼职销售',
-        'layout': '兼职排版'
+    'layout': '兼职排版',
+    'part_time_translator': '兼职翻译'
     };
     
     container.innerHTML = createProjectMembers.map((member, index) => {
@@ -1901,12 +1952,14 @@ export function updateCreateProjectMembersList() {
         const userName = user ? user.name : '未知用户';
         const roleText = roleTextMap[member.role] || member.role;
         const employmentLabel = (member.employmentType || user?.employmentType) === 'part_time' ? '兼职' : '专职';
-        let extraInfo = '';
-        if (member.role === 'translator') {
-            extraInfo = ` (${member.translatorType === 'mtpe' ? 'MTPE' : '深度编辑'}, 占比: ${(member.wordRatio || 1.0).toFixed(2)})`;
-        } else if (member.role === 'layout' && member.layoutCost) {
-            extraInfo = ` (费用: ¥${member.layoutCost.toFixed(2)})`;
-        }
+    let extraInfo = '';
+    if (member.role === 'translator') {
+      extraInfo = ` (${member.translatorType === 'mtpe' ? 'MTPE' : '深度编辑'}, 占比: ${(member.wordRatio || 1.0).toFixed(2)})`;
+    } else if (member.role === 'layout' && member.layoutCost) {
+      extraInfo = ` (费用: ¥${member.layoutCost.toFixed(2)})`;
+    } else if (member.role === 'part_time_translator' && member.partTimeFee) {
+      extraInfo = ` (兼职翻译费用: ¥${member.partTimeFee.toFixed(2)})`;
+    }
         return `
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; background: white; border-radius: 4px; margin-bottom: 8px;">
                 <span style="font-size: 13px;">
@@ -1940,15 +1993,18 @@ export async function showAddMemberModalForCreate() {
     const isPM = currentRole === 'pm';
     const isSales = currentRole === 'sales';
     const isPartTimeSales = currentRole === 'part_time_sales';
-    
+
+    // 动态加载所有「可作为项目成员」的角色（含兼职翻译等）
+    const dynamicProjectMemberRoles = await ensureProjectMemberRoles();
+
     // 权限控制（按当前角色）：
-    // - 管理员：可以添加所有角色
-    // - 当前角色为项目经理：只能添加翻译、审校、兼职排版
-    // - 当前角色为销售或兼职销售：只能添加项目经理
-    // - 其他情况默认只能添加项目经理
+    // - 管理员：固定基础角色 + 所有动态角色
+    // - 项目经理：基础执行角色 + 所有动态角色
+    // - 销售/兼职销售：只能添加项目经理
+    // - 其他：默认只能添加项目经理
     let availableRoles;
     if (isAdmin) {
-        availableRoles = [
+        const baseAdminRoles = [
             { value: 'translator', label: '翻译' },
             { value: 'reviewer', label: '审校' },
             { value: 'pm', label: '项目经理' },
@@ -1957,11 +2013,20 @@ export async function showAddMemberModalForCreate() {
             { value: 'part_time_sales', label: '兼职销售' },
             { value: 'layout', label: '兼职排版' }
         ];
-    } else if (currentRole === 'pm') {
         availableRoles = [
+            ...baseAdminRoles,
+            ...dynamicProjectMemberRoles.filter(r => !baseAdminRoles.some(b => b.value === r.value))
+        ];
+    } else if (isPM) {
+        const pmBaseRoles = [
             { value: 'translator', label: '翻译' },
             { value: 'reviewer', label: '审校' },
             { value: 'layout', label: '兼职排版' }
+        ];
+        availableRoles = [
+            ...pmBaseRoles,
+            // 把所有动态角色里“不是这三个基础角色”的都加进来（例如：part_time_translator 等）
+            ...dynamicProjectMemberRoles.filter(r => !pmBaseRoles.some(b => b.value === r.value))
         ];
     } else if (isSales || isPartTimeSales) {
         // 当前角色为销售/兼职销售：只能添加项目经理
@@ -2005,6 +2070,12 @@ export async function showAddMemberModalForCreate() {
                 <input type="number" name="layoutCost" id="createMemberLayoutCost" step="0.01" min="0" data-change="validateCreateMemberLayoutCost()">
                 <small style="color: #666; font-size: 12px;">排版费用不能超过项目总金额的5%</small>
                 <div id="createMemberLayoutCostValidation" style="margin-top: 5px;"></div>
+            </div>
+            <div class="form-group" id="createPartTimeFeeGroup" style="display: none;">
+                <label>兼职翻译费用（元）</label>
+                <input type="number" name="partTimeFee" id="createMemberPartTimeFee" step="0.01" min="0">
+                <small style="color: #666; font-size: 12px;">用于兼职翻译的实际支付金额</small>
+                <div id="createMemberPartTimeFeeValidation" style="margin-top: 5px;"></div>
             </div>
             <div class="action-buttons">
                 <button type="submit">添加</button>
@@ -2083,6 +2154,20 @@ export async function addMemberForCreate(e) {
         }
         member.layoutCost = layoutCost;
     }
+
+    if (role === 'part_time_translator') {
+        const partTimeFee = formData.get('partTimeFee') ? parseFloat(formData.get('partTimeFee')) : 0;
+        const projectAmount = parseFloat(document.getElementById('addMemberFormForCreate')?.dataset?.projectAmount || 0);
+        if (!partTimeFee || partTimeFee <= 0) {
+            showToast('请输入兼职翻译费用，且必须大于0', 'error');
+            return;
+        }
+        if (projectAmount && partTimeFee > projectAmount) {
+            showToast('兼职翻译费用不能大于项目总金额', 'error');
+            return;
+        }
+        member.partTimeFee = partTimeFee;
+    }
     
     createProjectMembers.push(member);
     updateCreateProjectMembersList();
@@ -2125,18 +2210,27 @@ export function toggleCreateTranslatorFields() {
     const translatorGroup = document.getElementById('createTranslatorTypeGroup');
     const wordRatioGroup = document.getElementById('createWordRatioGroup');
     const layoutCostGroup = document.getElementById('createLayoutCostGroup');
+    const partTimeFeeGroup = document.getElementById('createPartTimeFeeGroup');
     if (role === 'translator') {
         if (translatorGroup) translatorGroup.style.display = 'block';
         if (wordRatioGroup) wordRatioGroup.style.display = 'block';
         if (layoutCostGroup) layoutCostGroup.style.display = 'none';
+        if (partTimeFeeGroup) partTimeFeeGroup.style.display = 'none';
     } else if (role === 'layout') {
         if (translatorGroup) translatorGroup.style.display = 'none';
         if (wordRatioGroup) wordRatioGroup.style.display = 'none';
         if (layoutCostGroup) layoutCostGroup.style.display = 'block';
+        if (partTimeFeeGroup) partTimeFeeGroup.style.display = 'none';
+    } else if (role === 'part_time_translator') {
+        if (translatorGroup) translatorGroup.style.display = 'none';
+        if (wordRatioGroup) wordRatioGroup.style.display = 'none';
+        if (layoutCostGroup) layoutCostGroup.style.display = 'none';
+        if (partTimeFeeGroup) partTimeFeeGroup.style.display = 'block';
     } else {
         if (translatorGroup) translatorGroup.style.display = 'none';
         if (wordRatioGroup) wordRatioGroup.style.display = 'none';
         if (layoutCostGroup) layoutCostGroup.style.display = 'none';
+        if (partTimeFeeGroup) partTimeFeeGroup.style.display = 'none';
     }
 }
 
@@ -2255,14 +2349,15 @@ export async function showAddMemberModal(projectId) {
         }
     }
 
-    // 检查用户角色，确定可选择的角色
-    const roles = state.currentUser?.roles || [];
-    const isAdmin = roles.includes('admin');
-    const isPM = roles.includes('pm');
-    const isSales = roles.includes('sales') || roles.includes('part_time_sales');
-    
-    // 销售只能添加项目经理
-    const availableRoles = isAdmin || isPM ? [
+    const projectAmount = currentProjectDetail?.projectAmount || 0;
+    const dynamicProjectMemberRoles = await ensureProjectMemberRoles();
+    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    const isAdmin = currentRole === 'admin';
+    const isPM = currentRole === 'pm';
+    const isSales = currentRole === 'sales';
+    const isPartTimeSales = currentRole === 'part_time_sales';
+    let availableRoles;
+    const baseAdminRoles = [
         { value: 'translator', label: '翻译' },
         { value: 'reviewer', label: '审校' },
         { value: 'pm', label: '项目经理' },
@@ -2270,11 +2365,29 @@ export async function showAddMemberModal(projectId) {
         { value: 'admin_staff', label: '综合岗' },
         { value: 'part_time_sales', label: '兼职销售' },
         { value: 'layout', label: '兼职排版' }
-    ] : [
-        { value: 'pm', label: '项目经理' }
     ];
-
-    const projectAmount = currentProjectDetail?.projectAmount || 0;
+    if (isAdmin) {
+        availableRoles = [
+            ...baseAdminRoles,
+            ...dynamicProjectMemberRoles.filter(r => !baseAdminRoles.some(b => b.value === r.value))
+        ];
+    } else if (isPM) {
+        // 项目经理：默认可以添加核心执行角色 + 任何「可作为项目成员」的动态角色
+        const pmBaseRoles = [
+            { value: 'translator', label: '翻译' },
+            { value: 'reviewer', label: '审校' },
+            { value: 'layout', label: '兼职排版' }
+        ];
+        availableRoles = [
+            ...pmBaseRoles,
+            // 把所有动态角色里“不是这三个基础角色”的都加进来（例如：part_time_translator 等）
+            ...dynamicProjectMemberRoles.filter(r => !pmBaseRoles.some(b => b.value === r.value))
+        ];
+    } else if (isSales || isPartTimeSales) {
+        availableRoles = [{ value: 'pm', label: '项目经理' }];
+    } else {
+        availableRoles = [{ value: 'pm', label: '项目经理' }];
+    }
     const content = `
         <form id="addMemberForm" data-project-id="${projectId}" data-project-amount="${projectAmount}" data-submit="addMember(event, '${projectId}')">
             <div class="form-group">
@@ -2307,6 +2420,12 @@ export async function showAddMemberModal(projectId) {
                 <small style="color: #666; font-size: 12px;">排版费用不能超过项目总金额的5%</small>
                 <div id="addMemberLayoutCostValidation" style="margin-top: 5px;"></div>
             </div>
+            <div class="form-group" id="partTimeFeeGroup" style="display: none;">
+                <label>兼职翻译费用（元）</label>
+                <input type="number" name="partTimeFee" id="addMemberPartTimeFee" step="0.01" min="0">
+                <small style="color: #666; font-size: 12px;">用于兼职翻译的实际支付金额</small>
+                <div id="addMemberPartTimeFeeValidation" style="margin-top: 5px;"></div>
+            </div>
             <div class="action-buttons">
                 <button type="submit">添加</button>
                 <button type="button" data-click="closeModal()">取消</button>
@@ -2329,18 +2448,27 @@ export function toggleTranslatorFields() {
     const translatorGroup = document.getElementById('translatorTypeGroup');
     const wordRatioGroup = document.getElementById('wordRatioGroup');
     const layoutCostGroup = document.getElementById('layoutCostGroup');
+    const partTimeFeeGroup = document.getElementById('partTimeFeeGroup');
     if (role === 'translator') {
         if (translatorGroup) translatorGroup.style.display = 'block';
         if (wordRatioGroup) wordRatioGroup.style.display = 'block';
         if (layoutCostGroup) layoutCostGroup.style.display = 'none';
+        if (partTimeFeeGroup) partTimeFeeGroup.style.display = 'none';
     } else if (role === 'layout') {
         if (translatorGroup) translatorGroup.style.display = 'none';
         if (wordRatioGroup) wordRatioGroup.style.display = 'none';
         if (layoutCostGroup) layoutCostGroup.style.display = 'block';
+        if (partTimeFeeGroup) partTimeFeeGroup.style.display = 'none';
+    } else if (role === 'part_time_translator') {
+        if (translatorGroup) translatorGroup.style.display = 'none';
+        if (wordRatioGroup) wordRatioGroup.style.display = 'none';
+        if (layoutCostGroup) layoutCostGroup.style.display = 'none';
+        if (partTimeFeeGroup) partTimeFeeGroup.style.display = 'block';
     } else {
         if (translatorGroup) translatorGroup.style.display = 'none';
         if (wordRatioGroup) wordRatioGroup.style.display = 'none';
         if (layoutCostGroup) layoutCostGroup.style.display = 'none';
+        if (partTimeFeeGroup) partTimeFeeGroup.style.display = 'none';
     }
 }
 
@@ -2467,6 +2595,23 @@ export function validateAddMemberLayoutCost() {
     return true;
 }
 
+export function validateAddMemberPartTimeFee() {
+    const feeInput = document.getElementById('addMemberPartTimeFee');
+    const validationDiv = document.getElementById('addMemberPartTimeFeeValidation');
+    const fee = parseFloat(feeInput?.value || 0);
+    const projectAmount = currentProjectDetail?.projectAmount || parseFloat(document.getElementById('addMemberForm')?.dataset?.projectAmount || 0);
+    if (!fee || fee <= 0) {
+        if (validationDiv) validationDiv.innerHTML = '<span style="color: #dc2626;">请输入兼职翻译费用</span>';
+        return false;
+    }
+    if (projectAmount && fee > projectAmount) {
+        if (validationDiv) validationDiv.innerHTML = '<span style="color: #dc2626;">兼职翻译费用不能大于项目总金额</span>';
+        return false;
+    }
+    if (validationDiv) validationDiv.innerHTML = `<span style="color: #059669;">费用：¥${fee.toFixed(2)}</span>`;
+    return true;
+}
+
 export async function addMember(e, projectId) {
     e.preventDefault();
     const formData = new FormData(e.target);
@@ -2503,6 +2648,11 @@ export async function addMember(e, projectId) {
         const layoutCost = formData.get('layoutCost') ? parseFloat(formData.get('layoutCost')) : 0;
         if (layoutCost > 0 && !validateAddMemberLayoutCost()) return;
         payload.layoutCost = layoutCost;
+    }
+    if (role === 'part_time_translator') {
+        const partTimeFee = formData.get('partTimeFee') ? parseFloat(formData.get('partTimeFee')) : 0;
+        if (!validateAddMemberPartTimeFee()) return;
+        payload.partTimeFee = partTimeFee;
     }
 
     try {

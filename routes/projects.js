@@ -19,7 +19,8 @@ const {
   canDeleteProject 
 } = require('../utils/permissionChecker');
 
-// 对项目数据脱敏客户信息
+// 对项目数据脱敏客户信息（用于限制查看客户名称/联系方式）
+// 仅保留 customerId/_id，其余姓名、简称等用占位符替代
 function scrubCustomerInfo(project) {
   if (!project) return project;
   const obj = project.toObject ? project.toObject() : { ...project };
@@ -29,7 +30,7 @@ function scrubCustomerInfo(project) {
     // 保留ID，其他敏感信息置为*****
     obj.customerId = { _id: id, name: '*****', shortName: '*****' };
   }
-  // 统一占位显示
+  // 统一占位显示（给前端列表/详情用）
   obj.clientName = '*****';
   obj.customerName = '*****';
   return obj;
@@ -261,7 +262,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
 // 添加项目成员
 router.post('/:id/add-member', asyncHandler(async (req, res) => {
-  const { userId, role, translatorType, wordRatio, layoutCost } = req.body;
+  const { userId, role, translatorType, wordRatio, layoutCost, partTimeFee } = req.body;
   const projectId = req.params.id;
 
   // 使用公共函数检查项目访问权限
@@ -277,7 +278,7 @@ router.post('/:id/add-member', asyncHandler(async (req, res) => {
   try {
     const member = await projectService.addProjectMember(
       projectId,
-      { userId, role, translatorType, wordRatio, layoutCost },
+      { userId, role, translatorType, wordRatio, layoutCost, partTimeFee },
       req.user
     );
 

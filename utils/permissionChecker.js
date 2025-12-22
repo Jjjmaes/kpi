@@ -73,20 +73,22 @@ function isAdminOrFinanceOrPM(req) {
 }
 
 /**
- * 检查是否为仅交付角色（翻译/审校/排版），无查看客户信息权限
+ * 检查是否为“仅交付/执行”用户 —— 不能看到客户详细信息（名称、邮箱、电话）
+ * 业务要求：项目经理、专/兼职翻译、专/兼职排版、审校都不该看到客户信息
  * @param {Object} req - Express请求对象
  * @returns {Boolean}
  */
 function isDeliveryOnlyUser(req) {
   const currentRole = req.currentRole;
   if (currentRole) {
-    const restricted = ['translator', 'reviewer', 'layout'];
+    // 所有执行类角色（包括PM）视为仅交付
+    const restricted = ['pm', 'translator', 'reviewer', 'layout', 'part_time_translator'];
     return restricted.includes(currentRole);
   }
   // 向后兼容：基于所有角色判断
   const roles = req.user?.roles || [];
-  const restricted = ['translator', 'reviewer', 'layout'];
-  const privileged = ['admin', 'finance', 'pm', 'sales', 'part_time_sales', 'admin_staff'];
+  const restricted = ['pm', 'translator', 'reviewer', 'layout', 'part_time_translator'];
+  const privileged = ['admin', 'finance', 'sales', 'part_time_sales', 'admin_staff'];
   const hasRestricted = roles.some(r => restricted.includes(r));
   const hasPrivileged = roles.some(r => privileged.includes(r));
   return hasRestricted && !hasPrivileged;

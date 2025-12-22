@@ -19,7 +19,7 @@ router.get('/', authorize('admin', 'finance', 'sales', 'part_time_sales'), async
 
 // 获取单个客户详情
 router.get('/:id', authorize('admin', 'finance', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
-  const customer = await customerService.getCustomerById(req.params.id);
+  const customer = await customerService.getCustomerById(req.params.id, req.user);
 
   res.json({
     success: true,

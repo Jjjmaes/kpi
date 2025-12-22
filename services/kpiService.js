@@ -278,6 +278,13 @@ async function generateMonthlyKPIRecords(month, force = false) {
                 kpiValue: layoutCost,
                 formula: `排版费用：${layoutCost}元`
               };
+            } else if (member.role === 'part_time_translator') {
+              // 兼职翻译：直接使用成员上记录的兼职费用作为KPI
+              const fee = member.partTimeFee || 0;
+              kpiResult = {
+                kpiValue: fee,
+                formula: `兼职翻译费用：${fee}元`
+              };
             } else if (member.role === 'admin_staff' || member.role === 'finance') {
               // 综合岗和财务岗：跳过项目级计算，将在最后按月汇总计算
               continue;
@@ -810,6 +817,13 @@ async function calculateProjectRealtime(projectId) {
           kpiValue: layoutCost,
           formula: `排版费用：${layoutCost}元`
         };
+    } else if (roleForCalc === 'part_time_translator') {
+      // 兼职翻译：直接使用成员上记录的兼职费用作为KPI
+      const fee = member.partTimeFee || 0;
+      kpiResult = {
+        kpiValue: fee,
+        formula: `兼职翻译费用：${fee}元`
+      };
     } else if (roleForCalc === 'admin_staff' || roleForCalc === 'finance') {
       // 综合岗和财务岗：需要按月汇总计算，使用管理员评价的完成系数
       // 实时计算时，提示需要按月汇总
@@ -1009,6 +1023,12 @@ async function calculateProjectsRealtimeBatch(projectIds) {
         kpiResult = {
           kpiValue: layoutCost,
           formula: `排版费用：${layoutCost}元`
+        };
+      } else if (member.role === 'part_time_translator') {
+        const fee = member.partTimeFee || 0;
+        kpiResult = {
+          kpiValue: fee,
+          formula: `兼职翻译费用：${fee}元`
         };
       } else if (member.role === 'admin_staff' || member.role === 'finance') {
         kpiResult = {

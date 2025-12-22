@@ -638,11 +638,12 @@ let orgInfo = {
 };
 
 // 判断当前用户是否应该看到项目金额和单价信息
-// 翻译、审校、排版角色不应该看到金额信息
+// 业务要求：项目经理、专/兼职翻译、专/兼职排版、审校都不该看到项目金额
+// 允许看到的：管理员、财务、销售、兼职销售、综合岗（如需调整可在此扩展）
 const canViewProjectAmount = () => {
-    if (!currentRole) return true;
-    const restrictedRoles = ['translator', 'reviewer', 'layout'];
-    return !restrictedRoles.includes(currentRole);
+    if (!currentRole) return false;
+    const allowedRoles = ['admin', 'finance', 'sales', 'part_time_sales', 'admin_staff'];
+    return allowedRoles.includes(currentRole);
 };
 let allProjectsCache = []; // 缓存项目列表
 let receivablesCache = []; // 缓存应收结果
@@ -2733,6 +2734,35 @@ function removeEditTargetLanguageRow(rowId) {
 }
 
 let memberRowIndex = 0;
+let projectMemberRolesLoadedPromise = null;
+
+async function ensureProjectMemberRoles() {
+    if (window.projectMemberRoles && Array.isArray(window.projectMemberRoles)) {
+        return window.projectMemberRoles;
+    }
+    if (projectMemberRolesLoadedPromise) {
+        return projectMemberRolesLoadedPromise;
+    }
+    projectMemberRolesLoadedPromise = (async () => {
+        try {
+            // 使用专门的接口获取「可作为项目成员」的角色，非管理员也可访问
+            const res = await apiFetch(`/roles/project-member-roles`);
+            const data = await res.json();
+            if (data.success) {
+                const roles = (data.data || [])
+                    .filter(r => r.isActive && r.canBeProjectMember)
+                    .map(r => ({ value: r.code, label: r.name }));
+                window.projectMemberRoles = roles;
+                return roles;
+            }
+        } catch (err) {
+            console.error('加载项目成员角色失败:', err);
+        }
+        window.projectMemberRoles = [];
+        return [];
+    })();
+    return projectMemberRolesLoadedPromise;
+}
 
 async function addMemberRow() {
     // 确保用户列表已加载
@@ -2762,19 +2792,25 @@ async function addMemberRow() {
     row.id = `memberRow${memberRowIndex}`;
     row.style.cssText = 'display: flex; gap: 10px; margin-bottom: 10px; padding: 10px; background: #f8f9fa; border-radius: 4px; align-items: flex-end;';
     
-    // 如果是销售创建项目，只能选择项目经理
-    const roleOptions = isSales ? `
+    const dynamicProjectMemberRoles = await ensureProjectMemberRoles();
+    const baseRoles = isSales ? [
+        { value: 'pm', label: '项目经理' }
+    ] : [
+        { value: 'translator', label: '翻译' },
+        { value: 'reviewer', label: '审校' },
+        { value: 'pm', label: '项目经理' },
+        { value: 'sales', label: '销售' },
+        { value: 'admin_staff', label: '综合岗' },
+        { value: 'part_time_sales', label: '兼职销售' },
+        { value: 'layout', label: '兼职排版' }
+    ];
+    const combinedRoles = [
+        ...baseRoles,
+        ...dynamicProjectMemberRoles.filter(r => !baseRoles.some(b => b.value === r.value))
+    ];
+    const roleOptions = `
                 <option value="">请选择</option>
-                <option value="pm">项目经理</option>
-    ` : `
-                <option value="">请选择</option>
-                <option value="translator">翻译</option>
-                <option value="reviewer">审校</option>
-                <option value="pm">项目经理</option>
-                <option value="sales">销售</option>
-                <option value="admin_staff">综合岗</option>
-                <option value="part_time_sales">兼职销售</option>
-                <option value="layout">兼职排版</option>
+                ${combinedRoles.map(r => `<option value="${r.value}">${r.label}</option>`).join('')}
     `;
     
     // 过滤用户列表：如果销售有PM角色，且当前选择的是PM角色，则过滤掉自己
@@ -3920,19 +3956,47 @@ async function showAddMemberModal(projectId) {
     // 过滤出激活的用户
     const activeUsers = allUsers.filter(u => u.isActive);
 
+    const dynamicProjectMemberRoles = await ensureProjectMemberRoles();
+    const currentRole = currentRoleCode || (currentUser?.roles?.[0] || '');
+    const isAdmin = currentRole === 'admin';
+    const isPM = currentRole === 'pm';
+    const isSales = currentRole === 'sales';
+    const isPartTimeSales = currentRole === 'part_time_sales';
+    let availableRoles;
+    const baseAdminRoles = [
+        { value: 'translator', label: '翻译' },
+        { value: 'reviewer', label: '审校' },
+        { value: 'pm', label: '项目经理' },
+        { value: 'sales', label: '销售' },
+        { value: 'admin_staff', label: '综合岗' },
+        { value: 'part_time_sales', label: '兼职销售' },
+        { value: 'layout', label: '兼职排版' }
+    ];
+    if (isAdmin) {
+        availableRoles = [
+            ...baseAdminRoles,
+            ...dynamicProjectMemberRoles.filter(r => !baseAdminRoles.some(b => b.value === r.value))
+        ];
+    } else if (isPM) {
+        availableRoles = [
+            { value: 'translator', label: '翻译' },
+            { value: 'reviewer', label: '审校' },
+            { value: 'layout', label: '兼职排版' },
+            ...dynamicProjectMemberRoles.filter(r => ['translator', 'reviewer', 'layout'].includes(r.value))
+        ];
+    } else if (isSales || isPartTimeSales) {
+        availableRoles = [{ value: 'pm', label: '项目经理' }];
+    } else {
+        availableRoles = [{ value: 'pm', label: '项目经理' }];
+    }
+
     const content = `
         <form id="addMemberForm" data-project-id="${projectId}" data-project-amount="${projectAmount || 0}" onsubmit="addMember(event, '${projectId}')">
             <div class="form-group">
                 <label>角色 *</label>
                 <select name="role" id="memberRole" onchange="toggleTranslatorFields(); filterUsersByRole()" required>
                     <option value="">请选择</option>
-                    <option value="translator">翻译</option>
-                    <option value="reviewer">审校</option>
-                    <option value="pm">项目经理</option>
-                    <option value="sales">销售</option>
-                    <option value="admin_staff">综合岗</option>
-                    <option value="part_time_sales">兼职销售</option>
-                    <option value="layout">兼职排版</option>
+                    ${availableRoles.map(r => `<option value="${r.value}">${r.label}</option>`).join('')}
                 </select>
             </div>
             <div class="form-group">

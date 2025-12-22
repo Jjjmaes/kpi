@@ -10,6 +10,20 @@ const KpiRecord = require('../models/KpiRecord');
 // 所有路由需要认证
 router.use(authenticate);
 
+// 获取可用于项目成员的角色列表（所有已登录用户可见）
+// 用于前端项目成员下拉框，避免非管理员无法获取角色列表
+router.get('/project-member-roles', asyncHandler(async (req, res) => {
+  const roles = await Role.find({ 
+    isActive: true, 
+    canBeProjectMember: true 
+  }).sort({ priority: -1, createdAt: -1 });
+
+  res.json({
+    success: true,
+    data: roles
+  });
+}));
+
 // 获取所有角色列表（管理员可见）
 router.get('/', authorize('admin'), asyncHandler(async (req, res) => {
   const { includeInactive } = req.query;
@@ -69,9 +83,10 @@ router.post('/', authorize('admin'), asyncHandler(async (req, res) => {
     createdBy: req.user._id,
     updatedBy: req.user._id
   });
-  
-  // 清除权限缓存
-  const { clearCache } = require('../config/permissions');
+
+  // 刷新权限缓存
+  const { refreshPermissionsCache, clearCache } = require('../config/permissions');
+  await refreshPermissionsCache();
   clearCache();
   
   res.status(201).json({
@@ -124,9 +139,9 @@ router.put('/:id', authorize('admin'), asyncHandler(async (req, res) => {
     throw new AppError('保存角色失败: ' + (saveError.message || '未知错误'), 400, 'SAVE_ERROR');
   }
   
-  // 清除权限缓存，使新配置立即生效
-  const { clearCache } = require('../config/permissions');
-  clearCache();
+  // 刷新权限缓存，使新配置立即生效
+  const { refreshPermissionsCache } = require('../config/permissions');
+  await refreshPermissionsCache();
   
   res.json({
     success: true,
@@ -170,9 +185,9 @@ router.delete('/:id', authorize('admin'), asyncHandler(async (req, res) => {
   
   await Role.findByIdAndDelete(req.params.id);
   
-  // 清除权限缓存
-  const { clearCache } = require('../config/permissions');
-  clearCache();
+  // 刷新权限缓存
+  const { refreshPermissionsCache } = require('../config/permissions');
+  await refreshPermissionsCache();
   
   res.json({
     success: true,

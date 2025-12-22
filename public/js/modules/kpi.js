@@ -51,8 +51,12 @@ export async function loadKPI() {
                     </thead>
                     <tbody>
                         ${data.data.summary.map(user => {
-                            const partTimeRoles = Object.keys(user.byRole).filter(role => role === 'part_time_sales' || role === 'layout');
-                            const fullTimeRoles = Object.keys(user.byRole).filter(role => role !== 'part_time_sales' && role !== 'layout');
+                            const partTimeRoles = Object.keys(user.byRole).filter(role => 
+                                role === 'part_time_sales' || role === 'layout' || role === 'part_time_translator'
+                            );
+                            const fullTimeRoles = Object.keys(user.byRole).filter(role => 
+                                !['part_time_sales', 'layout', 'part_time_translator'].includes(role)
+                            );
                             const partTimeTotal = partTimeRoles.reduce((sum, role) => sum + (user.byRole[role] || 0), 0);
                             const fullTimeTotal = fullTimeRoles.reduce((sum, role) => sum + (user.byRole[role] || 0), 0);
 
@@ -73,7 +77,7 @@ export async function loadKPI() {
                                 <td>${user.roles.map(r => getRoleText(r)).join(', ')}</td>
                                 <td style="font-size: 12px;">
                                     ${Object.entries(user.byRole).map(([role, value]) => {
-                                        const isPartTimeRole = role === 'part_time_sales' || role === 'layout';
+                                        const isPartTimeRole = role === 'part_time_sales' || role === 'layout' || role === 'part_time_translator';
                                         const unit = isPartTimeRole ? '元' : '分';
                                         const prefix = isPartTimeRole ? '¥' : '';
                                         return `${getRoleText(role)}: ${prefix}${value.toLocaleString()} ${unit}`;
@@ -182,9 +186,46 @@ export async function loadKPI() {
                 `;
             }
 
+            // 按角色拆分专职KPI分值与兼职费用合计
+            const byRole = {};
+            (data.data?.records || []).forEach(r => {
+                const role = String(r.role || '').trim();
+                if (!byRole[role]) byRole[role] = 0;
+                byRole[role] += r.kpiValue || 0;
+            });
+            (data.data?.monthlyRoleKPIs || []).forEach(r => {
+                const role = String(r.role || '').trim();
+                if (!byRole[role]) byRole[role] = 0;
+                byRole[role] += r.kpiValue || 0;
+            });
+
+            const partTimeRolesForUser = Object.keys(byRole).filter(role => 
+                role === 'part_time_sales' || role === 'layout' || role === 'part_time_translator'
+            );
+            const fullTimeRolesForUser = Object.keys(byRole).filter(role => 
+                !['part_time_sales', 'layout', 'part_time_translator'].includes(role)
+            );
+            const partTimeTotalForUser = partTimeRolesForUser.reduce((sum, role) => sum + (byRole[role] || 0), 0);
+            const fullTimeTotalForUser = fullTimeRolesForUser.reduce((sum, role) => sum + (byRole[role] || 0), 0);
+
+            let totalDisplay = '';
+            if (partTimeRolesForUser.length > 0 && fullTimeRolesForUser.length === 0) {
+                // 纯兼职：显示“本月兼职费用合计（元）”
+                totalDisplay = `<strong>本月兼职费用合计：¥${partTimeTotalForUser.toLocaleString()} 元</strong>`;
+            } else if (partTimeRolesForUser.length === 0 && fullTimeRolesForUser.length > 0) {
+                // 纯专职：显示KPI分值
+                totalDisplay = `<strong>总计：${fullTimeTotalForUser.toLocaleString()} 分</strong>`;
+            } else if (partTimeRolesForUser.length > 0 && fullTimeRolesForUser.length > 0) {
+                // 既有专职又有兼职，分行展示
+                totalDisplay = `<strong>兼职：¥${partTimeTotalForUser.toLocaleString()} 元；专职：${fullTimeTotalForUser.toLocaleString()} 分</strong>`;
+            } else {
+                // 默认回退（无记录）
+                totalDisplay = `<strong>总计：0 分</strong>`;
+            }
+
             const html = `
                 <h3>${user?.name || ''} 的KPI - ${month}</h3>
-                <p><strong>总计: ${(data.data?.total || 0).toLocaleString()} 分</strong> <small style="color:#666;">（兼职岗位按元计算，专职岗位按分计算）</small></p>
+                <p>${totalDisplay} <br><small style="color:#666;">（兼职岗位按元计算，专职岗位按分计算）</small></p>
                 ${(!data.data?.records || data.data.records.length === 0) && (!data.data?.monthlyRoleKPIs || data.data?.monthlyRoleKPIs.length === 0) ? '<p>该月暂无KPI记录</p>' : `
                     <table>
                         <thead>
@@ -200,7 +241,7 @@ export async function loadKPI() {
                         <tbody>
                             ${(data.data?.records || []).map(r => {
                                 const roleStr = String(r.role || '').trim();
-                                const isPartTimeRole = roleStr === 'part_time_sales' || roleStr === 'layout';
+                                const isPartTimeRole = roleStr === 'part_time_sales' || roleStr === 'layout' || roleStr === 'part_time_translator';
                                 const unit = isPartTimeRole ? '元' : '分';
                                 const prefix = isPartTimeRole ? '¥' : '';
                                 return `
