@@ -118,7 +118,10 @@ router.get('/', asyncHandler(async (req, res) => {
     let query = {};
     
     // 基于当前角色的权限进行数据过滤
-    const viewPermission = getCurrentPermission(req, 'project.view');
+    const rawViewPermission = getCurrentPermission(req, 'project.view');
+    const currentRole = req.currentRole || (req.user.roles[0] || null);
+    // 业务规则：项目经理只能看到“分配给自己”的项目，即使权限配置里是 all 也强制按 assigned 处理
+    const viewPermission = currentRole === 'pm' ? 'assigned' : rawViewPermission;
     
     if (viewPermission === 'all') {
       // 查看所有项目：管理员、财务、PM、综合岗

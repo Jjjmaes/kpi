@@ -58,7 +58,8 @@ const defaultRoles = [
     priority: 80,
     isSystem: true,
     permissions: {
-      'project.view': 'all',
+      // 只查看“分配给自己”的项目（包括自己作为 PM 成员的项目）
+      'project.view': 'assigned',
       'project.edit': false,
       'project.create': true,
       'project.delete': false,
