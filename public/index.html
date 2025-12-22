@@ -299,6 +299,9 @@
                 <div id="financeSection-addPayment" class="finance-section-content" style="display: none;">
                     <div class="card" style="margin-bottom:16px;">
                         <div class="card-title">新增回款</div>
+                        <div style="background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;padding:8px 10px;border-radius:6px;font-size:12px;margin:8px 0 4px;">
+                            仅非取消项目可录入；回款金额会影响销售回款系数，请确认金额和日期。
+                        </div>
                     <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;">
                         <div style="position: relative; min-width: 300px;">
                             <input type="text" id="paymentProjectSearch" placeholder="搜索项目（编号/名称/客户）" 
@@ -420,6 +423,9 @@
                 <div id="financeSection-myInvoiceRequests" class="finance-section-content" style="display: none;">
                     <div class="card" style="margin-bottom:16px;">
                         <div class="card-title">我的发票申请</div>
+                        <div style="background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;padding:8px 10px;border-radius:6px;font-size:12px;margin:8px 0 4px;">
+                            仅非取消项目可申请开票；回款金额会影响销售回款系数，请先确认回款记录。
+                        </div>
                         <div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0;align-items:center;">
                             <button data-click="showCreateInvoiceRequestModal()" style="padding:6px 12px;background:#667eea;color:white;border:none;border-radius:4px;cursor:pointer;">➕ 申请开票</button>
                             <select id="myInvoiceRequestStatusFilter" style="padding:6px;" data-change="loadMyInvoiceRequests()">

@@ -151,12 +151,19 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
 
     // 特殊处理：兼职翻译在看板上显示“本月兼职费用合计”（按项目成员上的兼职费用汇总）
     if (effectiveRole === 'part_time_translator') {
-      // 兼职翻译：按当月新增的兼职翻译成员记录汇总费用（不依赖项目金额/KPI分值）
+      // 兼职翻译：按「项目完成时间」归属月份汇总兼职费用
+      const completedProjects = await Project.find({
+        status: 'completed',
+        completedAt: { $gte: startDate, $lte: endDate }
+      }).select('_id');
+      const projectIds = completedProjects.map(p => p._id);
+
       const partTimeMembers = await ProjectMember.find({
         userId: req.user._id,
         role: 'part_time_translator',
-        createdAt: { $gte: startDate, $lte: endDate }
+        projectId: { $in: projectIds }
       });
+
       const feeTotal = partTimeMembers.reduce((sum, m) => sum + (m.partTimeFee || 0), 0);
       const rounded = Math.round(feeTotal * 100) / 100;
       kpiByRole['part_time_translator'] = rounded;

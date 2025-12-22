@@ -9,7 +9,7 @@ router.use(authenticate);
 
 // 获取所有客户（销售、兼职销售、管理员、财务可见）
 router.get('/', authorize('admin', 'finance', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
-  const customers = await customerService.getAllCustomers(req.query, req.user);
+  const customers = await customerService.getAllCustomers(req.query, { ...req.user.toObject(), currentRole: req.currentRole });
 
   res.json({
     success: true,
@@ -19,7 +19,7 @@ router.get('/', authorize('admin', 'finance', 'sales', 'part_time_sales'), async
 
 // 获取单个客户详情
 router.get('/:id', authorize('admin', 'finance', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
-  const customer = await customerService.getCustomerById(req.params.id, req.user);
+  const customer = await customerService.getCustomerById(req.params.id, { ...req.user.toObject(), currentRole: req.currentRole });
 
   res.json({
     success: true,
@@ -29,7 +29,7 @@ router.get('/:id', authorize('admin', 'finance', 'sales', 'part_time_sales'), as
 
 // 创建客户（销售、管理员）
 router.post('/', authorize('admin', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
-  const customer = await customerService.createCustomer(req.body, req.user);
+  const customer = await customerService.createCustomer(req.body, { ...req.user.toObject(), currentRole: req.currentRole });
 
   res.status(201).json({
     success: true,
@@ -40,7 +40,7 @@ router.post('/', authorize('admin', 'sales', 'part_time_sales'), asyncHandler(as
 
 // 更新客户（销售、管理员）
 router.put('/:id', authorize('admin', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
-  const customer = await customerService.updateCustomer(req.params.id, req.body, req.user);
+  const customer = await customerService.updateCustomer(req.params.id, req.body, { ...req.user.toObject(), currentRole: req.currentRole });
 
   res.json({
     success: true,

@@ -26,6 +26,13 @@ const ALL_PERMISSIONS = [
   { key: 'role.manage', label: '管理角色', values: [true, false] }
 ];
 
+const PERMISSION_HINTS = {
+  'customer.view': 'self=仅自己创建的客户；all=所有客户',
+  'customer.edit': 'self=仅自己创建的客户；all=所有客户',
+  'project.view': 'assigned=自己创建或被分配的项目；all=全部项目',
+  'project.amount.visible': '金额可见性按角色内置控制，谨慎开启'
+};
+
 // 加载角色列表
 export async function loadRoles() {
   try {
@@ -137,6 +144,7 @@ export async function showCreateRoleModal() {
         <h3 style="margin:20px 0 10px;">权限配置</h3>
         <div id="permissionsConfig" style="border:1px solid #ddd;border-radius:4px;padding:12px;max-height:400px;overflow-y:auto;">
           ${ALL_PERMISSIONS.map(perm => {
+            const hint = PERMISSION_HINTS[perm.key];
             return `
               <div style="margin-bottom:12px;padding:8px;background:#f8f9fa;border-radius:4px;">
                 <label style="font-weight:bold;display:block;margin-bottom:4px;">${perm.label} (${perm.key})</label>
@@ -146,6 +154,7 @@ export async function showCreateRoleModal() {
                     `<option value="${JSON.stringify(v)}">${v === true ? '是' : v === 'all' ? '全部' : v === 'self' ? '自己' : v === 'sales' ? '销售' : v === 'assigned' ? '分配的' : v}</option>`
                   ).join('')}
                 </select>
+                ${hint ? `<div style="font-size:12px;color:#666;margin-top:4px;">${hint}</div>` : ''}
               </div>
             `;
           }).join('')}
@@ -349,6 +358,7 @@ export async function editRole(roleId) {
           ${ALL_PERMISSIONS.map(perm => {
             const currentValue = permissions[perm.key];
             const currentValueStr = currentValue === undefined ? 'false' : JSON.stringify(currentValue);
+            const hint = PERMISSION_HINTS[perm.key];
             return `
               <div style="margin-bottom:12px;padding:8px;background:#f8f9fa;border-radius:4px;">
                 <label style="font-weight:bold;display:block;margin-bottom:4px;">${perm.label} (${perm.key})</label>
@@ -359,6 +369,7 @@ export async function editRole(roleId) {
                     return `<option value="${vStr}" ${currentValueStr === vStr ? 'selected' : ''}>${v === true ? '是' : v === 'all' ? '全部' : v === 'self' ? '自己' : v === 'sales' ? '销售' : v === 'assigned' ? '分配的' : v}</option>`;
                   }).join('')}
                 </select>
+                ${hint ? `<div style="font-size:12px;color:#666;margin-top:4px;">${hint}</div>` : ''}
               </div>
             `;
           }).join('')}

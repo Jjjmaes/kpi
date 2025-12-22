@@ -82,6 +82,7 @@ export async function loadDashboard() {
         renderDashboardTodayInfo(data);
         renderDashboardCards(data);
         renderDashboardCharts(data);
+        syncWarningsToNotifications(data);
     } catch (error) {
         showAlert('dashboardCards', '加载业务看板失败: ' + error.message, 'error');
     } finally {
@@ -697,6 +698,23 @@ function renderDashboardCharts(data) {
 
     const el = document.getElementById('dashboardCharts');
     if (el) el.innerHTML = `<div class="chart-grid">${charts.join('')}</div>`;
+}
+
+// 将逾期/预警写入站内通知（后端去重：项目+类型+当天）
+async function syncWarningsToNotifications(data) {
+    if (!data) return;
+    try {
+        await apiFetch('/notifications/sync-warnings', {
+            method: 'POST',
+            body: JSON.stringify({
+                paymentWarnings: data.paymentWarnings || [],
+                paymentDueSoon: data.paymentDueSoon || [],
+                deliveryWarnings: data.deliveryWarnings || []
+            })
+        });
+    } catch (err) {
+        console.warn('[Dashboard] 同步预警通知失败:', err);
+    }
 }
 
 export async function navigateFromDashboardCard(target, overrideStatus) {

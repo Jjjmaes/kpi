@@ -8,11 +8,12 @@ const Notification = require('../models/Notification');
  * @param {String} params.message - 通知消息
  * @param {String} params.link - 跳转链接（可选）
  */
-async function createNotification({ userId, type = 'general', message, link = null }) {
+async function createNotification({ userId, type = 'general', message, link = null, projectId = null }) {
   try {
     const notification = await Notification.create({
       user: userId,
       type,
+      projectId,
       message,
       link,
       read: false
@@ -31,11 +32,12 @@ async function createNotification({ userId, type = 'general', message, link = nu
  * @param {String} message - 通知消息
  * @param {String} link - 跳转链接（可选）
  */
-async function createNotificationsForUsers(userIds, type, message, link = null) {
+async function createNotificationsForUsers(userIds, type, message, link = null, projectId = null) {
   try {
     const notifications = userIds.map(userId => ({
       user: userId,
       type,
+      projectId,
       message,
       link,
       read: false
@@ -62,12 +64,38 @@ const NotificationTypes = {
   KPI_REVIEWED: 'kpi_reviewed',              // KPI审核
   PAYMENT_RECEIVED: 'payment_received',      // 回款到账
   PROJECT_DELAYED: 'project_delayed',        // 项目延期
-  PROJECT_REVISION: 'project_revision'       // 项目返修
+  PROJECT_REVISION: 'project_revision',      // 项目返修
+  PAYMENT_OVERDUE: 'payment_overdue',        // 回款逾期
+  PAYMENT_DUE_SOON: 'payment_due_soon',      // 回款即将到期
+  DELIVERY_OVERDUE: 'delivery_overdue'       // 交付逾期
 };
+
+/**
+ * 去重创建通知：同一用户、项目、类型在当天只创建一次
+ */
+async function createNotificationIfNotExists({ userId, type, message, link = null, projectId = null }) {
+  try {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const exists = await Notification.findOne({
+      user: userId,
+      type,
+      projectId,
+      createdAt: { $gte: startOfDay }
+    });
+    if (exists) return { notification: exists, created: false };
+    const notification = await createNotification({ userId, type, message, link, projectId });
+    return { notification, created: true };
+  } catch (error) {
+    console.error('[NotificationService] 去重创建通知失败:', error);
+    throw error;
+  }
+}
 
 module.exports = {
   createNotification,
   createNotificationsForUsers,
+  createNotificationIfNotExists,
   NotificationTypes
 };
 

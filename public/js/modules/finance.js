@@ -2957,74 +2957,15 @@ export async function showCreateInvoiceRequestModal() {
             return;
         }
         
-        // 处理 createdBy 可能是对象（有 _id）或字符串ID的情况
-        const currentUserId = state.currentUser?._id;
-        
         // 先过滤状态：只排除已取消的项目，其余状态都允许申请发票
         const eligibleProjects = (data.data || []).filter(p => 
             p.status !== 'cancelled' && p.status !== 'canceled'
         );
         
-        // 详细调试：检查第一个项目的数据格式
-        if (eligibleProjects && eligibleProjects.length > 0) {
-            const firstProject = eligibleProjects[0];
-            console.log('[Finance] 第一个符合状态的项目数据示例:', {
-                projectId: firstProject._id,
-                projectName: firstProject.projectName,
-                status: firstProject.status,
-                createdBy: firstProject.createdBy,
-                createdByType: typeof firstProject.createdBy,
-                createdById: firstProject.createdBy?._id,
-                createdByString: firstProject.createdBy?.toString(),
-                currentUserId,
-                currentUserIdType: typeof currentUserId
-            });
-        }
-        
-        // 再过滤创建者：只保留当前用户创建的项目
-        const projects = eligibleProjects.filter(p => {
-            const projectCreatedBy = p.createdBy?._id || p.createdBy;
-            const projectCreatedByStr = projectCreatedBy?.toString();
-            const currentUserIdStr = currentUserId?.toString();
-            const matches = currentUserId && 
-                   projectCreatedBy && 
-                   (projectCreatedByStr === currentUserIdStr);
-            
-            // 调试：输出不匹配的原因
-            if (!matches && currentUserId) {
-                console.log('[Finance] 项目不匹配:', {
-                    projectId: p._id,
-                    projectName: p.projectName,
-                    projectCreatedBy,
-                    projectCreatedByStr,
-                    currentUserIdStr,
-                    match: projectCreatedByStr === currentUserIdStr
-                });
-            }
-            
-            return matches;
-        });
-        
-        console.log('[Finance] showCreateInvoiceRequestModal 项目过滤:', {
-            totalProjects: data.data?.length || 0,
-            filteredProjects: projects.length,
-            currentUserId,
-            currentUserIdStr: currentUserId?.toString(),
-            pendingSelectedIds: window.pendingSelectedProjectsForInvoice ? Array.from(window.pendingSelectedProjectsForInvoice) : [],
-            sampleProjectCreatedBy: data.data?.[0]?.createdBy
-        });
+        // 后端已按照角色返回可见项目，这里不再按创建者二次过滤，避免因前端缓存缺失导致空列表
+        const projects = eligibleProjects;
         
         if (projects.length === 0) {
-            // 如果过滤后没有项目，检查是否是所有项目都不匹配
-            if (data.data && data.data.length > 0) {
-                console.warn('[Finance] 所有项目都被过滤掉了，可能是用户ID不匹配');
-                console.warn('[Finance] 当前用户ID:', currentUserId);
-                console.warn('[Finance] 项目 createdBy 示例:', data.data.slice(0, 3).map(p => ({
-                    projectId: p._id,
-                    createdBy: p.createdBy,
-                    createdById: p.createdBy?._id || p.createdBy
-                })));
-            }
             showToast('您没有可申请开票的项目', 'error');
             return;
         }
@@ -3054,6 +2995,9 @@ export async function showCreateInvoiceRequestModal() {
         
         const modalContent = `
             <div style="padding:20px;max-width:600px;">
+                <div style="background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;padding:8px 10px;border-radius:6px;font-size:12px;margin-bottom:12px;">
+                    仅非取消项目可申请开票；金额请与回款、项目金额保持一致，回款金额会影响销售回款系数。
+                </div>
                 <form id="createInvoiceRequestForm">
                     <div class="form-group">
                         <label>选择项目 <span style="color:red;">*</span>（可多选）：</label>

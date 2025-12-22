@@ -15,10 +15,14 @@ class CustomerService {
 
     // 基于权限配置的客户查看范围控制：customer.view = false | 'all' | 'self'
     const userRoles = requester.roles || [];
-    const primaryRole = getDefaultRoleSync(userRoles);
-    const customerViewPerm = getPermissionSync(primaryRole, 'customer.view');
+    const currentRole = requester.currentRole || getDefaultRoleSync(userRoles);
+    const isSalesRole = currentRole === 'sales' || currentRole === 'part_time_sales';
+    const customerViewPerm = getPermissionSync(currentRole, 'customer.view');
 
-    if (customerViewPerm === 'self') {
+    // 销售与兼职销售强制只能查看自己创建的客户，防止配置误开
+    if (isSalesRole) {
+      filter.createdBy = requester._id;
+    } else if (customerViewPerm === 'self') {
       // 只能看到自己创建的客户
       filter.createdBy = requester._id;
     } else if (!customerViewPerm || customerViewPerm === false) {
@@ -62,10 +66,16 @@ class CustomerService {
     // 基于权限配置的单个客户查看控制
     if (requester) {
       const userRoles = requester.roles || [];
-      const primaryRole = getDefaultRoleSync(userRoles);
-      const customerViewPerm = getPermissionSync(primaryRole, 'customer.view');
+      const currentRole = requester.currentRole || getDefaultRoleSync(userRoles);
+      const isSalesRole = currentRole === 'sales' || currentRole === 'part_time_sales';
+      const customerViewPerm = getPermissionSync(currentRole, 'customer.view');
 
-      if (customerViewPerm === 'self') {
+      // 销售与兼职销售强制只能查看自己创建的客户
+      if (isSalesRole) {
+        if (!customer.createdBy || customer.createdBy._id.toString() !== requester._id.toString()) {
+          throw new AppError('只能查看自己创建的客户', 403, 'PERMISSION_DENIED');
+        }
+      } else if (customerViewPerm === 'self') {
         // 只能查看自己创建的客户
         if (!customer.createdBy || customer.createdBy._id.toString() !== requester._id.toString()) {
           throw new AppError('只能查看自己创建的客户', 403, 'PERMISSION_DENIED');
@@ -165,8 +175,10 @@ class CustomerService {
 
     // 基于权限配置的客户编辑控制：customer.edit = false | 'all' | 'self'
     const userRoles = requester.roles || [];
-    const primaryRole = getDefaultRoleSync(userRoles);
-    const customerEditPerm = getPermissionSync(primaryRole, 'customer.edit');
+    const currentRole = requester.currentRole || getDefaultRoleSync(userRoles);
+    const isSalesRole = currentRole === 'sales' || currentRole === 'part_time_sales';
+    // 销售与兼职销售强制仅能编辑自己创建的客户
+    const customerEditPerm = isSalesRole ? 'self' : getPermissionSync(currentRole, 'customer.edit');
 
     if (customerEditPerm === 'self') {
       if (!customer.createdBy || customer.createdBy.toString() !== requester._id.toString()) {
