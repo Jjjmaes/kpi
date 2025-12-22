@@ -458,7 +458,8 @@ router.get('/:id/quotation', authenticate, asyncHandler(async (req, res) => {
     throw new AppError('项目不存在', 404, 'PROJECT_NOT_FOUND');
   }
   
-  // 检查权限：创建者、管理员、销售、兼职销售、财务可以导出（含PM身份时不允许）
+  // 检查权限：创建者、管理员、销售、兼职销售、财务可以导出
+  // 业务调整：即使用户同时拥有 PM 角色，只要是项目创建人也允许导出报价单
   const isCreator = project.createdBy._id.toString() === req.user._id.toString();
   const isAdmin = req.user.roles.includes('admin');
   const isFinance = req.user.roles.includes('finance');
@@ -466,8 +467,10 @@ router.get('/:id/quotation', authenticate, asyncHandler(async (req, res) => {
   const isPartTimeSales = req.user.roles.includes('part_time_sales');
   const isPM = req.user.roles.includes('pm');
 
-  const canViewRole = (isAdmin || isFinance || isSales || isPartTimeSales) && !isPM;
-  const canView = canViewRole || (isCreator && !isPM);
+  // 角色维度的导出权限：管理员 / 财务 / 销售 / 兼职销售（非创建者时，如果同时是 PM，则不允许）
+  const canViewByRole = (isAdmin || isFinance || isSales || isPartTimeSales) && !isPM;
+  // 创建者始终可以导出，与是否同时是 PM 无关
+  const canView = isCreator || canViewByRole;
   
   if (!canView) {
     throw new AppError('无权导出此项目的报价单', 403, 'PERMISSION_DENIED');

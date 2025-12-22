@@ -945,6 +945,13 @@ export async function showEditProjectModal() {
     if ((state.languagesCache || []).length === 0) {
         await loadLanguages();
     }
+    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    const isAdmin = currentRole === 'admin';
+    const isPM = currentRole === 'pm';
+    const isSales = currentRole === 'sales';
+    const isPartTimeSales = currentRole === 'part_time_sales';
+    // 销售创建的项目，销售可以管理成员；管理员和项目经理可以管理所有项目的成员
+    const canManageMembers = isAdmin || isPM || (isSales || isPartTimeSales) && p.createdBy?._id === state.currentUser?._id;
     const targetLanguagesArray = Array.isArray(p.targetLanguages) ? p.targetLanguages : (p.targetLanguages ? [p.targetLanguages] : []);
     const sourceLanguageOptions = (state.languagesCache || [])
         .filter(lang => lang.isActive)
@@ -1118,6 +1125,39 @@ export async function showEditProjectModal() {
                 `;
             })()}
             
+            ${canManageMembers ? `
+            <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                    <h4 style="margin:0;font-size:14px;color:#667eea;">项目成员</h4>
+                    <button type="button" class="btn-small" data-click="showAddMemberModal('${p._id}')">添加成员</button>
+                </div>
+                <div id="editProjectMembersList" style="display:flex;flex-direction:column;gap:8px;background:#f8f9fa;padding:10px;border-radius:6px;">
+                    ${p.members && Array.isArray(p.members) && p.members.length > 0 ? p.members.map(m => {
+                        const userName = (m.userId && typeof m.userId === 'object') ? m.userId.name : (m.userId || '未知用户');
+                        const employmentLabel = m.employmentType === 'part_time' || m.userId?.employmentType === 'part_time' ? '兼职' : '专职';
+                        const roleText = getRoleText(m.role);
+                        let extraInfo = '';
+                        if (m.role === 'translator') {
+                            extraInfo = ` (${m.translatorType === 'deepedit' ? '深度编辑' : 'MTPE'}, 字数占比: ${((m.wordRatio || 1) * 100).toFixed(0)}%)`;
+                        } else if (m.role === 'layout' && m.layoutCost) {
+                            extraInfo = ` (排版费用: ¥${(m.layoutCost || 0).toFixed(2)})`;
+                        } else if (m.role === 'part_time_translator' && m.partTimeFee) {
+                            extraInfo = ` (兼职翻译费用: ¥${(m.partTimeFee || 0).toFixed(2)})`;
+                        }
+                        return `<div class="member-item" style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;">
+                            <div class="member-info" style="flex:1;">
+                                <strong>${userName}</strong> - ${roleText} <span style="color:#6b7280;">(${employmentLabel})</span>${extraInfo}
+                            </div>
+                            <div class="member-actions" style="margin-left:10px;">
+                                <button type="button" class="btn-small btn-danger" data-click="deleteMember('${p._id}', '${m._id}')" style="background:#dc2626;color:white;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;">删除</button>
+                            </div>
+                        </div>`;
+                    }).join('') : '<p style="margin:0;color:#999;font-size:12px;">暂无成员，点击“添加成员”进行维护</p>'}
+                </div>
+                <small style="color:#666;font-size:12px;display:block;margin-top:6px;">成员增删使用上方按钮，操作完成后重新打开项目详情可看到最新状态。</small>
+            </div>
+            ` : ''}
+
             <div class="action-buttons">
                 <button type="submit">保存</button>
                 <button type="button" data-click="closeModal()">取消</button>
@@ -1552,7 +1592,7 @@ export async function exportProjectQuotation(projectId) {
             const text = await response.text();
             let error;
             try { error = JSON.parse(text); } catch (e) { error = { message: text || '导出失败' }; }
-            alert('导出失败: ' + (error.message || '未知错误'));
+            alert('导出失败: ' + (error.message || error.error?.message || '未知错误'));
         }
     } catch (error) {
         console.error('导出报价单失败:', error);
@@ -1570,7 +1610,7 @@ export async function startProject(projectId) {
             loadProjects();
             showToast('项目已通知项目经理，等待安排', 'success');
         } else {
-            alert(result.message);
+            alert(result.message || result.error?.message || '操作失败');
         }
     } catch (error) {
         alert('操作失败: ' + error.message);

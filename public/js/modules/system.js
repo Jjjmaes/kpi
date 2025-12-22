@@ -5,7 +5,7 @@ import { showModal } from '../core/ui.js';
 // 缓存配置历史
 let configHistoryCache = [];
 let orgInfo = {
-    companyName: 'KPI绩效管理系统',
+    companyName: '语家',
     companyAddress: '',
     companyContact: '',
     companyPhone: '',
@@ -23,10 +23,11 @@ export async function loadOrgInfo() {
     } catch (e) {
         console.warn('加载机构信息失败，使用默认值', e);
     }
-    const titleText = `${orgInfo.companyName || 'KPI'}绩效管理系统`;
+    const baseName = orgInfo.companyName || '语家';
+    const titleText = `${baseName} KPI SYSTEM`;
     document.title = titleText;
     const loginTitle = document.getElementById('loginTitle');
-    if (loginTitle) loginTitle.textContent = 'KPI SYSTEM';
+    if (loginTitle) loginTitle.textContent = titleText;
     const mainTitle = document.getElementById('mainTitle');
     if (mainTitle) mainTitle.textContent = titleText;
 }
