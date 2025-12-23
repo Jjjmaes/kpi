@@ -20,9 +20,9 @@ export async function loadUsers() {
                     <tbody>
                         ${data.data.map(u => `
                             <tr>
-                                <td>${u.name}</td>
-                                <td>${u.username}</td>
-                                <td>${u.email}</td>
+                                <td>${u.name || '-'}</td>
+                                <td>${u.username || '-'}</td>
+                                <td>${u.email || '-'}</td>
                                 <td>${u.phone || '-'}</td>
                                 <td>${(u.roles || []).map(r => getRoleText(r)).join(', ')}</td>
                                 <td>${u.employmentType === 'part_time' ? '兼职' : '专职'}</td>
@@ -259,8 +259,34 @@ export async function createUser(e) {
 }
 
 export async function editUser(userId) {
-    const user = (state.allUsers || []).find(u => u._id === userId);
-    if (!user) return;
+    let user = (state.allUsers || []).find(u => u._id === userId);
+    
+    // 如果本地找不到用户数据，从服务器重新获取
+    if (!user) {
+        try {
+            const res = await apiFetch(`/users/${userId}`);
+            const data = await res.json();
+            if (data.success && data.data) {
+                user = data.data;
+                // 更新本地缓存
+                if (state.allUsers) {
+                    const index = state.allUsers.findIndex(u => u._id === userId);
+                    if (index >= 0) {
+                        state.allUsers[index] = user;
+                    } else {
+                        state.allUsers.push(user);
+                    }
+                }
+            } else {
+                alert('无法加载用户信息');
+                return;
+            }
+        } catch (error) {
+            console.error('加载用户信息失败:', error);
+            alert('加载用户信息失败: ' + (error.message || '网络错误'));
+            return;
+        }
+    }
 
     // 确保角色列表已加载
     await loadAvailableRolesForUser();
@@ -270,11 +296,11 @@ export async function editUser(userId) {
         <form id="editUserForm" data-submit="updateUser(event, '${userId}')">
             <div class="form-group">
                 <label>姓名 *</label>
-                <input type="text" name="name" value="${user.name}" required>
+                <input type="text" name="name" value="${user.name || ''}" required>
             </div>
             <div class="form-group">
                 <label>邮箱 *</label>
-                <input type="email" name="email" value="${user.email}" required>
+                <input type="email" name="email" value="${user.email || ''}" required>
             </div>
             <div class="form-group">
                 <label>电话</label>
@@ -333,10 +359,12 @@ export async function updateUser(e, userId) {
             loadUsers();
             showAlert('usersList', '用户更新成功', 'success');
         } else {
-            alert(result.message);
+            const errorMsg = result.error?.message || result.message || '更新失败，请检查输入信息';
+            alert(errorMsg);
         }
     } catch (error) {
-        alert('更新失败: ' + error.message);
+        console.error('更新用户失败:', error);
+        alert('更新失败: ' + (error.message || '网络错误'));
     }
 }
 

@@ -5,6 +5,7 @@ const KpiConfig = require('../models/KpiConfig');
 const User = require('../models/User');
 const Role = require('../models/Role');
 const { createNotification, createNotificationsForUsers, NotificationTypes } = require('./notificationService');
+const emailService = require('./emailService');
 const { AppError } = require('../middleware/errorHandler');
 
 /**
@@ -419,12 +420,27 @@ class ProjectService {
       project.completionChecks.hasMembers = true;
       await project.save();
 
-      // 发送通知
+      // 发送站内通知
       await this.sendMemberAssignmentNotifications(
         project,
         validatedMembers.map(m => ({ userId: m.userId, role: m.role })),
         creator._id
       );
+
+      // 发送邮件通知（异步，不阻塞主流程）
+      try {
+        // 需要查询用户信息以获取邮箱
+        const membersWithUsers = await Promise.all(
+          validatedMembers.map(async (m) => {
+            const user = await User.findById(m.userId).select('name email username');
+            return { user, role: m.role };
+          })
+        );
+        await emailService.sendBulkProjectAssignmentEmails(membersWithUsers, project, creator);
+      } catch (emailError) {
+        console.error('[ProjectService] 发送邮件通知失败:', emailError);
+        // 邮件发送失败不影响项目创建
+      }
     }
 
     return project;
@@ -561,7 +577,7 @@ class ProjectService {
       await project.save();
     }
 
-    // 发送通知
+    // 发送站内通知
     try {
       const roleNames = {
         'pm': '项目经理',
@@ -578,6 +594,14 @@ class ProjectService {
       });
     } catch (notifError) {
       console.error('[ProjectService] 创建通知失败:', notifError);
+    }
+
+    // 发送邮件通知（异步，不阻塞主流程）
+    try {
+      await emailService.sendProjectAssignmentEmail(memberUser, project, role, user);
+    } catch (emailError) {
+      console.error('[ProjectService] 发送邮件通知失败:', emailError);
+      // 邮件发送失败不影响成员分配
     }
 
     return member;

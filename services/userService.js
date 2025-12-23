@@ -144,9 +144,28 @@ class UserService {
       throw new AppError('用户不存在', 404, 'USER_NOT_FOUND');
     }
 
+    // 验证必填字段
+    if (name !== undefined && !name) {
+      throw new AppError('姓名不能为空', 400, 'VALIDATION_ERROR');
+    }
+    if (email !== undefined && !email) {
+      throw new AppError('邮箱不能为空', 400, 'VALIDATION_ERROR');
+    }
+
+    // 如果更新邮箱，检查是否与其他用户重复
+    if (email && email !== user.email) {
+      const existingUser = await User.findOne({ 
+        email: email.toLowerCase(),
+        _id: { $ne: userId }
+      });
+      if (existingUser) {
+        throw new AppError('邮箱已被其他用户使用', 400, 'DUPLICATE_EMAIL');
+      }
+    }
+
     // 更新字段
-    if (name) user.name = name;
-    if (email) user.email = email;
+    if (name !== undefined) user.name = name;
+    if (email !== undefined) user.email = email.toLowerCase();
     if (phone !== undefined) user.phone = phone || '';
     if (roles) user.roles = roles;
     if (employmentType) {
