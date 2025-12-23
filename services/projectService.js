@@ -436,7 +436,14 @@ class ProjectService {
             return { user, role: m.role };
           })
         );
-        await emailService.sendBulkProjectAssignmentEmails(membersWithUsers, project, creator);
+        // 处理附件：将 base64 转换为 Buffer
+        const attachments = data.attachments && Array.isArray(data.attachments) && data.attachments.length > 0
+          ? data.attachments.map(att => ({
+              filename: att.filename,
+              content: Buffer.from(att.content, 'base64')
+            }))
+          : null;
+        await emailService.sendBulkProjectAssignmentEmails(membersWithUsers, project, creator, attachments);
       } catch (emailError) {
         console.error('[ProjectService] 发送邮件通知失败:', emailError);
         // 邮件发送失败不影响项目创建

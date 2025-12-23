@@ -569,6 +569,15 @@ export async function showCreateProjectModal() {
                 </div>
             </div>
 
+            <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 500;">项目附件（可选）</label>
+                <input type="file" id="projectAttachments" multiple style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" accept="*/*">
+                <small style="color: #666; font-size: 12px; display: block; margin-top: 4px;">
+                    可上传多个文件，总大小不超过 20MB。附件将通过邮件发送给项目成员，不会保存到服务器。
+                </small>
+                <div id="projectAttachmentsList" style="margin-top: 10px; font-size: 12px; color: #666;"></div>
+            </div>
+
             <div class="form-group" style="text-align:right; margin-top: 20px; display:flex; gap:10px; justify-content:flex-end;">
                 <button type="submit">创建项目</button>
                 <button type="button" class="btn-secondary" data-click="closeModal()">取消</button>
@@ -596,7 +605,47 @@ export async function showCreateProjectModal() {
         }
         // 初始化内联添加成员表单
         initInlineCreateMemberForm();
+        
+        // 初始化附件上传功能
+        const attachmentsInput = document.getElementById('projectAttachments');
+        const attachmentsList = document.getElementById('projectAttachmentsList');
+        if (attachmentsInput && attachmentsList) {
+            attachmentsInput.addEventListener('change', function() {
+                const files = Array.from(this.files);
+                if (files.length === 0) {
+                    attachmentsList.innerHTML = '';
+                    return;
+                }
+                
+                const listHtml = files.map((file, index) => {
+                    const size = (file.size / 1024).toFixed(2);
+                    return `<div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: #f0f0f0; border-radius: 4px; margin-bottom: 4px;">
+                        <span>${file.name} (${size} KB)</span>
+                        <button type="button" onclick="removeProjectAttachment(${index})" style="background: #ef4444; color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 11px;">移除</button>
+                    </div>`;
+                }).join('');
+                attachmentsList.innerHTML = listHtml;
+            });
+        }
     }, 100);
+}
+
+// 移除项目附件
+window.removeProjectAttachment = function(index) {
+    const attachmentsInput = document.getElementById('projectAttachments');
+    if (!attachmentsInput) return;
+    
+    const dt = new DataTransfer();
+    const files = Array.from(attachmentsInput.files);
+    files.forEach((file, i) => {
+        if (i !== index) {
+            dt.items.add(file);
+        }
+    });
+    attachmentsInput.files = dt.files;
+    
+    // 触发 change 事件更新列表
+    attachmentsInput.dispatchEvent(new Event('change'));
 }
 
 export async function createProject(e) {
@@ -747,6 +796,51 @@ export async function createProject(e) {
         }
     }
     
+    // 处理附件：将文件转换为 base64
+    const attachmentsInput = document.getElementById('projectAttachments');
+    let attachments = null;
+    if (attachmentsInput && attachmentsInput.files && attachmentsInput.files.length > 0) {
+        const files = Array.from(attachmentsInput.files);
+        const maxSize = 20 * 1024 * 1024; // 20MB
+        let totalSize = 0;
+        
+        // 检查文件大小
+        for (const file of files) {
+            totalSize += file.size;
+            if (file.size > maxSize) {
+                showToast(`文件 "${file.name}" 超过 20MB 限制`, 'error');
+                return;
+            }
+        }
+        if (totalSize > maxSize) {
+            showToast(`所有附件总大小超过 20MB 限制`, 'error');
+            return;
+        }
+        
+        // 转换为 base64
+        try {
+            const attachmentPromises = files.map(file => {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const base64 = reader.result.split(',')[1]; // 移除 data:type;base64, 前缀
+                        resolve({
+                            filename: file.name,
+                            content: base64
+                        });
+                    };
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+            });
+            attachments = await Promise.all(attachmentPromises);
+        } catch (error) {
+            console.error('读取附件失败:', error);
+            showToast('读取附件失败，请重试', 'error');
+            return;
+        }
+    }
+
     const data = {
         projectNumber: formData.get('projectNumber') || undefined,
         projectName: formData.get('projectName'),
@@ -767,7 +861,8 @@ export async function createProject(e) {
         specialRequirements: Object.keys(specialRequirements).some(k => specialRequirements[k]) ? specialRequirements : undefined,
         members: members.length > 0 ? members : undefined,
         partTimeSales: partTimeSales,
-        partTimeLayout: partTimeLayout
+        partTimeLayout: partTimeLayout,
+        attachments: attachments
     };
 
     try {
@@ -3437,7 +3532,7 @@ export function renderProjects() {
                         invoiceStatusBadge = '<span class="badge" style="background:#f59e0b;color:white;margin-left:4px;">待审批</span>';
                     } else if (hasApprovedRequest) {
                         const invoiceNumber = invoiceRequestStatus?.linkedInvoiceNumber;
-                        invoiceStatusBadge = `<span class="badge" style="background:#10b981;color:white;margin-left:4px;">已批准${invoiceNumber ? ` (${invoiceNumber})` : ''}</span>`;
+                        invoiceStatusBadge = `<span class="badge" style="background:#10b981;color:white;margin-left:4px;">已开票${invoiceNumber ? ` (${invoiceNumber})` : ''}</span>`;
                     } else if (hasRejectedRequest) {
                         invoiceStatusBadge = '<span class="badge" style="background:#ef4444;color:white;margin-left:4px;">已拒绝</span>';
                     }

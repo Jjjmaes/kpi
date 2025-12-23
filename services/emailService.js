@@ -202,9 +202,10 @@ ${assigner ? `分配人：${assigner.name || assigner.username || '-'}` : ''}
    * @param {Object} project - 项目对象
    * @param {String} role - 角色代码
    * @param {Object} assigner - 分配人对象（可选）
+   * @param {Array} attachments - 附件数组，格式：[{ filename: string, content: Buffer }]（可选）
    * @returns {Promise<Object>} 发送结果
    */
-  async sendProjectAssignmentEmail(user, project, role, assigner = null) {
+  async sendProjectAssignmentEmail(user, project, role, assigner = null, attachments = null) {
     if (!this.isEnabled()) {
       console.warn('[EmailService] 邮件服务未启用，跳过发送');
       return { success: false, reason: 'EMAIL_SERVICE_DISABLED' };
@@ -220,13 +221,23 @@ ${assigner ? `分配人：${assigner.name || assigner.username || '-'}` : ''}
       const textContent = this.generateProjectAssignmentEmailText(user, project, role, assigner);
       const roleName = this.getRoleName(role);
 
-      const result = await this.resend.emails.send({
+      const emailOptions = {
         from: `${this.fromName} <${this.fromEmail}>`,
         to: user.email,
         subject: `【项目分配通知】${project.projectName || '新项目'} - ${roleName}`,
         html: htmlContent,
         text: textContent
-      });
+      };
+
+      // 如果有附件，添加到邮件中
+      if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+        emailOptions.attachments = attachments.map(att => ({
+          filename: att.filename,
+          content: Buffer.isBuffer(att.content) ? att.content : Buffer.from(att.content, 'base64')
+        }));
+      }
+
+      const result = await this.resend.emails.send(emailOptions);
 
       console.log('[EmailService] 邮件发送成功:', {
         to: user.email,
@@ -288,7 +299,7 @@ ${assigner ? `分配人：${assigner.name || assigner.username || '-'}` : ''}
         return;
       }
 
-      const emailResult = await this.sendProjectAssignmentEmail(user, project, role, assigner);
+      const emailResult = await this.sendProjectAssignmentEmail(user, project, role, assigner, attachments);
       if (emailResult.success) {
         results.success++;
         results.details.push({ userId: user._id, email: user.email, role, status: 'success' });
