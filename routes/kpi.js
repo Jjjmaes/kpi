@@ -127,10 +127,16 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
     const totalProjectAmount = canViewAmount
       ? projects.reduce((sum, p) => sum + (p.projectAmount || 0), 0)
       : undefined;
-    const totalReceived = projects.reduce((sum, p) => sum + (p.payment?.receivedAmount || 0), 0);
-    const paymentCompletionRate = totalProjectAmount && totalProjectAmount > 0
-      ? Math.round((totalReceived / totalProjectAmount) * 100)
-      : 0;
+    
+    // 回款完成率：管理员、财务可见所有项目；销售可见自己创建的项目
+    const canViewAllFinance = isAdmin(req) || isFinance(req);
+    const canViewOwnFinance = isSales(req) && !isAdmin(req) && !isFinance(req);
+    const canViewFinance = canViewAllFinance || canViewOwnFinance;
+    let paymentCompletionRate = null;
+    if (canViewFinance && totalProjectAmount && totalProjectAmount > 0) {
+      const totalReceived = projects.reduce((sum, p) => sum + (p.payment?.receivedAmount || 0), 0);
+      paymentCompletionRate = Math.round((totalReceived / totalProjectAmount) * 100);
+    }
 
     // 统计分布
     const statusCounts = projects.reduce((acc, p) => {
@@ -489,34 +495,39 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
       }));
     }
 
-    // 回款预警：已逾期
+    // 回款预警：已逾期（管理员、财务可见所有；销售可见自己创建的项目）
     const now = new Date();
-    const paymentWarnings = projects
-      .filter(p => p.payment?.expectedAt && !p.payment.isFullyPaid && p.payment.expectedAt < now)
-      .map(p => ({
-        projectId: p._id,
-        projectName: p.projectName,
-        expectedAt: p.payment.expectedAt,
-        receivedAmount: p.payment.receivedAmount || 0,
-        daysOverdue: Math.ceil((now - p.payment.expectedAt) / (1000 * 60 * 60 * 24))
-      }))
-      .sort((a, b) => b.daysOverdue - a.daysOverdue)
-      .slice(0, 20); // 截取前20条避免过长
+    let paymentWarnings = [];
+    let paymentDueSoon = [];
+    
+    if (canViewFinance) {
+      paymentWarnings = projects
+        .filter(p => p.payment?.expectedAt && !p.payment.isFullyPaid && p.payment.expectedAt < now)
+        .map(p => ({
+          projectId: p._id,
+          projectName: p.projectName,
+          expectedAt: p.payment.expectedAt,
+          receivedAmount: p.payment.receivedAmount || 0,
+          daysOverdue: Math.ceil((now - p.payment.expectedAt) / (1000 * 60 * 60 * 24))
+        }))
+        .sort((a, b) => b.daysOverdue - a.daysOverdue)
+        .slice(0, 20); // 截取前20条避免过长
 
-    // 回款即将到期：未来5天内到期且未全额回款
-    const soonEnd = new Date();
-    soonEnd.setDate(soonEnd.getDate() + 5);
-    const paymentDueSoon = projects
-      .filter(p => p.payment?.expectedAt && !p.payment.isFullyPaid && p.payment.expectedAt >= now && p.payment.expectedAt <= soonEnd)
-      .map(p => ({
-        projectId: p._id,
-        projectName: p.projectName,
-        expectedAt: p.payment.expectedAt,
-        receivedAmount: p.payment.receivedAmount || 0,
-        daysLeft: Math.ceil((p.payment.expectedAt - now) / (1000 * 60 * 60 * 24))
-      }))
-      .sort((a, b) => a.daysLeft - b.daysLeft)
-      .slice(0, 20);
+      // 回款即将到期：未来5天内到期且未全额回款
+      const soonEnd = new Date();
+      soonEnd.setDate(soonEnd.getDate() + 5);
+      paymentDueSoon = projects
+        .filter(p => p.payment?.expectedAt && !p.payment.isFullyPaid && p.payment.expectedAt >= now && p.payment.expectedAt <= soonEnd)
+        .map(p => ({
+          projectId: p._id,
+          projectName: p.projectName,
+          expectedAt: p.payment.expectedAt,
+          receivedAmount: p.payment.receivedAmount || 0,
+          daysLeft: Math.ceil((p.payment.expectedAt - now) / (1000 * 60 * 60 * 24))
+        }))
+        .sort((a, b) => a.daysLeft - b.daysLeft)
+        .slice(0, 20);
+    }
 
     // 交付逾期预警：未完成且deadline已过
     const deliveryWarnings = projects
@@ -540,7 +551,7 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     const recentCompleted = projects.filter(p => p.status === 'completed' && p.completedAt && p.completedAt >= sevenDaysAgo).length;
-    const recentPaymentOverdue = paymentWarnings.filter(w => w.expectedAt && w.expectedAt >= sevenDaysAgo).length;
+    const recentPaymentOverdue = canViewFinance ? paymentWarnings.filter(w => w.expectedAt && w.expectedAt >= sevenDaysAgo).length : 0;
     const recentDeliveryOverdue = deliveryWarnings.filter(w => w.deadline && w.deadline >= sevenDaysAgo).length;
 
     // 今日指标（根据角色不同）

@@ -241,6 +241,8 @@ function renderDashboardCards(data) {
     const canViewAmount = canViewProjectAmount();
     const showSalesAmount = isSales && !isAdmin && !isFinance && canViewAmount;
     const showKPI = data.kpiTotal !== undefined || data.kpiByRole !== undefined;
+    // 财务相关数据：管理员、财务可见所有；销售可见自己创建的项目
+    const canViewFinance = isAdmin || isFinance || isSales;
 
     const cards = `
         <div class="card-grid">
@@ -314,6 +316,7 @@ function renderDashboardCards(data) {
                     <div class="subtext">待排期项目</div>
                 </div>
             </div>
+            ${canViewFinance ? `
             <div class="card stat-card stat-danger" data-click="navigateFromDashboardCard('paymentOverdue')">
                 <div class="stat-icon">⚠️</div>
                 <div class="stat-content">
@@ -322,6 +325,7 @@ function renderDashboardCards(data) {
                     <div class="card-desc">逾期未回款项目</div>
                 </div>
             </div>
+            ` : ''}
             <div class="card stat-card stat-danger" data-click="navigateFromDashboardCard('deliveryOverdue')">
                 <div class="stat-icon">🚨</div>
                 <div class="stat-content">
@@ -330,7 +334,7 @@ function renderDashboardCards(data) {
                     <div class="card-desc">截止已过未完成</div>
                 </div>
             </div>
-            ${paymentRate !== null ? `
+            ${canViewFinance && paymentRate !== null ? `
             <div class="card stat-card stat-success" data-click="navigateFromDashboardCard('receivables')">
                 <div class="stat-icon">💵</div>
                 <div class="stat-content">
@@ -348,6 +352,7 @@ function renderDashboardCards(data) {
                     <div class="subtext">近7天完成项目数</div>
                 </div>
             </div>
+            ${canViewFinance ? `
             <div class="card stat-card stat-danger" data-click="navigateFromDashboardCard('paymentOverdue')">
                 <div class="stat-icon">⚠️</div>
                 <div class="stat-content">
@@ -356,6 +361,7 @@ function renderDashboardCards(data) {
                     <div class="card-desc">近7天逾期回款项目</div>
                 </div>
             </div>
+            ` : ''}
             <div class="card stat-card stat-danger" data-click="navigateFromDashboardCard('recentDeliveryOverdue')">
                 <div class="stat-icon">🚨</div>
                 <div class="stat-content">
@@ -564,39 +570,42 @@ function renderDashboardCharts(data) {
         }, 100);
     }
 
-    // 回款预警
-    charts.push(`
-        <div class="card">
-            <div class="card-title">回款预警</div>
-            ${data.paymentWarnings && data.paymentWarnings.length > 0 ? `
-                <ul class="list">
-                    ${data.paymentWarnings.map(w => `
-                        <li>
-                            <div style="font-weight:600;">${w.projectName}</div>
-                            <div class="card-desc">应回款：${new Date(w.expectedAt).toLocaleDateString()}，逾期 ${w.daysOverdue} 天，已回款 ¥${(w.receivedAmount||0).toLocaleString()}</div>
-                        </li>
-                    `).join('')}
-                </ul>
-            ` : '<div class="card-desc">暂无逾期回款</div>'}
-        </div>
-    `);
+    // 回款预警（仅管理员和财务可见）
+    const canViewFinance = isAdmin || isFinance;
+    if (canViewFinance) {
+        charts.push(`
+            <div class="card">
+                <div class="card-title">回款预警</div>
+                ${data.paymentWarnings && data.paymentWarnings.length > 0 ? `
+                    <ul class="list">
+                        ${data.paymentWarnings.map(w => `
+                            <li>
+                                <div style="font-weight:600;">${w.projectName}</div>
+                                <div class="card-desc">应回款：${new Date(w.expectedAt).toLocaleDateString()}，逾期 ${w.daysOverdue} 天，已回款 ¥${(w.receivedAmount||0).toLocaleString()}</div>
+                            </li>
+                        `).join('')}
+                    </ul>
+                ` : '<div class="card-desc">暂无逾期回款</div>'}
+            </div>
+        `);
 
-    // 回款即将到期
-    charts.push(`
-        <div class="card" data-click="navigateFromDashboardCard('paymentDueSoon')" style="cursor:pointer;">
-            <div class="card-title">回款即将到期（5天内）</div>
-            ${data.paymentDueSoon && data.paymentDueSoon.length > 0 ? `
-                <ul class="list">
-                    ${data.paymentDueSoon.map(w => `
-                        <li>
-                            <div style="font-weight:600;">${w.projectName}</div>
-                            <div class="card-desc">应回款：${new Date(w.expectedAt).toLocaleDateString()}，剩余 ${w.daysLeft} 天，已回款 ¥${(w.receivedAmount||0).toLocaleString()}</div>
-                        </li>
-                    `).join('')}
-                </ul>
-            ` : '<div class="card-desc">未来 5 天内暂无到期回款</div>'}
-        </div>
-    `);
+        // 回款即将到期
+        charts.push(`
+            <div class="card" data-click="navigateFromDashboardCard('paymentDueSoon')" style="cursor:pointer;">
+                <div class="card-title">回款即将到期（5天内）</div>
+                ${data.paymentDueSoon && data.paymentDueSoon.length > 0 ? `
+                    <ul class="list">
+                        ${data.paymentDueSoon.map(w => `
+                            <li>
+                                <div style="font-weight:600;">${w.projectName}</div>
+                                <div class="card-desc">应回款：${new Date(w.expectedAt).toLocaleDateString()}，剩余 ${w.daysLeft} 天，已回款 ¥${(w.receivedAmount||0).toLocaleString()}</div>
+                            </li>
+                        `).join('')}
+                    </ul>
+                ` : '<div class="card-desc">未来 5 天内暂无到期回款</div>'}
+            </div>
+        `);
+    }
 
     // 交付逾期
     charts.push(`
