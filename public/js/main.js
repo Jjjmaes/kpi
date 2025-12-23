@@ -8,7 +8,7 @@ import { showSection, closeModal } from './core/ui.js';
 // 导入业务模块
 import { initAuth, checkAuth, showLogin, showMainApp, logout, bindAuthEvents, submitForcePasswordChange } from './modules/auth.js';
 import { loadDashboard, navigateFromDashboardCard } from './modules/dashboard.js';
-import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectPayments, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, createProject, updateProject, setLayoutCost, addMember, showAddMemberModal, showPaymentModalForProject, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter, showAddMemberModalForCreate, addMemberForCreate, removeCreateProjectMember, toggleCreateTranslatorFields, filterCreateUsersByRole, validateCreateMemberLayoutCost, updateCreateProjectMembersList, onMemberRoleChange, onCreateMemberRoleChange, toggleTranslatorFields, filterUsersByRole, validateAddMemberLayoutCost, closeAddMemberModalAndReturnToCreate, addInlineMemberForCreate, onInlineCreateMemberRoleChange, filterInlineCreateUsersByRole, validateInlineCreateMemberLayoutCost, quickRequestInvoice, viewProjectInvoiceRequest, selectAllProjectsForInvoice, deselectAllProjectsForInvoice, batchRequestInvoice, toggleProjectForInvoice, toggleSelectAllProjects } from './modules/project.js';
+import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectPayments, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, exportProjectContract, createProject, updateProject, setLayoutCost, addMember, showAddMemberModal, showPaymentModalForProject, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter, showAddMemberModalForCreate, addMemberForCreate, removeCreateProjectMember, toggleCreateTranslatorFields, filterCreateUsersByRole, validateCreateMemberLayoutCost, updateCreateProjectMembersList, onMemberRoleChange, onCreateMemberRoleChange, toggleTranslatorFields, filterUsersByRole, validateAddMemberLayoutCost, closeAddMemberModalAndReturnToCreate, addInlineMemberForCreate, onInlineCreateMemberRoleChange, filterInlineCreateUsersByRole, validateInlineCreateMemberLayoutCost, quickRequestInvoice, viewProjectInvoiceRequest, selectAllProjectsForInvoice, deselectAllProjectsForInvoice, batchRequestInvoice, toggleProjectForInvoice, toggleSelectAllProjects } from './modules/project.js';
 import { loadCustomers, searchCustomers, showCreateCustomerModal, showCreateCustomerModalFromProject, editCustomer, deleteCustomer, createCustomer, updateCustomer, updateCustomerInfo, addCustomerContactRow, removeCustomerContactRow } from './modules/customer.js';
 import { loadKPI, exportKPI, generateMonthlyKPI, showEvaluateModal, submitEvaluation } from './modules/kpi.js';
 import { loadReceivables, renderReceivables, exportReceivables, loadInvoiceProjects, renderInvoiceProjects, addInvoice, addInvoiceForProject, loadPaymentRecordsProjects, renderPaymentRecordsProjects, addPaymentRecord, addPaymentRecordForProject, loadPaymentRecords, clearPaymentRecordFilter, showFinanceSection, loadFinanceSummary, exportFinanceSummary, loadPendingKpi, reviewKpiRecord, rejectKpiRecord, batchReviewKpiRecords, selectAllPendingKpi, deselectAllPendingKpi, toggleSelectAllPendingKpi, loadReconciliation, exportReconciliation, togglePaymentRecords, toggleInvoiceRecords, clearPaymentRecordsFilters, removePaymentRecord, jumpReceivablePage, prevReceivablePage, nextReceivablePage, jumpPaymentRecordsProjectsPage, prevPaymentRecordsProjectsPage, nextPaymentRecordsProjectsPage, jumpInvoiceProjectsPage, prevInvoiceProjectsPage, nextInvoiceProjectsPage, backToFinanceNav, showProjectSelector, filterProjectSelector, selectProject, loadInvoiceRequests, renderInvoiceRequests, loadMyInvoiceRequests, renderMyInvoiceRequests, viewInvoiceRequest, approveInvoiceRequest, rejectInvoiceRequest, deleteInvoiceRequest, showCreateInvoiceRequestModal, jumpInvoiceRequestPage, prevInvoiceRequestPage, nextInvoiceRequestPage, jumpMyInvoiceRequestPage, prevMyInvoiceRequestPage, nextMyInvoiceRequestPage } from './modules/finance.js';
@@ -19,6 +19,7 @@ import { loadConfig, loadConfigHistory, loadPermissionsConfig, savePermissionsCo
 import { loadRoles, showCreateRoleModal, viewRole, editRole, deleteRole } from './modules/role.js';
 import { startNotificationPolling, stopNotificationPolling, toggleNotificationPanel, markAllNotificationsRead, initNotificationAudio } from './modules/notification.js';
 import { loadPaymentCompletionDetail, renderPaymentCompletionDetail, pcdPrevPage, pcdNextPage, pcdJumpPage, pcdToggleProject, pcdToggleOverdue } from './modules/paymentDetail.js';
+import { showEvaluationModal, showProjectEvaluationsList, submitProjectEvaluation, showEvaluationStats } from './modules/evaluation.js';
 
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', async () => {
@@ -434,6 +435,7 @@ const ACTIONS = Object.freeze({
     finishProject: (id) => finishProject(id),
     deleteMember: (projectId, memberId) => deleteMember(projectId, memberId),
     exportProjectQuotation: (id) => exportProjectQuotation(id),
+    exportProjectContract: (id) => exportProjectContract(id),
     showSetLayoutCostModal: (projectId) => showSetLayoutCostModal(projectId),
 
     // Project form rows
@@ -614,6 +616,13 @@ const ACTIONS = Object.freeze({
     cleanupOldBackups: () => cleanupOldBackups(),
     restoreBackup: (filename) => restoreBackup(filename),
     deleteBackupFile: (filename) => deleteBackupFile(filename),
+
+    // Evaluation (项目评价)
+    showEvaluationModalForSales: (projectId, salesId, salesName) => showEvaluationModal(projectId, 'pm_to_sales', salesId, 'sales', salesName),
+    showEvaluationModalForPM: (projectId, pmId, pmName) => showEvaluationModal(projectId, 'executor_to_pm', pmId, 'pm', pmName),
+    showProjectEvaluationsList: (projectId) => showProjectEvaluationsList(projectId),
+    submitProjectEvaluation: (event, projectId, evaluationType, evaluatedUserId) => submitProjectEvaluation(event, projectId, evaluationType, evaluatedUserId),
+    showEvaluationStats: (userId) => showEvaluationStats(userId),
 
     // 特殊：阻止冒泡（兼容历史 HTML：event.stopPropagation()）
     "__event_stopPropagation__": (event) => {

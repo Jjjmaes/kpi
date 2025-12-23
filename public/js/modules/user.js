@@ -507,6 +507,17 @@ export async function loadProfile() {
                         </div>
                     </form>
                 </div>
+
+                <!-- 评价统计卡片 -->
+                <div class="card">
+                    <div class="card-title">评价统计</div>
+                    <div style="padding: 20px;">
+                        <p style="color: #6b7280; margin-bottom: 20px;">查看您收到的项目评价统计信息</p>
+                        <button class="btn-small" data-click="showEvaluationStats()" style="background: #8b5cf6; color: white; width: 100%;">
+                            📊 查看我的评价统计
+                        </button>
+                    </div>
+                </div>
             </div>
         `;
 

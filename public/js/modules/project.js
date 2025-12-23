@@ -4,6 +4,7 @@ import { showModal, closeModal } from '../core/ui.js';
 import { showToast, getStatusBadgeClass, getStatusText, getBusinessTypeText, getRoleText } from '../core/utils.js';
 import { loadCustomers } from './customer.js';
 import { loadLanguages } from './language.js';
+import { showEvaluationModal, showProjectEvaluationsList, checkPendingEvaluations } from './evaluation.js';
 
 // --- 辅助 ---
 // 是否可以在项目相关界面看到项目金额 / 单价
@@ -647,6 +648,19 @@ window.removeProjectAttachment = function(index) {
     
     // 触发 change 事件更新列表
     attachmentsInput.dispatchEvent(new Event('change'));
+}
+
+// 评价相关函数（供项目详情页面调用）
+window.showEvaluationModalForSales = async function(projectId, salesId, salesName) {
+    await showEvaluationModal(projectId, 'pm_to_sales', salesId, 'sales', salesName);
+}
+
+window.showEvaluationModalForPM = async function(projectId, pmId, pmName) {
+    await showEvaluationModal(projectId, 'executor_to_pm', pmId, 'pm', pmName);
+}
+
+window.showProjectEvaluationsList = async function(projectId) {
+    await showProjectEvaluationsList(projectId);
 }
 
 export async function createProject(e) {
@@ -1394,6 +1408,7 @@ export async function viewProject(projectId) {
         const canQualityOps = isAdmin || isPM || isSales || isPartTimeSales;
         const canDeliver = (isAdmin || isSales || isPartTimeSales) && !isPM;
         const canEditDeleteExport = (isAdmin || isSales || isPartTimeSales) && !isPM;
+        const canExportContract = isAdmin || isSales || isPartTimeSales || isPM;
         // 销售创建的项目，销售可以管理成员；管理员和项目经理可以管理所有项目的成员
         const canManageMembers = isAdmin || isPM || (isSales || isPartTimeSales) && project.createdBy?._id === state.currentUser?._id;
         // 财务相关功能应该基于当前选择的角色，而不是用户拥有的所有角色
@@ -1615,9 +1630,60 @@ export async function viewProject(projectId) {
                             ${(project.status === 'in_progress' || project.status === 'scheduled' || project.status === 'translation_done' || project.status === 'review_done' || project.status === 'layout_done') && canDeliver ? `<button class="btn-small btn-success" data-click="finishProject('${projectId}')">交付项目</button>` : ''}
                             ${canEditDeleteExport ? `
                               <button class="btn-small" data-click="exportProjectQuotation('${projectId}')" style="background: #10b981;">📄 导出报价单</button>
+                              ${canExportContract ? `<button class="btn-small" data-click="exportProjectContract('${projectId}')" style="background: #0ea5e9; color: white;">📄 导出合同</button>` : ''}
                               <button class="btn-small" data-click="showEditProjectModal()">编辑项目</button>
                               <button class="btn-small btn-danger" data-click="deleteProject('${projectId}')">删除项目</button>
                             ` : ''}
+                        </div>
+                    </div>
+                ` : ''}
+                
+                ${project.status === 'completed' ? `
+                    <div class="detail-section">
+                        <h4>项目评价</h4>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                            <button class="btn-small" data-click="showProjectEvaluationsList('${projectId}')" style="background: #8b5cf6; color: white;">查看评价</button>
+                            ${(() => {
+                                // 检查当前用户是否可以评价
+                                const memberRoles = (project.members || []).reduce((acc, m) => {
+                                    if (!m || !m.userId || !state.currentUser?._id) return acc;
+                                    const raw = typeof m.userId === 'object' ? m.userId._id : m.userId;
+                                    if (!raw) return acc;
+                                    const uidStr = raw.toString();
+                                    if (uidStr === state.currentUser._id.toString()) acc.push(m.role);
+                                    return acc;
+                                }, []);
+                                
+                                // PM评价销售：检查用户是否有PM角色（不仅是项目成员，只要用户有PM角色就可以评价）
+                                const userRoles = state.currentUser?.roles || [];
+                                const hasPMRole = userRoles.includes('pm');
+                                const isPMMember = memberRoles.includes('pm');
+                                const isExecutorMember = ['translator', 'reviewer', 'layout'].some(r => memberRoles.includes(r));
+                                const salesId = project.createdBy?._id || project.createdBy;
+                                // PM可以评价销售：用户有PM角色，且销售不是自己
+                                const canEvalSales = (hasPMRole || isPMMember) && salesId && salesId.toString() !== state.currentUser?._id?.toString();
+                                
+                                // 查找PM成员
+                                const pmMembers = (project.members || []).filter(m => {
+                                    const raw = typeof m.userId === 'object' ? m.userId._id : m.userId;
+                                    return raw && m.role === 'pm' && raw.toString() !== state.currentUser?._id?.toString();
+                                });
+                                const canEvalPM = isExecutorMember && pmMembers.length > 0;
+                                
+                                let buttons = [];
+                                if (canEvalSales) {
+                                    const salesName = project.createdBy?.name || '销售';
+                                    buttons.push(`<button class="btn-small" data-click="showEvaluationModalForSales('${projectId}', '${salesId}', '${salesName}')" style="background: #10b981; color: white;">评价销售</button>`);
+                                }
+                                if (canEvalPM) {
+                                    pmMembers.forEach(pm => {
+                                        const pmId = typeof pm.userId === 'object' ? pm.userId._id : pm.userId;
+                                        const pmName = typeof pm.userId === 'object' ? pm.userId.name : '项目经理';
+                                        buttons.push(`<button class="btn-small" data-click="showEvaluationModalForPM('${projectId}', '${pmId}', '${pmName}')" style="background: #3b82f6; color: white;">评价PM (${pmName})</button>`);
+                                    });
+                                }
+                                return buttons.join('');
+                            })()}
                         </div>
                     </div>
                 ` : ''}
@@ -1699,6 +1765,62 @@ export async function exportProjectQuotation(projectId) {
     } catch (error) {
         console.error('导出报价单失败:', error);
         alert('导出失败: ' + error.message);
+    }
+}
+
+export async function exportProjectContract(projectId) {
+    try {
+        const response = await apiFetch(`/projects/${projectId}/contract`, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            }
+        });
+
+        if (!response.ok) {
+            let msg = '导出合同失败';
+            try {
+                const err = await response.json();
+                msg = err.message || err.error?.message || msg;
+            } catch (e) {
+                msg = response.statusText || msg;
+            }
+            showToast(msg, 'error');
+            return;
+        }
+
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = '合同.docx';
+        if (contentDisposition) {
+            const utf8Match = contentDisposition.match(/filename\\*=UTF-8''(.+)/);
+            if (utf8Match?.[1]) {
+                try { filename = decodeURIComponent(utf8Match[1]); } catch (e) { filename = utf8Match[1]; }
+            } else {
+                const matches = contentDisposition.match(/filename[^;=\\n]*=((['\"]).*?\\2|[^;\\n]*)/);
+                if (matches?.[1]) {
+                    filename = matches[1].replace(/['"]/g, '');
+                    try { filename = decodeURIComponent(filename); } catch (e) { /* ignore */ }
+                }
+            }
+        }
+
+        const blob = await response.blob();
+        if (!blob || blob.size === 0) {
+            showToast('导出的文件为空，请重试', 'error');
+            return;
+        }
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        showToast('合同导出成功', 'success');
+    } catch (error) {
+        console.error('导出合同失败:', error);
+        showToast('导出合同失败: ' + error.message, 'error');
     }
 }
 
@@ -3358,7 +3480,10 @@ export function renderProjects() {
     // 如果后端已经筛选过，前端只做搜索和客户过滤，不再过滤月份、状态、业务类型
     const backendFiltered = state.backendFilters && Object.keys(state.backendFilters).length > 0;
     
+    const warningIdSet = state.projectFilterPaymentWarningIds instanceof Set ? state.projectFilterPaymentWarningIds : null;
     const filtered = (state.allProjectsCache || []).filter(p => {
+        const projectId = p._id?.toString() || p._id;
+        const matchesWarning = warningIdSet ? warningIdSet.has(projectId) : true;
         const matchesSearch = !search || (p.projectName?.toLowerCase().includes(search)) || (p.projectNumber?.toLowerCase().includes(search)) || ((p.customerId?.name || p.customerId?.shortName || p.clientName || '').toLowerCase().includes(search));
         const matchesCust = !cust || (p.customerId && (p.customerId._id === cust || p.customerId === cust));
         
@@ -3378,7 +3503,7 @@ export function renderProjects() {
                 p.completedAt &&
                 new Date(p.completedAt) >= sevenDaysAgo
             );
-            return matchesSearch && matchesCust && matchesDeliveryOverdue && matchesRecentCompleted;
+            return matchesWarning && matchesSearch && matchesCust && matchesDeliveryOverdue && matchesRecentCompleted;
         }
         
         // 否则，前端需要完整过滤（兼容手动筛选）
@@ -3417,7 +3542,7 @@ export function renderProjects() {
             p.completedAt &&
             new Date(p.completedAt) >= sevenDaysAgo
         );
-        return matchesSearch && matchesStatus && matchesBiz && matchesCust && matchesMonth && matchesDeliveryOverdue && matchesRecentCompleted;
+        return matchesWarning && matchesSearch && matchesStatus && matchesBiz && matchesCust && matchesMonth && matchesDeliveryOverdue && matchesRecentCompleted;
     });
 
     console.log('[Projects] renderProjects filters:', {
@@ -4003,6 +4128,19 @@ export function fillFinanceProjectSelects() {
     selects.forEach(sel => {
         sel.innerHTML = '<option value="">请选择项目</option>' + options;
     });
+}
+
+// 评价相关函数（供项目详情页面调用）
+window.showEvaluationModalForSales = async function(projectId, salesId, salesName) {
+    await showEvaluationModal(projectId, 'pm_to_sales', salesId, 'sales', salesName);
+}
+
+window.showEvaluationModalForPM = async function(projectId, pmId, pmName) {
+    await showEvaluationModal(projectId, 'executor_to_pm', pmId, 'pm', pmName);
+}
+
+window.showProjectEvaluationsList = async function(projectId) {
+    await showProjectEvaluationsList(projectId);
 }
 
 // --- 暴露给 Window ---

@@ -7,6 +7,8 @@ import { loadProjects, renderProjects } from './project.js';
 
 // Chart.js 实例列表，避免内存泄漏
 let chartInstances = [];
+// 最近一次看板数据，供卡片点击直接展示项目列表
+let lastDashboardData = null;
 
 function destroyCharts() {
     // 销毁所有图表实例
@@ -79,6 +81,7 @@ export async function loadDashboard() {
         }
 
         const data = result.data;
+        lastDashboardData = data; // 缓存看板数据，供卡片直接列出项目
         renderDashboardTodayInfo(data);
         renderDashboardCards(data);
         renderDashboardCharts(data);
@@ -354,7 +357,7 @@ function renderDashboardCards(data) {
                 </div>
             </div>
             ${canViewFinance ? `
-            <div class="card stat-card stat-danger" data-click="navigateFromDashboardCard('paymentOverdue')">
+            <div class="card stat-card stat-danger" data-click="navigateFromDashboardCard('recentPaymentOverdue')">
                 <div class="stat-icon">⚠️</div>
                 <div class="stat-content">
                     <div class="card-title">近7天回款预警</div>
@@ -728,6 +731,8 @@ async function syncWarningsToNotifications(data) {
 }
 
 export async function navigateFromDashboardCard(target, overrideStatus) {
+    // 每次跳转前清理支付预警筛选
+    state.projectFilterPaymentWarningIds = null;
     const dashMonth = document.getElementById('dashboardMonth')?.value || '';
     const dashStatus = document.getElementById('dashboardStatus')?.value || '';
     const dashBiz = document.getElementById('dashboardBusinessType')?.value || '';
@@ -808,11 +813,7 @@ export async function navigateFromDashboardCard(target, overrideStatus) {
             applyProjectFilters();
             break;
         case 'paymentOverdue':
-            state.salesFinanceView = true;
-            showSection('finance');
-            window.showFinanceSection?.('paymentRecords');
-            applyFinanceMonth('paymentMonth');
-            window.loadPaymentRecordsProjects?.();
+            loadPaymentWarningProjects(false);
             break;
         case 'paymentDueSoon':
             state.salesFinanceView = true;
@@ -820,6 +821,9 @@ export async function navigateFromDashboardCard(target, overrideStatus) {
             window.showFinanceSection?.('paymentRecords');
             applyFinanceMonth('paymentMonth');
             window.loadPaymentRecordsProjects?.();
+            break;
+        case 'recentPaymentOverdue':
+            loadPaymentWarningProjects(true);
             break;
         case 'receivables':
             // 跳转到独立的回款完成率详情页（不依赖财务导航）
@@ -856,6 +860,43 @@ export async function navigateFromDashboardCard(target, overrideStatus) {
         default:
             showSection('dashboard');
     }
+}
+
+function loadPaymentWarningProjects(onlyRecent = false) {
+    const data = lastDashboardData;
+    if (!data) {
+        showToast('请先加载业务看板数据', 'info');
+        return;
+    }
+    const allWarnings = data.paymentWarnings || [];
+    const list = onlyRecent
+        ? allWarnings.filter(w => w.daysOverdue !== undefined && w.daysOverdue !== null && Number(w.daysOverdue) <= 7 && Number(w.daysOverdue) > 0)
+        : allWarnings;
+    const ids = list.map(w => w.projectId || w._id).filter(Boolean).map(id => id.toString());
+
+    // 跳转到项目列表并按项目ID过滤
+    showSection('projects');
+    state.projectFilterPaymentWarningIds = new Set(ids);
+    state.projectFilterDeliveryOverdue = false;
+    state.projectFilterRecentDeliveryOverdue = false;
+    state.projectFilterRecentCompleted = false;
+    state.projectFilterMonth = ''; // 不限定月份
+    state.projectPage = 1;
+
+    // 清空项目筛选器（状态、业务类型）
+    const statusSel = document.getElementById('projectStatusFilter');
+    if (statusSel) statusSel.value = '';
+    const bizSel = document.getElementById('projectBizFilter');
+    if (bizSel) bizSel.value = '';
+
+    // 重新加载项目数据后，由 renderProjects 根据 projectFilterPaymentWarningIds 过滤
+    loadProjects({}).then(() => {
+        renderProjects();
+        showToast(`已筛选 ${ids.length} 个回款预警项目`, 'info');
+    }).catch(err => {
+        console.error('[Dashboard] 加载回款预警项目失败', err);
+        showToast('加载回款预警项目失败', 'error');
+    });
 }
 
 // 挂载到 Window 供 HTML 调用

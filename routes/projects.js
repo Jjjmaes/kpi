@@ -10,6 +10,7 @@ const User = require('../models/User');
 const { exportProjectQuotation } = require('../services/excelService');
 const { createNotification, createNotificationsForUsers, NotificationTypes } = require('../services/notificationService');
 const { getUserProjectIds } = require('../utils/projectUtils');
+const { generateProjectContract } = require('../services/contractService');
 const { createProjectValidation, handleValidationErrors } = require('../validators/projectValidator');
 const { checkProjectAccess, canModifyProject, canAddMember, canRemoveMember } = require('../utils/projectAccess');
 const projectService = require('../services/projectService');
@@ -293,6 +294,67 @@ router.get('/:id', asyncHandler(async (req, res) => {
       members
     }
   });
+}));
+
+// 导出项目合同（Word）
+router.get('/:id/contract', authenticate, asyncHandler(async (req, res) => {
+  // 校验访问权限
+  const project = await checkProjectAccess(
+    req.params.id,
+    req.user,
+    req.user.roles
+  );
+
+  // 补充所需字段
+  await project.populate('createdBy', 'name username roles');
+  await project.populate('customerId', 'name shortName contactPerson phone email address');
+  await project.populate('partTimeLayout.layoutAssignedTo', 'name username');
+
+  // 成员列表
+  const members = await ProjectMember.find({ projectId: project._id })
+    .populate('userId', 'name username roles');
+
+  const isAdmin = req.user.roles.includes('admin');
+  const isCreator = project.createdBy && project.createdBy._id && project.createdBy._id.toString() === req.user._id.toString();
+  const isPMMember = members.some(m => m.role === 'pm' && m.userId && m.userId._id && m.userId._id.toString() === req.user._id.toString());
+
+  if (!isAdmin && !isCreator && !isPMMember) {
+    throw new AppError('无权导出合同', 403, 'NO_CONTRACT_PERMISSION');
+  }
+
+  const rawProject = project.toObject();
+
+  // 脱敏联系人：仅管理员或创建人+销售角色可查看明文
+  const currentRole = req.currentRole || (req.user.roles[0] || null);
+  const isSalesRole = currentRole === 'sales' || currentRole === 'part_time_sales';
+  const canViewContact = isAdmin || (isCreator && isSalesRole);
+  const projectData = { ...rawProject };
+  if (!canViewContact) {
+    if (projectData.contactInfo) {
+      projectData.contactInfo = {
+        name: '*****',
+        phone: '*****',
+        email: '*****',
+        position: ''
+      };
+    }
+    if (projectData.customerId) {
+      projectData.customerId = {
+        ...projectData.customerId,
+        contactPerson: '*****',
+        phone: '*****',
+        email: '*****'
+      };
+    }
+  }
+
+  const buffer = await generateProjectContract(projectData, members);
+  const filenameBase = project.projectNumber || project.projectName || 'Contract';
+  const filenameSafe = filenameBase.replace(/[^\w\u4e00-\u9fa5-]/g, '_');
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filenameSafe)}.docx"`);
+  res.send(buffer);
 }));
 
 // 添加项目成员
