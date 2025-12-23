@@ -427,7 +427,8 @@ export async function showCreateProjectModal() {
                         { name: 'nda', label: '签署保密协议' },
                         { name: 'referenceFiles', label: '参考文件' },
                         { name: 'pureTranslationDelivery', label: '仅交付译文' },
-                        { name: 'bilingualDelivery', label: '双语对照交付' }
+                        { name: 'bilingualDelivery', label: '双语对照交付' },
+                        { name: 'printSealExpress', label: '打印盖章快递' }
                     ].map(item => `
                         <label style="display: flex; align-items: center; gap: 5px; font-weight: normal;">
                             <input type="checkbox" name="specialRequirements.${item.name}">
@@ -699,6 +700,7 @@ export async function createProject(e) {
         referenceFiles: formData.get('specialRequirements.referenceFiles') === 'on',
         pureTranslationDelivery: formData.get('specialRequirements.pureTranslationDelivery') === 'on',
         bilingualDelivery: formData.get('specialRequirements.bilingualDelivery') === 'on',
+        printSealExpress: formData.get('specialRequirements.printSealExpress') === 'on',
         notes: formData.get('specialRequirements.notes') || undefined
     };
     
@@ -1136,6 +1138,9 @@ export async function showEditProjectModal() {
                     <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
                         <input type="checkbox" name="specialRequirements.bilingualDelivery" ${p.specialRequirements?.bilingualDelivery ? 'checked' : ''}> 对照版交付
                     </label>
+                    <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+                        <input type="checkbox" name="specialRequirements.printSealExpress" ${p.specialRequirements?.printSealExpress ? 'checked' : ''}> 打印盖章快递
+                    </label>
                 </div>
                 <textarea name="specialRequirements.notes" rows="3" style="margin-top:8px;">${p.specialRequirements?.notes || ''}</textarea>
             </div>
@@ -1330,6 +1335,7 @@ export async function updateProject(e, projectId) {
             referenceFiles: formData.get('specialRequirements.referenceFiles') === 'on',
             pureTranslationDelivery: formData.get('specialRequirements.pureTranslationDelivery') === 'on',
             bilingualDelivery: formData.get('specialRequirements.bilingualDelivery') === 'on',
+            printSealExpress: formData.get('specialRequirements.printSealExpress') === 'on',
             notes: formData.get('specialRequirements.notes') || undefined
         },
         partTimeSales: editPartTimeSales,
@@ -1488,7 +1494,7 @@ export async function viewProject(projectId) {
                             </div>
                         </div>
                     ` : ''}
-                    ${project.specialRequirements && (project.specialRequirements.terminology || project.specialRequirements.nda || project.specialRequirements.referenceFiles || project.specialRequirements.pureTranslationDelivery || project.specialRequirements.bilingualDelivery || project.specialRequirements.notes) ? `
+                    ${project.specialRequirements && (project.specialRequirements.terminology || project.specialRequirements.nda || project.specialRequirements.referenceFiles || project.specialRequirements.pureTranslationDelivery || project.specialRequirements.bilingualDelivery || project.specialRequirements.printSealExpress || project.specialRequirements.notes) ? `
                         <div class="detail-row">
                             <div class="detail-label">特殊要求:</div>
                             <div class="detail-value">
@@ -1497,6 +1503,7 @@ export async function viewProject(projectId) {
                                 ${project.specialRequirements.referenceFiles ? '<span class="badge badge-info">参考文件</span>' : ''}
                                 ${project.specialRequirements.pureTranslationDelivery ? '<span class="badge badge-info">纯译文交付</span>' : ''}
                                 ${project.specialRequirements.bilingualDelivery ? '<span class="badge badge-info">对照版交付</span>' : ''}
+                                ${project.specialRequirements.printSealExpress ? '<span class="badge badge-info">打印盖章快递</span>' : ''}
                                 ${project.specialRequirements.notes ? '<br><small>' + project.specialRequirements.notes + '</small>' : ''}
                             </div>
                         </div>

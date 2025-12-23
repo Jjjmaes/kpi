@@ -99,6 +99,7 @@ const projectSchema = new mongoose.Schema({
     referenceFiles: { type: Boolean, default: false }, // 参考文件
     pureTranslationDelivery: { type: Boolean, default: false }, // 纯译文交付
     bilingualDelivery: { type: Boolean, default: false }, // 对照版交付
+    printSealExpress: { type: Boolean, default: false }, // 打印盖章快递
     notes: String // 其他备注
   },
   // 交付时间
