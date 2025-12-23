@@ -93,10 +93,11 @@ export async function loadDashboard() {
 }
 
 // 统一判断当前角色是否可以查看金额（与项目列表/详情一致）
+// 综合岗不应该看到项目金额（finance.view: false）
 const canViewProjectAmount = () => {
     const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
     if (!currentRole) return false;
-    const allowed = ['admin', 'finance', 'sales', 'part_time_sales', 'admin_staff'];
+    const allowed = ['admin', 'finance', 'sales', 'part_time_sales'];
     return allowed.includes(currentRole);
 };
 
