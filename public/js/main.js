@@ -23,6 +23,7 @@ import { showEvaluationModal, showProjectEvaluationsList, submitProjectEvaluatio
 import { loadExpressList, renderExpressList, switchExpressTab, showCreateExpressModal, createExpressRequest, viewExpressRequest, processExpressRequest, showSentExpressModal, markExpressSent, cancelExpressRequest, updatePendingCount, prevExpressPage, nextExpressPage, updateExpressUI } from './modules/express.js';
 import { loadOfficeSupplyList, renderOfficeSupplyList, switchOfficeSupplyTab, showCreateOfficeSupplyModal, createOfficeSupplyRequest, addOfficeSupplyItem, viewOfficeSupply, approveOfficeSupply, rejectOfficeSupply, markPurchased, submitMarkPurchased, cancelOfficeSupply, updatePendingCount as updateOfficeSupplyPendingCount, prevOfficeSupplyPage, nextOfficeSupplyPage, jumpOfficeSupplyPage, updateOfficeSupplyUI } from './modules/officeSupply.js';
 import { loadSealList, renderSealList, switchSealTab, showCreateSealModal, createSealRequest, viewSeal, processSeal, returnSeal, submitReturnSeal, cancelSeal, updatePendingCount as updateSealPendingCount, prevSealPage, nextSealPage, jumpSealPage, updateSealUI } from './modules/seal.js';
+import { loadExpenseList, renderExpenseList, switchExpenseTab, showCreateExpenseModal, createExpenseRequest, addExpenseItem, viewExpense, approveExpense, rejectExpense, markExpensePaid, cancelExpense, updateExpensePendingCount, prevExpensePage, nextExpensePage, jumpExpensePage, updateExpenseUI } from './modules/expense.js';
 
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', async () => {
@@ -84,6 +85,9 @@ async function onRoleSwitched() {
     
     // 更新章证使用管理界面（根据角色显示/隐藏功能）
     updateSealUI();
+    
+    // 更新报销管理界面（根据角色显示/隐藏功能）
+    updateExpenseUI();
     
     // 重新加载当前 section 的数据
     const activeSection = document.querySelector('.section.active');
@@ -437,6 +441,19 @@ const SECTION_ROUTES = {
         updateSealUI();
         await loadSealList();
         await updateSealPendingCount();
+    } },
+    expense: { onEnter: async () => {
+        // 更新界面显示（根据角色）
+        updateExpenseUI();
+        await loadExpenseList();
+        await updateExpensePendingCount();
+        // 显示/隐藏新建按钮（专职人员可见）
+        const createBtn = document.getElementById('createExpenseBtn');
+        if (createBtn) {
+            const user = state.currentUser;
+            const isFullTime = user?.employmentType === 'full_time';
+            createBtn.style.display = isFullTime ? 'inline-block' : 'none';
+        }
     } }
 };
 
@@ -740,6 +757,23 @@ const ACTIONS = Object.freeze({
     prevSealPage: () => prevSealPage(),
     nextSealPage: () => nextSealPage(),
     jumpSealPage: (page, total) => jumpSealPage(page, total),
+
+    // Expense Management (报销管理)
+    loadExpenseList: () => loadExpenseList(),
+    renderExpenseList: () => renderExpenseList(),
+    switchExpenseTab: (tab) => switchExpenseTab(tab),
+    showCreateExpenseModal: () => showCreateExpenseModal(),
+    addExpenseItem: () => addExpenseItem(),
+    createExpenseRequest: (event) => createExpenseRequest(event),
+    viewExpense: (id) => viewExpense(id),
+    approveExpense: (id) => approveExpense(id),
+    rejectExpense: (id) => rejectExpense(id),
+    markExpensePaid: (id) => markExpensePaid(id),
+    cancelExpense: (id) => cancelExpense(id),
+    updateExpensePendingCount: () => updateExpensePendingCount(),
+    prevExpensePage: () => prevExpensePage(),
+    nextExpensePage: () => nextExpensePage(),
+    jumpExpensePage: (page, total) => jumpExpensePage(page, total),
 
     // 特殊：阻止冒泡（兼容历史 HTML：event.stopPropagation()）
     "__event_stopPropagation__": (event) => {

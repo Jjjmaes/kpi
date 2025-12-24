@@ -103,6 +103,7 @@ const evaluationRoutes = require('./routes/evaluations');
 const expressRoutes = require('./routes/express');
 const officeSupplyRoutes = require('./routes/officeSupply');
 const sealRoutes = require('./routes/seal');
+const expenseRoutes = require('./routes/expense');
 
 // API 路由
 app.use('/api/auth', authRoutes);
@@ -123,6 +124,7 @@ app.use('/api/evaluations', evaluationRoutes);
 app.use('/api/express', expressRoutes);
 app.use('/api/officeSupply', officeSupplyRoutes);
 app.use('/api/seal', sealRoutes);
+app.use('/api/expense', expenseRoutes);
 
 // 健康检查
 app.get('/health', (req, res) => {

@@ -74,7 +74,11 @@ const NotificationTypes = {
   OFFICE_SUPPLY_APPROVED: 'office_supply_approved', // 办公用品采购申请已批准（通知申请人）
   OFFICE_SUPPLY_REJECTED: 'office_supply_rejected', // 办公用品采购申请已拒绝（通知申请人）
   SEAL_REQUEST: 'seal_request',                 // 章证使用申请（通知行政综合岗）
-  SEAL_STATUS_CHANGE: 'seal_status_change'     // 章证使用状态变更（通知申请人）
+  SEAL_STATUS_CHANGE: 'seal_status_change',     // 章证使用状态变更（通知申请人）
+  EXPENSE_REQUEST: 'expense_request',           // 报销申请（通知财务/管理员）
+  EXPENSE_APPROVED: 'expense_approved',          // 报销申请已批准（通知申请人）
+  EXPENSE_REJECTED: 'expense_rejected',          // 报销申请已拒绝（通知申请人）
+  EXPENSE_PAID: 'expense_paid'                  // 报销申请已支付（通知申请人）
 };
 
 /**

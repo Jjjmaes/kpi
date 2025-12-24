@@ -41,7 +41,7 @@ export const ROLE_PRIORITY = {
 export const PERMISSIONS = {
     admin: { 'project.view': 'all', 'project.edit': true, 'project.create': true, 'kpi.view': 'all', 'finance.view': true, 'customer.view': true, 'customer.edit': true, 'user.manage': true, 'system.config': true },
     finance: { 'project.view': 'all', 'project.edit': false, 'project.create': false, 'kpi.view': 'all', 'finance.view': true, 'customer.view': true, 'customer.edit': true, 'user.manage': false, 'system.config': false },
-    pm: { 'project.view': 'all', 'project.edit': true, 'project.create': true, 'kpi.view': 'self', 'finance.view': false, 'customer.view': true, 'customer.edit': true, 'user.manage': false, 'system.config': false },
+    pm: { 'project.view': 'assigned', 'project.edit': false, 'project.create': true, 'kpi.view': 'self', 'finance.view': false, 'customer.view': false, 'customer.edit': false, 'user.manage': false, 'system.config': false },
     sales: { 'project.view': 'sales', 'project.edit': 'sales', 'project.create': true, 'kpi.view': 'self', 'finance.view': false, 'customer.view': true, 'customer.edit': true, 'user.manage': false, 'system.config': false },
     part_time_sales: { 'project.view': 'sales', 'project.edit': 'sales', 'project.create': true, 'kpi.view': 'self', 'finance.view': false, 'customer.view': true, 'customer.edit': false, 'user.manage': false, 'system.config': false },
     translator: { 'project.view': 'assigned', 'project.edit': false, 'project.create': false, 'kpi.view': 'self', 'finance.view': false, 'customer.view': false, 'customer.edit': false, 'user.manage': false, 'system.config': false },

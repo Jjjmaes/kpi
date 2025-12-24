@@ -263,9 +263,10 @@ ${assigner ? `分配人：${assigner.name || assigner.username || '-'}` : ''}
    * @param {Array} members - 成员数组，每个元素包含 { userId, role } 或 { user, role }
    * @param {Object} project - 项目对象
    * @param {Object} assigner - 分配人对象
+   * @param {Array} attachments - 附件数组（可选）
    * @returns {Promise<Object>} 发送结果统计
    */
-  async sendBulkProjectAssignmentEmails(members, project, assigner = null) {
+  async sendBulkProjectAssignmentEmails(members, project, assigner = null, attachments = null) {
     if (!this.isEnabled() || !members || members.length === 0) {
       return { total: 0, success: 0, failed: 0 };
     }
@@ -313,6 +314,272 @@ ${assigner ? `分配人：${assigner.name || assigner.username || '-'}` : ''}
 
     console.log('[EmailService] 批量邮件发送完成:', {
       project: project.projectName,
+      total: results.total,
+      success: results.success,
+      failed: results.failed
+    });
+
+    return results;
+  }
+
+  /**
+   * 生成报销申请邮件HTML内容
+   * @param {Object} user - 审批人用户对象
+   * @param {Object} expenseRequest - 报销申请对象
+   * @param {Object} applicant - 申请人对象
+   * @returns {String} HTML内容
+   */
+  generateExpenseRequestEmailHTML(user, expenseRequest, applicant) {
+    const expenseTypeMap = {
+      travel: '差旅费',
+      meal: '餐费',
+      transport: '交通费',
+      office_supply: '办公用品',
+      communication: '通讯费',
+      other: '其他'
+    };
+    const expenseTypeText = expenseTypeMap[expenseRequest.expenseType] || expenseRequest.expenseType;
+    const requestDate = new Date(expenseRequest.createdAt).toLocaleString('zh-CN');
+    
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: #667eea; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }
+          .content { background: #f9fafb; padding: 20px; border: 1px solid #e5e7eb; }
+          .info-row { margin: 10px 0; }
+          .label { font-weight: bold; color: #666; }
+          .value { color: #333; }
+          .items-table { width: 100%; border-collapse: collapse; margin: 15px 0; background: white; }
+          .items-table th, .items-table td { padding: 10px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+          .items-table th { background: #f3f4f6; font-weight: bold; }
+          .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+          .button { display: inline-block; padding: 10px 20px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; margin: 10px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h2>报销申请通知</h2>
+          </div>
+          <div class="content">
+            <p>您好 ${user.name || user.username}，</p>
+            <p>您收到一份新的报销申请，请及时审批。</p>
+            
+            <div class="info-row">
+              <span class="label">申请编号：</span>
+              <span class="value">${expenseRequest.requestNumber}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">费用类型：</span>
+              <span class="value">${expenseTypeText}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">总金额：</span>
+              <span class="value">¥${expenseRequest.totalAmount.toLocaleString()}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">申请人：</span>
+              <span class="value">${applicant.name || applicant.username}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">申请时间：</span>
+              <span class="value">${requestDate}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">申请说明：</span>
+              <span class="value">${expenseRequest.reason || '无'}</span>
+            </div>
+            
+            ${expenseRequest.items && expenseRequest.items.length > 0 ? `
+            <h3>费用明细：</h3>
+            <table class="items-table">
+              <thead>
+                <tr>
+                  <th>日期</th>
+                  <th>金额</th>
+                  <th>说明</th>
+                  <th>发票号</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${expenseRequest.items.map(item => `
+                  <tr>
+                    <td>${new Date(item.date).toLocaleDateString('zh-CN')}</td>
+                    <td>¥${item.amount.toLocaleString()}</td>
+                    <td>${item.description}</td>
+                    <td>${item.invoice || '-'}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+            ` : ''}
+            
+            <p style="margin-top: 20px;">
+              <a href="${process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:3000'}/#expense" class="button">查看详情并审批</a>
+            </p>
+          </div>
+          <div class="footer">
+            <p>此邮件由系统自动发送，请勿回复。</p>
+            <p>${new Date().getFullYear()} 语家 KPI 系统</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `.trim();
+  }
+
+  /**
+   * 生成报销申请邮件纯文本内容
+   * @param {Object} user - 审批人用户对象
+   * @param {Object} expenseRequest - 报销申请对象
+   * @param {Object} applicant - 申请人对象
+   * @returns {String} 纯文本内容
+   */
+  generateExpenseRequestEmailText(user, expenseRequest, applicant) {
+    const expenseTypeMap = {
+      travel: '差旅费',
+      meal: '餐费',
+      transport: '交通费',
+      office_supply: '办公用品',
+      communication: '通讯费',
+      other: '其他'
+    };
+    const expenseTypeText = expenseTypeMap[expenseRequest.expenseType] || expenseRequest.expenseType;
+    const requestDate = new Date(expenseRequest.createdAt).toLocaleString('zh-CN');
+    
+    return `
+报销申请通知
+
+您好 ${user.name || user.username}，
+
+您收到一份新的报销申请，请及时审批。
+
+申请编号：${expenseRequest.requestNumber}
+费用类型：${expenseTypeText}
+总金额：¥${expenseRequest.totalAmount.toLocaleString()}
+申请人：${applicant.name || applicant.username}
+申请时间：${requestDate}
+申请说明：${expenseRequest.reason || '无'}
+
+费用明细：
+${expenseRequest.items && expenseRequest.items.length > 0 
+  ? expenseRequest.items.map((item, index) => 
+      `${index + 1}. ${new Date(item.date).toLocaleDateString('zh-CN')} - ¥${item.amount.toLocaleString()} - ${item.description}${item.invoice ? ` (发票号: ${item.invoice})` : ''}`
+    ).join('\n')
+  : '无'
+}
+
+请登录系统查看详情并审批。
+
+${new Date().getFullYear()} 语家 KPI 系统
+    `.trim();
+  }
+
+  /**
+   * 发送报销申请邮件给审批人
+   * @param {Object} user - 审批人用户对象（包含 name, email）
+   * @param {Object} expenseRequest - 报销申请对象
+   * @param {Object} applicant - 申请人对象
+   * @param {Array} attachments - 附件数组，格式：[{ filename: string, content: Buffer }]（可选）
+   * @returns {Promise<Object>} 发送结果
+   */
+  async sendExpenseRequestEmail(user, expenseRequest, applicant, attachments = null) {
+    if (!this.isEnabled()) {
+      console.warn('[EmailService] 邮件服务未启用，跳过发送');
+      return { success: false, reason: 'EMAIL_SERVICE_DISABLED' };
+    }
+
+    if (!user || !user.email) {
+      console.warn('[EmailService] 用户邮箱不存在，跳过发送:', user?.name || user?.username);
+      return { success: false, reason: 'NO_EMAIL' };
+    }
+
+    try {
+      const htmlContent = this.generateExpenseRequestEmailHTML(user, expenseRequest, applicant);
+      const textContent = this.generateExpenseRequestEmailText(user, expenseRequest, applicant);
+
+      const emailOptions = {
+        from: `${this.fromName} <${this.fromEmail}>`,
+        to: user.email,
+        subject: `【报销申请通知】${expenseRequest.requestNumber} - ${expenseRequest.totalAmount}元`,
+        html: htmlContent,
+        text: textContent
+      };
+
+      // 如果有附件，添加到邮件中
+      if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+        emailOptions.attachments = attachments.map(att => ({
+          filename: att.filename,
+          content: Buffer.isBuffer(att.content) ? att.content : Buffer.from(att.content, 'base64')
+        }));
+      }
+
+      const result = await this.resend.emails.send(emailOptions);
+
+      console.log('[EmailService] 报销申请邮件发送成功:', {
+        to: user.email,
+        requestNumber: expenseRequest.requestNumber,
+        messageId: result.data?.id
+      });
+
+      return { success: true, messageId: result.data?.id };
+    } catch (error) {
+      console.error('[EmailService] 报销申请邮件发送失败:', {
+        to: user.email,
+        requestNumber: expenseRequest.requestNumber,
+        error: error.message
+      });
+      return { success: false, reason: 'SEND_FAILED', error: error.message };
+    }
+  }
+
+  /**
+   * 批量发送报销申请邮件给审批人
+   * @param {Array} users - 审批人用户数组
+   * @param {Object} expenseRequest - 报销申请对象
+   * @param {Object} applicant - 申请人对象
+   * @param {Array} attachments - 附件数组（可选）
+   * @returns {Promise<Object>} 发送结果统计
+   */
+  async sendBulkExpenseRequestEmails(users, expenseRequest, applicant, attachments = null) {
+    if (!this.isEnabled() || !users || users.length === 0) {
+      return { total: 0, success: 0, failed: 0 };
+    }
+
+    const results = {
+      total: users.length,
+      success: 0,
+      failed: 0,
+      details: []
+    };
+
+    // 批量发送（使用 Promise.allSettled 确保所有邮件都尝试发送）
+    const emailPromises = users.map(async (user) => {
+      if (!user || !user.email) {
+        results.failed++;
+        results.details.push({ userId: user._id, reason: 'NO_EMAIL' });
+        return;
+      }
+
+      const emailResult = await this.sendExpenseRequestEmail(user, expenseRequest, applicant, attachments);
+      if (emailResult.success) {
+        results.success++;
+        results.details.push({ userId: user._id, email: user.email, status: 'success' });
+      } else {
+        results.failed++;
+        results.details.push({ userId: user._id, email: user.email, status: 'failed', reason: emailResult.reason });
+      }
+    });
+
+    await Promise.allSettled(emailPromises);
+
+    console.log('[EmailService] 批量报销申请邮件发送完成:', {
+      requestNumber: expenseRequest.requestNumber,
       total: results.total,
       success: results.success,
       failed: results.failed

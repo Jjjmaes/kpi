@@ -52,7 +52,7 @@ function getDefaultPermissions() {
         'system.config': false
       },
       'pm': {
-        // 项目经理：只看“分配给自己”的项目（通过成员表 ProjectMember）
+        // 项目经理：只看"分配给自己"的项目（通过成员表 ProjectMember）
         'project.view': "assigned",
         'project.edit': false,
         'project.create': true,
@@ -64,7 +64,7 @@ function getDefaultPermissions() {
         'finance.view': false,
         'finance.edit': false,
         'customer.view': false,
-        'customer.edit': true,
+        'customer.edit': false,
         'user.manage': false,
         'system.config': false
       },

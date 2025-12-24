@@ -464,6 +464,31 @@ function renderAdminStaffDashboard(data) {
     if (el) el.innerHTML = cards;
 }
 
+// 等待 Chart.js 加载完成的辅助函数
+function waitForChart(maxWait = 5000, interval = 100) {
+    return new Promise((resolve) => {
+        if (typeof Chart !== 'undefined' && Chart) {
+            resolve(true);
+            return;
+        }
+        
+        let elapsed = 0;
+        const checkInterval = setInterval(() => {
+            if (typeof Chart !== 'undefined' && Chart) {
+                clearInterval(checkInterval);
+                resolve(true);
+            } else {
+                elapsed += interval;
+                if (elapsed >= maxWait) {
+                    clearInterval(checkInterval);
+                    console.warn('[Dashboard] Chart.js 加载超时，跳过图表渲染');
+                    resolve(false);
+                }
+            }
+        }, interval);
+    });
+}
+
 function renderDashboardCharts(data) {
     // 综合岗不显示图表
     const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
@@ -475,8 +500,24 @@ function renderDashboardCharts(data) {
     }
     
     destroyCharts();
+    
+    // 等待 Chart.js 加载完成
+    waitForChart().then((chartLoaded) => {
+        if (!chartLoaded) {
+            const el = document.getElementById('dashboardCharts');
+            if (el) el.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">图表加载中...</div>';
+            return;
+        }
+        
+        // Chart.js 已加载，继续渲染图表
+        renderChartsInternal(data);
+    });
+}
 
+// 内部渲染图表函数
+function renderChartsInternal(data) {
     // 基于当前选择的角色判断，而不是用户拥有的所有角色
+    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
     const isSales = currentRole === 'sales' || currentRole === 'part_time_sales';
     const isAdmin = currentRole === 'admin';
     const isFinance = currentRole === 'finance';
@@ -579,6 +620,12 @@ function renderDashboardCharts(data) {
         setTimeout(() => {
             const ctx = document.getElementById(chartId);
             if (ctx) {
+                // 检查 Chart.js 是否已加载
+                if (typeof Chart === 'undefined' || !Chart) {
+                    console.warn('[Dashboard] Chart.js 未加载，跳过图表渲染');
+                    return;
+                }
+                
                 // 检查 canvas 是否已经被使用，如果是，先销毁旧图表
                 const existingChart = Chart.getChart(ctx);
                 if (existingChart) {
@@ -636,6 +683,12 @@ function renderDashboardCharts(data) {
         setTimeout(() => {
             const ctx = document.getElementById(chartId);
             if (ctx) {
+                // 检查 Chart.js 是否已加载
+                if (typeof Chart === 'undefined' || !Chart) {
+                    console.warn('[Dashboard] Chart.js 未加载，跳过图表渲染');
+                    return;
+                }
+                
                 // 检查 canvas 是否已经被使用，如果是，先销毁旧图表
                 const existingChart = Chart.getChart(ctx);
                 if (existingChart) {
@@ -741,6 +794,12 @@ function renderDashboardCharts(data) {
         setTimeout(() => {
             const ctx = document.getElementById(chartId);
             if (ctx) {
+                // 检查 Chart.js 是否已加载
+                if (typeof Chart === 'undefined' || !Chart) {
+                    console.warn('[Dashboard] Chart.js 未加载，跳过图表渲染');
+                    return;
+                }
+                
                 // 检查 canvas 是否已经被使用，如果是，先销毁旧图表
                 const existingChart = Chart.getChart(ctx);
                 if (existingChart) {
