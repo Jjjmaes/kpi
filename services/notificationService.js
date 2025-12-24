@@ -67,7 +67,14 @@ const NotificationTypes = {
   PROJECT_REVISION: 'project_revision',      // 项目返修
   PAYMENT_OVERDUE: 'payment_overdue',        // 回款逾期
   PAYMENT_DUE_SOON: 'payment_due_soon',      // 回款即将到期
-  DELIVERY_OVERDUE: 'delivery_overdue'       // 交付逾期
+  DELIVERY_OVERDUE: 'delivery_overdue',       // 交付逾期
+  EXPRESS_REQUEST: 'express_request',         // 快递申请（通知综合岗）
+  EXPRESS_STATUS_CHANGE: 'express_status_change', // 快递状态变更（通知申请人）
+  OFFICE_SUPPLY_REQUEST: 'office_supply_request', // 办公用品采购申请（通知财务）
+  OFFICE_SUPPLY_APPROVED: 'office_supply_approved', // 办公用品采购申请已批准（通知申请人）
+  OFFICE_SUPPLY_REJECTED: 'office_supply_rejected', // 办公用品采购申请已拒绝（通知申请人）
+  SEAL_REQUEST: 'seal_request',                 // 章证使用申请（通知行政综合岗）
+  SEAL_STATUS_CHANGE: 'seal_status_change'     // 章证使用状态变更（通知申请人）
 };
 
 /**

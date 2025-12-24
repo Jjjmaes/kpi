@@ -23,6 +23,106 @@ function isFinanceRole() {
     return roles.includes('admin') || roles.includes('finance');
 }
 
+const manualPaymentMethods = ['cash', 'alipay', 'wechat'];
+
+function buildPaymentReceiverOptions() {
+    const allowedRoles = ['finance', 'sales', 'part_time_sales', 'admin'];
+    const users = state.allUsers || [];
+    console.log('[buildPaymentReceiverOptions] state.allUsers length:', users.length);
+    const uniq = new Map();
+    users.forEach(u => {
+        if (!u || u.isActive === false) return;
+        const hit = (u.roles || []).find(r => allowedRoles.includes(r));
+        if (!hit) return;
+        if (!uniq.has(u._id)) {
+            uniq.set(u._id, {
+                id: u._id,
+                name: u.name || u.username || u._id,
+                role: hit
+            });
+        }
+    });
+    const result = Array.from(uniq.values());
+    console.log('[buildPaymentReceiverOptions] found', result.length, 'eligible users:', result.map(r => r.name));
+    return result;
+}
+
+export function handlePaymentMethodChange(projectId = 'global') {
+    const methodEl = document.getElementById(projectId === 'global' ? 'paymentMethod' : `paymentMethod_${projectId}`);
+    const wrapEl = document.getElementById(projectId === 'global' ? 'paymentReceiverWrap_global' : `paymentReceiverWrap_${projectId}`);
+    const selectEl = document.getElementById(projectId === 'global' ? 'paymentReceivedBy' : `paymentReceivedBy_${projectId}`);
+    const method = methodEl?.value || 'bank';
+    const needReceiver = manualPaymentMethods.includes(method);
+    if (wrapEl) {
+        wrapEl.style.display = needReceiver ? 'block' : 'none';
+    }
+    if (!needReceiver && selectEl) {
+        selectEl.value = '';
+    } else if (needReceiver && selectEl) {
+        // 若必填且未选择，自动选第一个有效选项
+        const firstOption = Array.from(selectEl.options || []).find(opt => opt.value);
+        if (firstOption && !selectEl.value) {
+            selectEl.value = firstOption.value;
+        }
+    }
+}
+
+async function populatePaymentReceiverOptions(projectId, selectId, wrapId, methodId) {
+    const selectEl = document.getElementById(selectId);
+    const wrapEl = document.getElementById(wrapId);
+    if (!selectEl) {
+        console.warn('[populatePaymentReceiverOptions] select element not found:', selectId);
+        return;
+    }
+    try {
+        selectEl.innerHTML = '<option value="">加载收款人...</option>';
+        console.log('[populatePaymentReceiverOptions] checking state.allUsers:', state.allUsers?.length || 0);
+        if (!state.allUsers || !state.allUsers.length) {
+            console.log('[populatePaymentReceiverOptions] loading users from API...');
+            try {
+                const resAll = await apiFetch('/users');
+                const usersData = await resAll.json();
+                console.log('[populatePaymentReceiverOptions] API response:', usersData?.success, 'users count:', usersData?.data?.length || 0);
+                if (usersData?.success && Array.isArray(usersData.data)) {
+                    state.allUsers = usersData.data;
+                    console.log('[populatePaymentReceiverOptions] loaded', state.allUsers.length, 'users into state');
+                } else {
+                    console.error('[populatePaymentReceiverOptions] invalid API response:', usersData);
+                }
+            } catch (err) {
+                console.error('[populatePaymentReceiverOptions] 加载用户失败', err);
+                showToast('加载用户列表失败: ' + err.message, 'error');
+            }
+        }
+        const options = buildPaymentReceiverOptions();
+        console.log('[populatePaymentReceiverOptions] built', options.length, 'options');
+        selectEl.innerHTML = `<option value="">${options.length ? '请选择收款人（财务/销售/兼职销售/管理员）' : '暂无可选收款人'}</option>` + options.map(o => 
+            `<option value="${o.id}">${o.name}（${getRoleText(o.role)}）</option>`
+        ).join('');
+        if (wrapEl) {
+            const method = document.getElementById(methodId || selectId)?.value || 'bank';
+            wrapEl.style.display = manualPaymentMethods.includes(method) ? 'block' : 'none';
+            const hint = wrapEl.querySelector('small');
+            if (hint) {
+                hint.textContent = options.length > 0 
+                    ? ''
+                    : '暂无财务/销售/兼职销售/管理员成员，请先添加后再录入现金类回款';
+            }
+        }
+        // 如果已选择现金类方式且列表有值，默认选中第一项
+        const currentMethodEl = document.getElementById(methodId || selectId);
+        const needReceiver = currentMethodEl && manualPaymentMethods.includes(currentMethodEl.value || '');
+        if (needReceiver) {
+            const firstOption = Array.from(selectEl.options || []).find(opt => opt.value);
+            if (firstOption) selectEl.value = firstOption.value;
+        }
+    } catch (error) {
+        console.error('[populatePaymentReceiverOptions] failed', error);
+        showToast('加载收款人失败: ' + error.message, 'error');
+        selectEl.innerHTML = '<option value="">加载收款人失败</option>';
+    }
+}
+
 // ============ 应收对账 ============
 export async function loadReceivables() {
     const month = document.getElementById('financeMonth')?.value || '';
@@ -428,9 +528,18 @@ export async function addPaymentRecord() {
     const method = document.getElementById('paymentMethod')?.value || 'bank';
     const reference = document.getElementById('paymentReference')?.value || '';
     const invoiceNumber = document.getElementById('paymentInvoiceNumber')?.value || '';
+    const receivedBy = document.getElementById('paymentReceivedBy')?.value || '';
 
     if (!projectId || !amount || !receivedAt) {
         showToast('请选择项目、填写金额和回款日期', 'error');
+        return;
+    }
+    if (manualPaymentMethods.includes(method) && !receivedBy) {
+        showToast('现金/支付宝/微信需选择收款人（财务/销售/兼职销售）', 'error');
+        return;
+    }
+    if (manualPaymentMethods.includes(method) && !document.getElementById('paymentReceivedBy')?.options?.length) {
+        showToast('暂无可选收款人，请先在项目中添加财务/销售/兼职销售/管理员成员', 'error');
         return;
     }
     const payload = {
@@ -438,7 +547,8 @@ export async function addPaymentRecord() {
         receivedAt,
         method,
         reference,
-        invoiceNumber
+        invoiceNumber,
+        receivedBy: manualPaymentMethods.includes(method) ? receivedBy : undefined
     };
     try {
         const res = await apiFetch(`/finance/payment/${projectId}`, {
@@ -475,9 +585,19 @@ export async function addPaymentRecordForProject(e, projectId) {
     const method = document.getElementById(`paymentMethod_${projectId}`)?.value || 'bank';
     const reference = document.getElementById(`paymentReference_${projectId}`)?.value || '';
     const invoiceNumber = document.getElementById(`paymentInvoiceNumber_${projectId}`)?.value || '';
+    const receivedBy = document.getElementById(`paymentReceivedBy_${projectId}`)?.value || '';
 
     if (!amount || !receivedAt) {
         showToast('请填写金额和回款日期', 'error');
+        return;
+    }
+    if (manualPaymentMethods.includes(method) && !receivedBy) {
+        showToast('现金/支付宝/微信需选择收款人（财务/销售/兼职销售）', 'error');
+        return;
+    }
+    const receiverSelect = document.getElementById(`paymentReceivedBy_${projectId}`);
+    if (manualPaymentMethods.includes(method) && receiverSelect && receiverSelect.options.length <= 1) {
+        showToast('暂无可选收款人，请先在项目中添加财务/销售/兼职销售/管理员成员', 'error');
         return;
     }
     
@@ -486,7 +606,8 @@ export async function addPaymentRecordForProject(e, projectId) {
         receivedAt,
         method,
         reference,
-        invoiceNumber
+        invoiceNumber,
+        receivedBy: manualPaymentMethods.includes(method) ? receivedBy : undefined
     };
     
     try {
@@ -845,6 +966,31 @@ export async function loadPaymentRecordsForProject(projectId) {
 
         const paymentStatusText = { unpaid: '未支付', partially_paid: '部分支付', paid: '已支付' };
         const canManageFinance = isFinanceRole();
+        
+        // 确保用户列表已加载
+        if (!state.allUsers || !state.allUsers.length) {
+            try {
+                const resAll = await apiFetch('/users');
+                const usersData = await resAll.json();
+                if (usersData?.success && Array.isArray(usersData.data)) {
+                    state.allUsers = usersData.data;
+                }
+            } catch (err) {
+                console.warn('[loadPaymentRecordsForProject] 加载用户失败', err);
+            }
+        }
+        
+        const receiverOptions = buildPaymentReceiverOptions();
+        const receiverSelectHtml = `
+            <div id="paymentReceiverWrap_${projectId}" style="width: 160px; min-width: 140px; display: none;">
+                <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">收款人（现金/支付宝/微信必填）</label>
+                <select id="paymentReceivedBy_${projectId}" style="padding: 6px; width: 100%;">
+                    <option value="">请选择收款人（财务/销售/兼职销售/管理员）</option>
+                    ${receiverOptions.map(o => `<option value="${o.id}">${o.name}（${getRoleText(o.role)}）</option>`).join('')}
+                </select>
+                ${receiverOptions.length === 0 ? '<small style="color: #666; font-size: 12px;">暂无财务/销售/兼职销售/管理员成员，请先添加后再录入现金类回款</small>' : ''}
+            </div>
+        `;
 
         // 如果没有回款记录，显示新增表单
         if (!data.data || data.data.length === 0) {
@@ -863,29 +1009,30 @@ export async function loadPaymentRecordsForProject(projectId) {
                 ${canManageFinance ? `
                 <div class="card" style="margin-bottom: 12px; background: #f9fafb;">
                     <div class="card-title" style="font-size: 14px; margin-bottom: 8px;">新增回款记录</div>
-                    <form id="addPaymentForm_${projectId}" data-submit="addPaymentRecordForProject(event, '${projectId}')" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end;">
-                        <div style="flex: 1; min-width: 120px;">
+                    <form id="addPaymentForm_${projectId}" data-submit="addPaymentRecordForProject(event, '${projectId}')" style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
+                        <div style="width: 180px; min-width: 150px;">
                             <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">回款日期 <span style="color: #e74c3c;">*</span></label>
                             <input type="date" id="paymentDate_${projectId}" required style="padding: 6px; width: 100%;" value="${new Date().toISOString().split('T')[0]}">
                         </div>
-                        <div style="flex: 1; min-width: 120px;">
+                        <div style="width: 140px; min-width: 120px;">
                             <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">金额 <span style="color: #e74c3c;">*</span></label>
                             <input type="number" step="0.01" id="paymentAmount_${projectId}" required style="padding: 6px; width: 100%;" placeholder="0.00">
                         </div>
-                        <div style="flex: 1; min-width: 100px;">
+                        <div style="width: 140px; min-width: 120px;">
                             <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">支付方式</label>
-                            <select id="paymentMethod_${projectId}" style="padding: 6px; width: 100%;">
+                            <select id="paymentMethod_${projectId}" style="padding: 6px; width: 100%;" data-change="handlePaymentMethodChange('${projectId}')">
                                 <option value="bank">银行转账</option>
                                 <option value="cash">现金</option>
                                 <option value="alipay">支付宝</option>
                                 <option value="wechat">微信</option>
                             </select>
                         </div>
-                        <div style="flex: 1; min-width: 120px;">
+                        ${receiverSelectHtml}
+                        <div style="width: 160px; min-width: 140px;">
                             <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">凭证号</label>
                             <input type="text" id="paymentReference_${projectId}" style="padding: 6px; width: 100%;" placeholder="可选">
                         </div>
-                        <div style="flex: 1; min-width: 120px;">
+                        <div style="width: 160px; min-width: 140px;">
                             <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">关联发票号</label>
                             <input type="text" id="paymentInvoiceNumber_${projectId}" style="padding: 6px; width: 100%;" placeholder="可选">
                         </div>
@@ -901,10 +1048,11 @@ export async function loadPaymentRecordsForProject(projectId) {
         }
 
         const rows = data.data.map(r => `
-            <tr>
+        <tr>
                 <td>${new Date(r.receivedAt).toLocaleDateString()}</td>
                 <td>¥${(r.amount || 0).toLocaleString()}</td>
                 <td>${r.method === 'bank' ? '银行转账' : r.method === 'cash' ? '现金' : r.method === 'alipay' ? '支付宝' : r.method === 'wechat' ? '微信' : r.method || '-'}</td>
+                <td>${r.receivedBy?.name || '-'}</td>
                 <td>${r.reference || '-'}</td>
                 <td>${r.invoiceNumber || '-'}</td>
                 <td>${r.recordedBy?.name || '-'}</td>
@@ -930,29 +1078,30 @@ export async function loadPaymentRecordsForProject(projectId) {
             ${canManageFinance ? `
             <div class="card" style="margin-bottom: 12px; background: #f9fafb;">
                 <div class="card-title" style="font-size: 14px; margin-bottom: 8px;">新增回款记录</div>
-                <form id="addPaymentForm_${projectId}" data-submit="addPaymentRecordForProject(event, '${projectId}')" style="display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end;">
-                    <div style="flex: 1; min-width: 120px;">
+                <form id="addPaymentForm_${projectId}" data-submit="addPaymentRecordForProject(event, '${projectId}')" style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
+                    <div style="width: 180px; min-width: 150px;">
                         <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">回款日期 <span style="color: #e74c3c;">*</span></label>
                         <input type="date" id="paymentDate_${projectId}" required style="padding: 6px; width: 100%;" value="${new Date().toISOString().split('T')[0]}">
                     </div>
-                    <div style="flex: 1; min-width: 120px;">
+                    <div style="width: 140px; min-width: 120px;">
                         <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">金额 <span style="color: #e74c3c;">*</span></label>
                         <input type="number" step="0.01" id="paymentAmount_${projectId}" required style="padding: 6px; width: 100%;" placeholder="0.00">
                     </div>
-                    <div style="flex: 1; min-width: 100px;">
+                    <div style="width: 140px; min-width: 120px;">
                         <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">支付方式</label>
-                        <select id="paymentMethod_${projectId}" style="padding: 6px; width: 100%;">
+                        <select id="paymentMethod_${projectId}" style="padding: 6px; width: 100%;" data-change="handlePaymentMethodChange('${projectId}')">
                             <option value="bank">银行转账</option>
                             <option value="cash">现金</option>
                             <option value="alipay">支付宝</option>
                             <option value="wechat">微信</option>
                         </select>
                     </div>
-                    <div style="flex: 1; min-width: 120px;">
+                    ${receiverSelectHtml}
+                    <div style="width: 160px; min-width: 140px;">
                         <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">凭证号</label>
                         <input type="text" id="paymentReference_${projectId}" style="padding: 6px; width: 100%;" placeholder="可选">
                     </div>
-                    <div style="flex: 1; min-width: 120px;">
+                    <div style="width: 160px; min-width: 140px;">
                         <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">关联发票号</label>
                         <input type="text" id="paymentInvoiceNumber_${projectId}" style="padding: 6px; width: 100%;" placeholder="可选">
                     </div>
@@ -965,13 +1114,14 @@ export async function loadPaymentRecordsForProject(projectId) {
             <table class="table-sticky">
                 <thead>
                     <tr>
-                        <th>回款日期</th><th>金额</th><th>支付方式</th><th>凭证号</th>
+                        <th>回款日期</th><th>金额</th><th>支付方式</th><th>收款人</th><th>凭证号</th>
                         <th>关联发票号</th><th>记录人</th>${canManageFinance ? '<th>操作</th>' : ''}
                     </tr>
                 </thead>
                 <tbody>${rows}</tbody>
             </table>
         `;
+        setTimeout(() => handlePaymentMethodChange(projectId), 0);
     } catch (error) {
         container.innerHTML = `<div style="text-align: center; color: #ef4444;">加载失败: ${error.message}</div>`;
     }
@@ -2285,6 +2435,8 @@ export function selectProject(projectId, projectNumber, projectName, customerNam
         if (projectIdInput) projectIdInput.value = projectId;
         if (projectSearchInput) projectSearchInput.value = fullDisplay;
         if (projectInfoDiv) projectInfoDiv.textContent = `已选择：${displayName}`;
+        populatePaymentReceiverOptions(projectId, 'paymentReceivedBy', 'paymentReceiverWrap_global', 'paymentMethod');
+        handlePaymentMethodChange('global');
     } else if (type === 'invoice') {
         const projectIdInput = document.getElementById('invoiceProjectId');
         const projectSearchInput = document.getElementById('invoiceProjectSearch');

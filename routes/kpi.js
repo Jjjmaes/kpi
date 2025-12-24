@@ -648,6 +648,54 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
       }
     }
 
+    // 综合岗专用数据
+    let adminStaffData = {};
+    if (currentRole === 'admin_staff') {
+      const ExpressRequest = require('../models/ExpressRequest');
+      const SealRequest = require('../models/SealRequest');
+      const OfficeSupplyRequest = require('../models/OfficeSupplyRequest');
+      
+      // 待处理快递申请数量
+      const pendingExpressCount = await ExpressRequest.countDocuments({ status: 'pending' });
+      
+      // 待处理章证使用申请数量
+      const pendingSealCount = await SealRequest.countDocuments({ status: 'pending' });
+      
+      // 待审批办公用品采购数量（综合岗自己的申请）
+      const pendingOfficeSupplyCount = await OfficeSupplyRequest.countDocuments({ 
+        createdBy: req.user._id,
+        status: 'pending' 
+      });
+      
+      // 综合岗自己的KPI
+      const myKPIQuery = { 
+        month: monthStr,
+        userId: req.user._id,
+        role: 'admin_staff'
+      };
+      const myKPIRecords = await KpiRecord.find(myKPIQuery);
+      const monthlyRoleKPI = await MonthlyRoleKPI.findOne({
+        month: monthStr,
+        userId: req.user._id,
+        role: 'admin_staff'
+      });
+      
+      let myKPI = 0;
+      myKPIRecords.forEach(r => {
+        myKPI += r.kpiValue;
+      });
+      if (monthlyRoleKPI) {
+        myKPI += monthlyRoleKPI.kpiValue;
+      }
+      
+      adminStaffData = {
+        pendingExpressCount,
+        pendingSealCount,
+        pendingOfficeSupplyCount,
+        myKPI: myKPI > 0 ? Math.round(myKPI * 100) / 100 : null
+      };
+    }
+
     res.json({
       success: true,
       data: {
@@ -671,7 +719,8 @@ router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translato
         recentDeliveryOverdue,
         todayDeals,
         todayDelivery,
-        todayMyDueProjects
+        todayMyDueProjects,
+        ...adminStaffData
       }
     });
   } catch (error) {

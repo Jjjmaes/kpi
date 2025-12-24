@@ -1090,3 +1090,48 @@ table th {
     background: #f9f9f9 !important;
 }
 
+/* 标签页样式 */
+.tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid #e5e7eb;
+}
+
+.tab {
+    padding: 10px 20px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    color: #666;
+    font-size: 14px;
+    transition: all 0.2s;
+    margin-bottom: -2px;
+}
+
+.tab:hover {
+    color: #333;
+    background: #f5f5f5;
+}
+
+.tab.active {
+    color: #667eea;
+    border-bottom-color: #667eea;
+    font-weight: 500;
+}
+
+/* 导航徽章样式 */
+.nav-badge {
+    display: inline-block;
+    min-width: 18px;
+    padding: 2px 6px;
+    background: #ff4d4f;
+    color: #fff;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 1.2;
+    text-align: center;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+

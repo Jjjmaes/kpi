@@ -213,7 +213,7 @@ router.get('/receivables', allowViewFinance, async (req, res) => {
 router.post('/payment/:projectId', allowManageFinance, async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { amount, receivedAt, method, reference, invoiceNumber, note } = req.body;
+    const { amount, receivedAt, method, reference, invoiceNumber, note, receivedBy } = req.body;
     if (!amount || amount <= 0 || !receivedAt) {
       return res.status(400).json({ 
         success: false, 
@@ -224,6 +224,21 @@ router.post('/payment/:projectId', allowManageFinance, async (req, res) => {
         }
       });
     }
+
+    const manualMethods = ['cash', 'alipay', 'wechat'];
+    if (manualMethods.includes(method || 'bank')) {
+      if (!receivedBy) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'RECEIVED_BY_REQUIRED',
+            message: '现金/支付宝/微信收款需选择收款人',
+            statusCode: 400
+          }
+        });
+      }
+    }
+
     const project = await Project.findById(projectId);
     if (!project) {
       return res.status(404).json({ 
@@ -239,6 +254,24 @@ router.post('/payment/:projectId', allowManageFinance, async (req, res) => {
     const paymentAmount = Number(amount);
     const projectAmount = project.projectAmount || 0;
 
+    // 校验收款人（仅现金/支付宝/微信需要），允许财务/销售/兼职销售/管理员，不再限制必须为项目成员
+    let receivedByUserId = null;
+    if (manualMethods.includes(method || 'bank')) {
+      const allowedRoles = ['finance', 'sales', 'part_time_sales', 'admin'];
+      const receiverUser = await User.findById(receivedBy).select('roles isActive');
+      if (!receiverUser || !receiverUser.isActive || !receiverUser.roles?.some(r => allowedRoles.includes(r))) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_RECEIVED_BY',
+            message: '收款人需为在职的财务/销售/兼职销售/管理员',
+            statusCode: 400
+          }
+        });
+      }
+      receivedByUserId = receiverUser._id;
+    }
+
     // 创建回款记录
     const paymentRecord = await PaymentRecord.create({
       projectId,
@@ -248,6 +281,7 @@ router.post('/payment/:projectId', allowManageFinance, async (req, res) => {
       reference,
       invoiceNumber, // 关联发票号
       note,
+      receivedBy: receivedByUserId,
       recordedBy: req.user._id
     });
 
@@ -358,6 +392,7 @@ router.get('/payment/:projectId', allowViewFinance, async (req, res) => {
     // 获取所有回款记录（按时间正序，以便计算累计状态）
     let records = await PaymentRecord.find(paymentQuery)
       .populate('recordedBy', 'name')
+      .populate('receivedBy', 'name roles')
       .sort({ receivedAt: 1, createdAt: 1 }); // 按时间正序
     
     // 如果指定了回款状态筛选，需要根据累计回款金额判断每条记录发生时的状态

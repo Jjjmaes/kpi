@@ -11,7 +11,7 @@ import { loadDashboard, navigateFromDashboardCard } from './modules/dashboard.js
 import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectPayments, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, exportProjectContract, createProject, updateProject, setLayoutCost, addMember, showAddMemberModal, showPaymentModalForProject, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter, showAddMemberModalForCreate, addMemberForCreate, removeCreateProjectMember, toggleCreateTranslatorFields, filterCreateUsersByRole, validateCreateMemberLayoutCost, updateCreateProjectMembersList, onMemberRoleChange, onCreateMemberRoleChange, toggleTranslatorFields, filterUsersByRole, validateAddMemberLayoutCost, closeAddMemberModalAndReturnToCreate, addInlineMemberForCreate, onInlineCreateMemberRoleChange, filterInlineCreateUsersByRole, validateInlineCreateMemberLayoutCost, quickRequestInvoice, viewProjectInvoiceRequest, selectAllProjectsForInvoice, deselectAllProjectsForInvoice, batchRequestInvoice, toggleProjectForInvoice, toggleSelectAllProjects } from './modules/project.js';
 import { loadCustomers, searchCustomers, showCreateCustomerModal, showCreateCustomerModalFromProject, editCustomer, deleteCustomer, createCustomer, updateCustomer, updateCustomerInfo, addCustomerContactRow, removeCustomerContactRow } from './modules/customer.js';
 import { loadKPI, exportKPI, generateMonthlyKPI, showEvaluateModal, submitEvaluation } from './modules/kpi.js';
-import { loadReceivables, renderReceivables, exportReceivables, loadInvoiceProjects, renderInvoiceProjects, addInvoice, addInvoiceForProject, loadPaymentRecordsProjects, renderPaymentRecordsProjects, addPaymentRecord, addPaymentRecordForProject, loadPaymentRecords, clearPaymentRecordFilter, showFinanceSection, loadFinanceSummary, exportFinanceSummary, loadPendingKpi, reviewKpiRecord, rejectKpiRecord, batchReviewKpiRecords, selectAllPendingKpi, deselectAllPendingKpi, toggleSelectAllPendingKpi, loadReconciliation, exportReconciliation, togglePaymentRecords, toggleInvoiceRecords, clearPaymentRecordsFilters, removePaymentRecord, jumpReceivablePage, prevReceivablePage, nextReceivablePage, jumpPaymentRecordsProjectsPage, prevPaymentRecordsProjectsPage, nextPaymentRecordsProjectsPage, jumpInvoiceProjectsPage, prevInvoiceProjectsPage, nextInvoiceProjectsPage, backToFinanceNav, showProjectSelector, filterProjectSelector, selectProject, loadInvoiceRequests, renderInvoiceRequests, loadMyInvoiceRequests, renderMyInvoiceRequests, viewInvoiceRequest, approveInvoiceRequest, rejectInvoiceRequest, deleteInvoiceRequest, showCreateInvoiceRequestModal, jumpInvoiceRequestPage, prevInvoiceRequestPage, nextInvoiceRequestPage, jumpMyInvoiceRequestPage, prevMyInvoiceRequestPage, nextMyInvoiceRequestPage } from './modules/finance.js';
+import { loadReceivables, renderReceivables, exportReceivables, loadInvoiceProjects, renderInvoiceProjects, addInvoice, addInvoiceForProject, loadPaymentRecordsProjects, renderPaymentRecordsProjects, addPaymentRecord, addPaymentRecordForProject, loadPaymentRecords, clearPaymentRecordFilter, showFinanceSection, loadFinanceSummary, exportFinanceSummary, loadPendingKpi, reviewKpiRecord, rejectKpiRecord, batchReviewKpiRecords, selectAllPendingKpi, deselectAllPendingKpi, toggleSelectAllPendingKpi, loadReconciliation, exportReconciliation, togglePaymentRecords, toggleInvoiceRecords, clearPaymentRecordsFilters, removePaymentRecord, jumpReceivablePage, prevReceivablePage, nextReceivablePage, jumpPaymentRecordsProjectsPage, prevPaymentRecordsProjectsPage, nextPaymentRecordsProjectsPage, jumpInvoiceProjectsPage, prevInvoiceProjectsPage, nextInvoiceProjectsPage, backToFinanceNav, showProjectSelector, filterProjectSelector, selectProject, loadInvoiceRequests, renderInvoiceRequests, loadMyInvoiceRequests, renderMyInvoiceRequests, viewInvoiceRequest, approveInvoiceRequest, rejectInvoiceRequest, deleteInvoiceRequest, showCreateInvoiceRequestModal, jumpInvoiceRequestPage, prevInvoiceRequestPage, nextInvoiceRequestPage, jumpMyInvoiceRequestPage, prevMyInvoiceRequestPage, nextMyInvoiceRequestPage, handlePaymentMethodChange } from './modules/finance.js';
 import { loadUsers, loadUsersForSelect, showCreateUserModal, editUser, deleteUser, resetUserPassword, copyPasswordToClipboard, createUser, updateUser, loadProfile, updateProfileInfo, updateProfilePassword } from './modules/user.js';
 import { loadLanguages, showCreateLanguageModal, showEditLanguageModal, createLanguage, updateLanguage } from './modules/language.js';
 import { loadBackups, createBackup, cleanupOldBackups, restoreBackup, deleteBackupFile } from './modules/backup.js';
@@ -20,6 +20,9 @@ import { loadRoles, showCreateRoleModal, viewRole, editRole, deleteRole } from '
 import { startNotificationPolling, stopNotificationPolling, toggleNotificationPanel, markAllNotificationsRead, initNotificationAudio } from './modules/notification.js';
 import { loadPaymentCompletionDetail, renderPaymentCompletionDetail, pcdPrevPage, pcdNextPage, pcdJumpPage, pcdToggleProject, pcdToggleOverdue } from './modules/paymentDetail.js';
 import { showEvaluationModal, showProjectEvaluationsList, submitProjectEvaluation, showEvaluationStats } from './modules/evaluation.js';
+import { loadExpressList, renderExpressList, switchExpressTab, showCreateExpressModal, createExpressRequest, viewExpressRequest, processExpressRequest, showSentExpressModal, markExpressSent, cancelExpressRequest, updatePendingCount, prevExpressPage, nextExpressPage, updateExpressUI } from './modules/express.js';
+import { loadOfficeSupplyList, renderOfficeSupplyList, switchOfficeSupplyTab, showCreateOfficeSupplyModal, createOfficeSupplyRequest, addOfficeSupplyItem, viewOfficeSupply, approveOfficeSupply, rejectOfficeSupply, markPurchased, submitMarkPurchased, cancelOfficeSupply, updatePendingCount as updateOfficeSupplyPendingCount, prevOfficeSupplyPage, nextOfficeSupplyPage, jumpOfficeSupplyPage, updateOfficeSupplyUI } from './modules/officeSupply.js';
+import { loadSealList, renderSealList, switchSealTab, showCreateSealModal, createSealRequest, viewSeal, processSeal, returnSeal, submitReturnSeal, cancelSeal, updatePendingCount as updateSealPendingCount, prevSealPage, nextSealPage, jumpSealPage, updateSealUI } from './modules/seal.js';
 
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', async () => {
@@ -73,6 +76,15 @@ async function onRoleSwitched() {
     // 更新导航按钮可见性
     updateNavVisibility();
     
+    // 更新快递管理界面（根据角色显示/隐藏功能）
+    updateExpressUI();
+    
+    // 更新办公用品采购管理界面（根据角色显示/隐藏功能）
+    updateOfficeSupplyUI();
+    
+    // 更新章证使用管理界面（根据角色显示/隐藏功能）
+    updateSealUI();
+    
     // 重新加载当前 section 的数据
     const activeSection = document.querySelector('.section.active');
     if (activeSection) {
@@ -88,10 +100,27 @@ async function onRoleSwitched() {
 
 // ============ 更新导航按钮可见性 ============
 function updateNavVisibility() {
+    const currentRole = state.currentRole;
+    const isAdminStaff = currentRole === 'admin_staff';
+    
+    // 项目管理按钮 - 综合岗隐藏
+    const projectsBtn = document.querySelector('button[data-click*="showSection(\'projects\')"]');
+    if (projectsBtn) {
+        if (isAdminStaff) {
+            projectsBtn.style.display = 'none';
+        } else {
+            projectsBtn.style.display = 'inline-block';
+        }
+    }
+    
     // 客户管理
     const customersBtn = document.getElementById('customersBtn');
     if (customersBtn) {
-        customersBtn.style.display = hasPermission('customer.view') ? 'inline-block' : 'none';
+        if (isAdminStaff) {
+            customersBtn.style.display = 'none';
+        } else {
+            customersBtn.style.display = hasPermission('customer.view') ? 'inline-block' : 'none';
+        }
     }
     
     // 财务管理
@@ -164,6 +193,20 @@ function updateNavVisibility() {
     }
     if (generateKpiBtn) {
         generateKpiBtn.style.display = canViewAllKPI ? 'inline-block' : 'none';
+    }
+    
+    // 办公用品采购管理（行政综合岗或财务岗可见）
+    const officeSupplyBtn = document.getElementById('officeSupplyBtn');
+    const createOfficeSupplyBtn = document.getElementById('createOfficeSupplyBtn');
+    if (officeSupplyBtn) {
+        const currentRole = state.currentRole;
+        const canAccess = currentRole === 'admin' || currentRole === 'admin_staff' || currentRole === 'finance';
+        officeSupplyBtn.style.display = canAccess ? 'inline-block' : 'none';
+    }
+    if (createOfficeSupplyBtn) {
+        const currentRole = state.currentRole;
+        const canCreate = currentRole === 'admin' || currentRole === 'admin_staff';
+        createOfficeSupplyBtn.style.display = canCreate ? 'inline-block' : 'none';
     }
 }
 
@@ -370,7 +413,31 @@ const SECTION_ROUTES = {
         }
     } },
     backup: { onEnter: async () => { if (hasPermission('system.config')) await loadBackups(); } },
-    profile: { onEnter: async () => { if (state.currentUser) await loadProfile(); } }
+    profile: { onEnter: async () => { if (state.currentUser) await loadProfile(); } },
+    express: { onEnter: async () => {
+        // 更新界面显示（根据角色）
+        updateExpressUI();
+        await loadExpressList();
+        await updatePendingCount();
+    } },
+    officeSupply: { onEnter: async () => {
+        // 更新界面显示（根据角色）
+        updateOfficeSupplyUI();
+        await loadOfficeSupplyList();
+        await updateOfficeSupplyPendingCount();
+        // 显示/隐藏新建按钮
+        const createBtn = document.getElementById('createOfficeSupplyBtn');
+        if (createBtn) {
+            const currentRole = state.currentRole;
+            createBtn.style.display = (currentRole === 'admin' || currentRole === 'admin_staff') ? 'inline-block' : 'none';
+        }
+    } },
+    seal: { onEnter: async () => {
+        // 更新界面显示（根据角色）
+        updateSealUI();
+        await loadSealList();
+        await updateSealPendingCount();
+    } }
 };
 
 async function goToSection(sectionId) {
@@ -560,6 +627,7 @@ const ACTIONS = Object.freeze({
     renderPaymentRecordsProjects: () => renderPaymentRecordsProjects(),
     addPaymentRecord: () => addPaymentRecord(),
     addPaymentRecordForProject: (event, projectId) => addPaymentRecordForProject(event, projectId),
+    handlePaymentMethodChange: (projectId) => handlePaymentMethodChange(projectId),
     togglePaymentRecords: (projectId) => togglePaymentRecords(projectId),
     clearPaymentRecordsFilters: () => clearPaymentRecordsFilters(),
     clearPaymentRecordFilter: (projectId) => clearPaymentRecordFilter(projectId),
@@ -623,6 +691,55 @@ const ACTIONS = Object.freeze({
     showProjectEvaluationsList: (projectId) => showProjectEvaluationsList(projectId),
     submitProjectEvaluation: (event, projectId, evaluationType, evaluatedUserId) => submitProjectEvaluation(event, projectId, evaluationType, evaluatedUserId),
     showEvaluationStats: (userId) => showEvaluationStats(userId),
+
+    // Express Management (快递管理)
+    loadExpressList: () => loadExpressList(),
+    renderExpressList: () => renderExpressList(),
+    switchExpressTab: (tab) => switchExpressTab(tab),
+    showCreateExpressModal: () => showCreateExpressModal(),
+    createExpressRequest: (event) => createExpressRequest(event),
+    viewExpressRequest: (id) => viewExpressRequest(id),
+    processExpressRequest: (id) => processExpressRequest(id),
+    showSentExpressModal: (id) => showSentExpressModal(id),
+    markExpressSent: (event, id) => markExpressSent(event, id),
+    cancelExpressRequest: (id) => cancelExpressRequest(id),
+    updatePendingCount: () => updatePendingCount(),
+    prevExpressPage: () => prevExpressPage(),
+    nextExpressPage: () => nextExpressPage(),
+
+    // Office Supply Management (办公用品采购管理)
+    loadOfficeSupplyList: () => loadOfficeSupplyList(),
+    renderOfficeSupplyList: () => renderOfficeSupplyList(),
+    switchOfficeSupplyTab: (tab) => switchOfficeSupplyTab(tab),
+    showCreateOfficeSupplyModal: () => showCreateOfficeSupplyModal(),
+    addOfficeSupplyItem: () => addOfficeSupplyItem(),
+    createOfficeSupplyRequest: (event) => createOfficeSupplyRequest(event),
+    viewOfficeSupply: (id) => viewOfficeSupply(id),
+    approveOfficeSupply: (id) => approveOfficeSupply(id),
+    rejectOfficeSupply: (id) => rejectOfficeSupply(id),
+    markPurchased: (id) => markPurchased(id),
+    submitMarkPurchased: (event, id) => submitMarkPurchased(event, id),
+    cancelOfficeSupply: (id) => cancelOfficeSupply(id),
+    updateOfficeSupplyPendingCount: () => updateOfficeSupplyPendingCount(),
+    prevOfficeSupplyPage: () => prevOfficeSupplyPage(),
+    nextOfficeSupplyPage: () => nextOfficeSupplyPage(),
+    jumpOfficeSupplyPage: (page, total) => jumpOfficeSupplyPage(page, total),
+
+    // Seal Management (章证使用管理)
+    loadSealList: () => loadSealList(),
+    renderSealList: () => renderSealList(),
+    switchSealTab: (tab) => switchSealTab(tab),
+    showCreateSealModal: () => showCreateSealModal(),
+    createSealRequest: (event) => createSealRequest(event),
+    viewSeal: (id) => viewSeal(id),
+    processSeal: (id) => processSeal(id),
+    returnSeal: (id) => returnSeal(id),
+    submitReturnSeal: (event, id) => submitReturnSeal(event, id),
+    cancelSeal: (id) => cancelSeal(id),
+    updateSealPendingCount: () => updateSealPendingCount(),
+    prevSealPage: () => prevSealPage(),
+    nextSealPage: () => nextSealPage(),
+    jumpSealPage: (page, total) => jumpSealPage(page, total),
 
     // 特殊：阻止冒泡（兼容历史 HTML：event.stopPropagation()）
     "__event_stopPropagation__": (event) => {

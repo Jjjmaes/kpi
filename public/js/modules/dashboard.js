@@ -4,6 +4,9 @@ import { loadPaymentCompletionDetail } from './paymentDetail.js';
 import { showToast, showAlert, getStatusText, getBusinessTypeText, getRoleText, hasPermission } from '../core/utils.js';
 import { state } from '../core/state.js';
 import { loadProjects, renderProjects } from './project.js';
+import { switchExpressTab } from './express.js';
+import { switchSealTab } from './seal.js';
+import { switchOfficeSupplyTab } from './officeSupply.js';
 
 // Chart.js 实例列表，避免内存泄漏
 let chartInstances = [];
@@ -28,6 +31,10 @@ function destroyCharts() {
     const canvases = document.querySelectorAll('#dashboardCharts canvas');
     canvases.forEach(canvas => {
         try {
+            // 检查 Chart.js 是否已加载
+            if (typeof Chart === 'undefined' || !Chart) {
+                return;
+            }
             // Chart.js 会在 canvas 上存储图表实例
             const chart = Chart.getChart(canvas);
             if (chart) {
@@ -107,6 +114,7 @@ const canViewProjectAmount = () => {
 function renderDashboardTodayInfo(data) {
     // 基于当前选择的角色判断，而不是用户拥有的所有角色
     const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    const isAdminStaff = currentRole === 'admin_staff';
     const isSales = currentRole === 'sales' || currentRole === 'part_time_sales';
     const isAdmin = currentRole === 'admin';
     const isFinance = currentRole === 'finance';
@@ -116,6 +124,13 @@ function renderDashboardTodayInfo(data) {
     const canViewAmount = canViewProjectAmount();
     const showSalesAmount = isSales && !isAdmin && !isFinance && canViewAmount;
     const showPMDelivery = isPM && !isAdmin && !isFinance;
+    
+    // 综合岗不显示项目相关的今日信息
+    if (isAdminStaff) {
+        const el = document.getElementById('dashboardTodayInfo');
+        if (el) el.innerHTML = '';
+        return;
+    }
 
     let todayInfoHtml = '';
 
@@ -226,6 +241,15 @@ function renderDashboardTodayInfo(data) {
 }
 
 function renderDashboardCards(data) {
+    // 基于当前选择的角色判断，而不是用户拥有的所有角色
+    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    const isAdminStaff = currentRole === 'admin_staff';
+    
+    // 综合岗显示专用看板
+    if (isAdminStaff) {
+        return renderAdminStaffDashboard(data);
+    }
+    
     const statusCounts = data.statusCounts || {};
     const inProgress = statusCounts['in_progress'] || 0;
     const pending = statusCounts['pending'] || 0;
@@ -237,8 +261,6 @@ function renderDashboardCards(data) {
     const recentPaymentOverdue = data.recentPaymentOverdue || 0;
     const recentDeliveryOverdue = data.recentDeliveryOverdue || 0;
 
-    // 基于当前选择的角色判断，而不是用户拥有的所有角色
-    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
     const isSales = currentRole === 'sales' || currentRole === 'part_time_sales';
     const isAdmin = currentRole === 'admin';
     const isFinance = currentRole === 'finance';
@@ -381,11 +403,80 @@ function renderDashboardCards(data) {
     if (el) el.innerHTML = cards;
 }
 
+// 综合岗专用看板
+function renderAdminStaffDashboard(data) {
+    const pendingExpress = data.pendingExpressCount || 0;
+    const pendingSeal = data.pendingSealCount || 0;
+    const pendingOfficeSupply = data.pendingOfficeSupplyCount || 0;
+    const totalPending = pendingExpress + pendingSeal + pendingOfficeSupply;
+    const myKPI = data.myKPI || null;
+    
+    const cards = `
+        <div class="card-grid">
+            <div class="card stat-card stat-warning" data-click="navigateFromDashboardCard('expressPending')">
+                <div class="stat-icon">📦</div>
+                <div class="stat-content">
+                    <div class="card-title">待处理快递申请</div>
+                    <div class="card-value">${pendingExpress}</div>
+                    <div class="card-desc">需要处理的快递申请</div>
+                </div>
+            </div>
+            <div class="card stat-card stat-warning" data-click="navigateFromDashboardCard('sealPending')">
+                <div class="stat-icon">🔐</div>
+                <div class="stat-content">
+                    <div class="card-title">待处理章证使用申请</div>
+                    <div class="card-value">${pendingSeal}</div>
+                    <div class="card-desc">需要处理的章证使用申请</div>
+                </div>
+            </div>
+            ${pendingOfficeSupply > 0 ? `
+            <div class="card stat-card stat-warning" data-click="navigateFromDashboardCard('officeSupplyPending')">
+                <div class="stat-icon">🛒</div>
+                <div class="stat-content">
+                    <div class="card-title">待审批办公用品采购</div>
+                    <div class="card-value">${pendingOfficeSupply}</div>
+                    <div class="card-desc">待财务审批的采购申请</div>
+                </div>
+            </div>
+            ` : ''}
+            <div class="card stat-card stat-primary" data-click="navigateFromDashboardCard('expressPending')">
+                <div class="stat-icon">📋</div>
+                <div class="stat-content">
+                    <div class="card-title">今日待办事项</div>
+                    <div class="card-value">${totalPending}</div>
+                    <div class="card-desc">所有待处理事项总数</div>
+                </div>
+            </div>
+            ${myKPI !== null ? `
+            <div class="card stat-card stat-info" data-click="navigateFromDashboardCard('kpi')">
+                <div class="stat-icon">📈</div>
+                <div class="stat-content">
+                    <div class="card-title">我的KPI</div>
+                    <div class="card-value">${myKPI.toLocaleString()} 分</div>
+                    <div class="card-desc">当前月份KPI得分</div>
+                </div>
+            </div>
+            ` : ''}
+        </div>
+    `;
+    
+    const el = document.getElementById('dashboardCards');
+    if (el) el.innerHTML = cards;
+}
+
 function renderDashboardCharts(data) {
+    // 综合岗不显示图表
+    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
+    const isAdminStaff = currentRole === 'admin_staff';
+    if (isAdminStaff) {
+        const el = document.getElementById('dashboardCharts');
+        if (el) el.innerHTML = '';
+        return;
+    }
+    
     destroyCharts();
 
     // 基于当前选择的角色判断，而不是用户拥有的所有角色
-    const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
     const isSales = currentRole === 'sales' || currentRole === 'part_time_sales';
     const isAdmin = currentRole === 'admin';
     const isFinance = currentRole === 'finance';
@@ -411,6 +502,12 @@ function renderDashboardCharts(data) {
             setTimeout(() => {
                 const ctx = document.getElementById(chartId);
                 if (ctx) {
+                    // 检查 Chart.js 是否已加载
+                    if (typeof Chart === 'undefined' || !Chart) {
+                        console.warn('[Dashboard] Chart.js 未加载，跳过图表渲染');
+                        return;
+                    }
+                    
                     // 检查 canvas 是否已经被使用，如果是，先销毁旧图表
                     const existingChart = Chart.getChart(ctx);
                     if (existingChart) {
@@ -856,6 +953,36 @@ export async function navigateFromDashboardCard(target, overrideStatus) {
             break;
         case 'kpi':
             showSection('kpi');
+            break;
+        case 'expressPending':
+            showSection('express');
+            setTimeout(() => {
+                switchExpressTab('manage');
+                // 设置状态筛选为待处理
+                const statusFilter = document.getElementById('expressStatusFilter');
+                if (statusFilter) statusFilter.value = 'pending';
+                window.loadExpressList?.();
+            }, 100);
+            break;
+        case 'sealPending':
+            showSection('seal');
+            setTimeout(() => {
+                switchSealTab('manage');
+                // 设置状态筛选为待处理
+                const statusFilter = document.getElementById('sealStatusFilter');
+                if (statusFilter) statusFilter.value = 'pending';
+                window.loadSealList?.();
+            }, 100);
+            break;
+        case 'officeSupplyPending':
+            showSection('officeSupply');
+            setTimeout(() => {
+                switchOfficeSupplyTab('my');
+                // 设置状态筛选为待审批
+                const statusFilter = document.getElementById('officeSupplyStatusFilter');
+                if (statusFilter) statusFilter.value = 'pending';
+                window.loadOfficeSupplyList?.();
+            }, 100);
             break;
         default:
             showSection('dashboard');

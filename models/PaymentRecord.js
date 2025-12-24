@@ -21,6 +21,11 @@ const paymentRecordSchema = new mongoose.Schema({
     enum: ['bank', 'cash', 'alipay', 'wechat', 'other'],
     default: 'bank'
   },
+  // 收款人（现金/支付宝/微信需填写），需为项目成员，且角色为销售/兼职销售/财务
+  receivedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
   reference: String, // 凭证号/备注
   invoiceNumber: String, // 关联的发票号（如果有）
   note: String,

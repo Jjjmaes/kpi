@@ -55,6 +55,19 @@ function isPM(req) {
 }
 
 /**
+ * 检查是否为综合岗（admin_staff）或管理员
+ * @param {Object} req - Express请求对象
+ * @returns {Boolean}
+ */
+function isAdminStaff(req) {
+  if (!req || !req.user) {
+    return false;
+  }
+  // 严格基于当前角色判断，不检查所有角色
+  return req.currentRole === 'admin_staff' || req.currentRole === 'admin';
+}
+
+/**
  * 检查是否为管理员或财务角色
  * @param {Object} req - Express请求对象
  * @returns {Boolean}
@@ -220,6 +233,7 @@ module.exports = {
   isSales,
   isPartTimeSales,
   isPM,
+  isAdminStaff,
   isAdminOrFinance,
   isAdminOrFinanceOrPM,
   isDeliveryOnlyUser,
