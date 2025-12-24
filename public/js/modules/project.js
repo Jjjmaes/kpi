@@ -3643,6 +3643,8 @@ export function renderProjects() {
                             ${isSalesRole ? '<th style="width:50px;"><input type="checkbox" id="selectAllProjectsCheckbox" data-change="toggleSelectAllProjects(event)"></th>' : ''}
                             <th>项目编号</th>
                             <th>项目名称</th>
+                            <th>开票状态</th>
+                            <th>回款状态</th>
                             <th>客户名称</th>
                             <th>业务类型</th>
                             ${showAmount ? '<th>项目金额</th>' : ''}
@@ -3698,16 +3700,18 @@ export function renderProjects() {
                         !hasApprovedRequest;
                     
                     const isSelected = window.selectedProjectsForInvoice.has(projectIdStr);
+                    const paymentStatusText = { unpaid: '未支付', partially_paid: '部分支付', paid: '已支付' };
+                    const paymentStatus = p.payment?.paymentStatus || 'unpaid';
                     
-                    // 生成发票申请状态标签
+                    // 生成发票申请状态标签（单独一列展示）
                     let invoiceStatusBadge = '';
                     if (hasPendingRequest) {
-                        invoiceStatusBadge = '<span class="badge" style="background:#f59e0b;color:white;margin-left:4px;">待审批</span>';
+                        invoiceStatusBadge = '<span class="badge" style="background:#f59e0b;color:white;">待审批</span>';
                     } else if (hasApprovedRequest) {
                         const invoiceNumber = invoiceRequestStatus?.linkedInvoiceNumber;
-                        invoiceStatusBadge = `<span class="badge" style="background:#10b981;color:white;margin-left:4px;">已开票${invoiceNumber ? ` (${invoiceNumber})` : ''}</span>`;
+                        invoiceStatusBadge = `<span class="badge" style="background:#10b981;color:white;">已开票${invoiceNumber ? ` (${invoiceNumber})` : ''}</span>`;
                     } else if (hasRejectedRequest) {
-                        invoiceStatusBadge = '<span class="badge" style="background:#ef4444;color:white;margin-left:4px;">已拒绝</span>';
+                        invoiceStatusBadge = '<span class="badge" style="background:#ef4444;color:white;">已拒绝</span>';
                     }
                     
                     return `
@@ -3718,7 +3722,19 @@ export function renderProjects() {
                                 </td>
                             ` : ''}
                                 <td>${p.projectNumber || '-'}</td>
-                                <td>${p.projectName}${invoiceStatusBadge || ''}</td>
+                                <td>${p.projectName}</td>
+                                <td style="min-width: 96px;">${invoiceStatusBadge || '<span style="color:#9ca3af;font-size:12px;">未申请</span>'}</td>
+                                <td style="min-width: 88px;">
+                                    <span class="badge ${
+                                        paymentStatus === 'paid' 
+                                            ? 'badge-success' 
+                                            : paymentStatus === 'partially_paid' 
+                                                ? 'badge-warning' 
+                                                : 'badge-danger'
+                                    }">
+                                        ${paymentStatusText[paymentStatus] || paymentStatus}
+                                    </span>
+                                </td>
                                 <td>${p.customerId?.name || p.clientName}</td>
                                 <td>${getBusinessTypeText(p.businessType)}</td>
                                 ${showAmount ? `<td>¥${p.projectAmount?.toLocaleString()}</td>` : ''}
@@ -4097,7 +4113,9 @@ export function exportProjects() {
         );
         return baseRow;
     });
-    const header = showAmount ? ['项目编号','项目名称','客户','业务类型','项目金额','交付时间','状态'] : ['项目编号','项目名称','客户','业务类型','交付时间','状态'];
+    const header = showAmount 
+        ? ['项目编号','项目名称','开票状态','回款状态','客户','业务类型','项目金额','交付时间','状态']
+        : ['项目编号','项目名称','开票状态','回款状态','客户','业务类型','交付时间','状态'];
     exportToCSV([header, ...rows], 'projects.csv');
 }
 
