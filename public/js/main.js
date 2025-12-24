@@ -7,7 +7,7 @@ import { showSection, closeModal } from './core/ui.js';
 
 // 导入业务模块
 import { initAuth, checkAuth, showLogin, showMainApp, logout, bindAuthEvents, submitForcePasswordChange } from './modules/auth.js';
-import { loadDashboard, navigateFromDashboardCard } from './modules/dashboard.js';
+import { loadDashboard, navigateFromDashboardCard, initDashboard, updateDashboardMonth } from './modules/dashboard.js';
 import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectPayments, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, exportProjectContract, createProject, updateProject, setLayoutCost, addMember, showAddMemberModal, showPaymentModalForProject, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter, showAddMemberModalForCreate, addMemberForCreate, removeCreateProjectMember, toggleCreateTranslatorFields, filterCreateUsersByRole, validateCreateMemberLayoutCost, updateCreateProjectMembersList, onMemberRoleChange, onCreateMemberRoleChange, toggleTranslatorFields, filterUsersByRole, validateAddMemberLayoutCost, closeAddMemberModalAndReturnToCreate, addInlineMemberForCreate, onInlineCreateMemberRoleChange, filterInlineCreateUsersByRole, validateInlineCreateMemberLayoutCost, quickRequestInvoice, viewProjectInvoiceRequest, selectAllProjectsForInvoice, deselectAllProjectsForInvoice, batchRequestInvoice, toggleProjectForInvoice, toggleSelectAllProjects } from './modules/project.js';
 import { loadCustomers, searchCustomers, showCreateCustomerModal, showCreateCustomerModalFromProject, editCustomer, deleteCustomer, createCustomer, updateCustomer, updateCustomerInfo, addCustomerContactRow, removeCustomerContactRow } from './modules/customer.js';
 import { loadKPI, exportKPI, generateMonthlyKPI, showEvaluateModal, submitEvaluation } from './modules/kpi.js';
@@ -63,6 +63,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function onLoginSuccess() {
     // 根据权限显示/隐藏导航按钮
     updateNavVisibility();
+    
+    // 初始化 dashboard（设置月份选择器的默认值）
+    initDashboard();
     
     // 加载初始数据（根据当前 section）
     const activeSection = document.querySelector('.section.active');
@@ -333,7 +336,12 @@ function updateReportMonth() {
 
 // ============ 路由表：Section 切换与进入时加载（收敛 loadSectionData / showSection 调用） ============
 const SECTION_ROUTES = {
-    dashboard: { onEnter: async () => loadDashboard() },
+    dashboard: { 
+        onEnter: async () => {
+            initDashboard(); // 确保月份选择器有默认值
+            await loadDashboard();
+        }
+    },
     projects: { onEnter: async () => loadProjects() },
     customers: { onEnter: async () => loadCustomers() },
     kpi: { 

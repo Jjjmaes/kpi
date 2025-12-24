@@ -49,6 +49,60 @@ function destroyCharts() {
 // 防止重复加载的标记
 let isLoadingDashboard = false;
 
+// 初始化 dashboard：设置月份选择器的默认值
+export function initDashboard() {
+    const yearSelect = document.getElementById('dashboardYear');
+    const monthSelect = document.getElementById('dashboardMonthSelect');
+    const hiddenInput = document.getElementById('dashboardMonth');
+    
+    if (!yearSelect || !monthSelect || !hiddenInput) return;
+    
+    // 生成年份选项（从2020年到当前年份+1年）
+    const currentYear = new Date().getFullYear();
+    const startYear = 2020;
+    yearSelect.innerHTML = '';
+    for (let year = currentYear + 1; year >= startYear; year--) {
+        const option = document.createElement('option');
+        option.value = year;
+        option.textContent = year + '年';
+        yearSelect.appendChild(option);
+    }
+    
+    // 生成月份选项
+    monthSelect.innerHTML = '';
+    for (let month = 1; month <= 12; month++) {
+        const option = document.createElement('option');
+        option.value = String(month).padStart(2, '0');
+        option.textContent = month + '月';
+        monthSelect.appendChild(option);
+    }
+    
+    // 设置当前月份为默认值
+    const now = new Date();
+    yearSelect.value = now.getFullYear();
+    monthSelect.value = String(now.getMonth() + 1).padStart(2, '0');
+    updateDashboardMonth();
+    
+    console.log('[Dashboard] 初始化月份选择器完成');
+}
+
+// 更新 dashboard 月份隐藏输入框并触发加载
+export function updateDashboardMonth() {
+    const yearSelect = document.getElementById('dashboardYear');
+    const monthSelect = document.getElementById('dashboardMonthSelect');
+    const hiddenInput = document.getElementById('dashboardMonth');
+    
+    if (!yearSelect || !monthSelect || !hiddenInput) return;
+    
+    const year = yearSelect.value;
+    const month = monthSelect.value;
+    if (year && month) {
+        hiddenInput.value = `${year}-${month}`;
+        // 触发 loadDashboard
+        loadDashboard();
+    }
+}
+
 export async function loadDashboard() {
     // 如果正在加载，直接返回
     if (isLoadingDashboard) {
@@ -60,7 +114,9 @@ export async function loadDashboard() {
         isLoadingDashboard = true;
         destroyCharts();
 
-        const month = document.getElementById('dashboardMonth')?.value || new Date().toISOString().slice(0, 7);
+        // 从隐藏输入框获取月份值，如果没有则使用当前月份
+        const dashboardMonthInput = document.getElementById('dashboardMonth');
+        const month = dashboardMonthInput?.value || new Date().toISOString().slice(0, 7);
         const status = document.getElementById('dashboardStatus')?.value || '';
         const businessType = document.getElementById('dashboardBusinessType')?.value || '';
         // 注意：role 参数用于手动筛选特定角色的数据（如果有筛选器）
