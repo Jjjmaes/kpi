@@ -269,7 +269,7 @@ class ProjectService {
     if (!members || !Array.isArray(members) || members.length === 0) {
       return [];
     }
-
+    
     const isSales = creator.roles.includes('sales') || creator.roles.includes('part_time_sales');
     const isAdmin = creator.roles.includes('admin');
     
@@ -330,7 +330,10 @@ class ProjectService {
         userId,
         role,
         translatorType: role === 'translator' ? (translatorType || 'mtpe') : undefined,
-        wordRatio: role === 'translator' ? (wordRatio || 1.0) : 1.0,
+        // 翻译、审校、排版都支持占比；其他角色默认占比为1
+        wordRatio: ['translator', 'reviewer', 'layout'].includes(role)
+          ? (typeof wordRatio === 'number' ? (wordRatio || 1.0) : 1.0)
+          : 1.0,
         ratio_locked: ratio
       };
     });
@@ -569,7 +572,10 @@ class ProjectService {
       role,
       employmentType,
       translatorType: role === 'translator' ? (translatorType || 'mtpe') : undefined,
-      wordRatio: role === 'translator' ? (wordRatio || 1.0) : 1.0,
+      // 翻译、审校、排版都支持占比；其他角色默认占比为1
+      wordRatio: ['translator', 'reviewer', 'layout'].includes(role)
+        ? (typeof wordRatio === 'number' ? (wordRatio || 1.0) : 1.0)
+        : 1.0,
       ratio_locked: ratio,
       partTimeFee: role === 'part_time_translator'
         ? (parseFloat(partTimeFee || 0) || 0)

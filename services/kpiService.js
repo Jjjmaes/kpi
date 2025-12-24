@@ -272,11 +272,13 @@ async function generateMonthlyKPIRecords(month, force = false) {
                 formula: `成交额(${totalAmount}) - 公司应收(${companyReceivable}) = 应收金额(${receivableAmount})；应收金额(${receivableAmount}) - 税费(${taxAmount.toFixed(2)}) = 返还佣金(${commission})`
               };
             } else if (member.role === 'layout') {
-              // 兼职排版：直接使用排版费用作为KPI（按金额计算）
+              // 兼职排版：使用总排版费用按占比分摊给多人
               const layoutCost = project.partTimeLayout?.layoutCost || 0;
+              const layoutRatio = member.wordRatio || 1.0;
+              const layoutKPI = layoutCost * layoutRatio;
               kpiResult = {
-                kpiValue: layoutCost,
-                formula: `排版费用：${layoutCost}元`
+                kpiValue: layoutKPI,
+                formula: `排版总费用(${layoutCost}元) × 占比(${layoutRatio}) = 排版KPI(${layoutKPI.toFixed(2)})`
               };
             } else if (member.role === 'part_time_translator') {
               // 兼职翻译：直接使用成员上记录的兼职费用作为KPI
@@ -1020,9 +1022,11 @@ async function calculateProjectsRealtimeBatch(projectIds) {
         };
       } else if (member.role === 'layout') {
         const layoutCost = project.partTimeLayout?.layoutCost || 0;
+        const layoutRatio = member.wordRatio || 1.0;
+        const layoutKPI = layoutCost * layoutRatio;
         kpiResult = {
-          kpiValue: layoutCost,
-          formula: `排版费用：${layoutCost}元`
+          kpiValue: layoutKPI,
+          formula: `排版总费用(${layoutCost}元) × 占比(${layoutRatio}) = 排版KPI(${layoutKPI.toFixed(2)})`
         };
       } else if (member.role === 'part_time_translator') {
         const fee = member.partTimeFee || 0;

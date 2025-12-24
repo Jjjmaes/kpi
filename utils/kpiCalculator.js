@@ -26,13 +26,14 @@ function calculateTranslatorDeepEdit(projectAmount, ratio, wordRatio, completion
 }
 
 /**
- * 计算审校KPI
+ * 计算审校KPI（支持占比）
  * @param {Number} projectAmount - 项目金额
  * @param {Number} ratio - 审校系数
+ * @param {Number} wordRatio - 占比（多人审校时使用）
  * @param {Number} completionFactor - 完成系数
  */
-function calculateReviewer(projectAmount, ratio, completionFactor) {
-  return projectAmount * ratio * completionFactor;
+function calculateReviewer(projectAmount, ratio, wordRatio, completionFactor) {
+  return projectAmount * ratio * wordRatio * completionFactor;
 }
 
 /**
@@ -106,8 +107,8 @@ function calculateKPIByRole(params) {
       break;
 
     case 'reviewer':
-      kpiValue = calculateReviewer(projectAmount, ratio, completionFactor);
-      formula = `项目金额(${projectAmount}) × 审校系数(${ratio}) × 完成系数(${completionFactor})`;
+      kpiValue = calculateReviewer(projectAmount, ratio, wordRatio, completionFactor);
+      formula = `项目金额(${projectAmount}) × 审校系数(${ratio}) × 占比(${wordRatio}) × 完成系数(${completionFactor})`;
       break;
 
     case 'pm':

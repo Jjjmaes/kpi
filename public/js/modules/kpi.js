@@ -211,21 +211,31 @@ export async function loadKPI() {
             let totalDisplay = '';
             if (partTimeRolesForUser.length > 0 && fullTimeRolesForUser.length === 0) {
                 // 纯兼职：显示“本月兼职费用合计（元）”
-                totalDisplay = `<strong>本月兼职费用合计：¥${partTimeTotalForUser.toLocaleString()} 元</strong>`;
+                totalDisplay = `本月兼职费用合计：¥${partTimeTotalForUser.toLocaleString()} 元`;
             } else if (partTimeRolesForUser.length === 0 && fullTimeRolesForUser.length > 0) {
                 // 纯专职：显示KPI分值
-                totalDisplay = `<strong>总计：${fullTimeTotalForUser.toLocaleString()} 分</strong>`;
+                totalDisplay = `总计：${fullTimeTotalForUser.toLocaleString()} 分`;
             } else if (partTimeRolesForUser.length > 0 && fullTimeRolesForUser.length > 0) {
                 // 既有专职又有兼职，分行展示
-                totalDisplay = `<strong>兼职：¥${partTimeTotalForUser.toLocaleString()} 元；专职：${fullTimeTotalForUser.toLocaleString()} 分</strong>`;
+                totalDisplay = `兼职：¥${partTimeTotalForUser.toLocaleString()} 元；专职：${fullTimeTotalForUser.toLocaleString()} 分`;
             } else {
                 // 默认回退（无记录）
-                totalDisplay = `<strong>总计：0 分</strong>`;
+                totalDisplay = `总计：0 分`;
             }
+
+            const summaryHtml = `
+                <div style="margin: 10px 0 16px; padding: 10px 14px; background: #f1f5f9; border-radius: 6px; border: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+                    <div style="font-weight: 600; color: #0f172a;">人员总计</div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 14px; font-weight: 600; color: #0f766e;">${totalDisplay}</div>
+                        <div style="font-size: 12px; color: #64748b;">（兼职岗位按元计算，专职岗位按分计算）</div>
+                    </div>
+                </div>
+            `;
 
             const html = `
                 <h3>${user?.name || ''} 的KPI - ${month}</h3>
-                <p>${totalDisplay} <br><small style="color:#666;">（兼职岗位按元计算，专职岗位按分计算）</small></p>
+                ${summaryHtml}
                 ${(!data.data?.records || data.data.records.length === 0) && (!data.data?.monthlyRoleKPIs || data.data?.monthlyRoleKPIs.length === 0) ? '<p>该月暂无KPI记录</p>' : `
                     <table>
                         <thead>

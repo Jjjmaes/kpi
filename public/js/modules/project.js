@@ -535,20 +535,22 @@ export async function showCreateProjectModal() {
                         </div>
                     </div>
                     
-                    <!-- 翻译相关字段 -->
+                    <!-- 翻译相关字段（仅翻译需要选择类型） -->
                     <div id="inlineCreateTranslatorTypeGroup" style="display: none; margin-bottom: 10px;">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                            <div>
-                                <label style="font-size: 12px; display: block; margin-bottom: 4px;">翻译类型</label>
-                                <select id="inlineCreateTranslatorType" style="width: 100%; padding: 6px;">
-                                    <option value="mtpe">MTPE</option>
-                                    <option value="deepedit">深度编辑</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label style="font-size: 12px; display: block; margin-bottom: 4px;">字数占比 (0-1)</label>
-                                <input type="number" id="inlineCreateWordRatio" step="0.01" min="0" max="1" value="1.0" style="width: 100%; padding: 6px;">
-                            </div>
+                        <div>
+                            <label style="font-size: 12px; display: block; margin-bottom: 4px;">翻译类型</label>
+                            <select id="inlineCreateTranslatorType" style="width: 100%; padding: 6px;">
+                                <option value="mtpe">MTPE</option>
+                                <option value="deepedit">深度编辑</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- 占比字段（翻译、审校、排版共用） -->
+                    <div id="inlineCreateWordRatioGroup" style="display: none; margin-bottom: 10px;">
+                        <div>
+                            <label style="font-size: 12px; display: block; margin-bottom: 4px;">占比 (0-1)</label>
+                            <input type="number" id="inlineCreateWordRatio" step="0.01" min="0" max="1" value="1.0" style="width: 100%; padding: 6px;">
                         </div>
                     </div>
                     
@@ -678,6 +680,9 @@ export async function createProject(e) {
         };
         if (m.role === 'translator') {
             member.translatorType = m.translatorType || 'mtpe';
+            member.wordRatio = m.wordRatio || 1.0;
+        } else if (m.role === 'reviewer' || m.role === 'layout') {
+            // 审校与排版也支持占比
             member.wordRatio = m.wordRatio || 1.0;
         }
         if (m.role === 'layout' && m.layoutCost) {
@@ -1995,8 +2000,10 @@ async function initInlineCreateMemberForm() {
     
     // 隐藏所有额外字段
     const translatorGroup = document.getElementById('inlineCreateTranslatorTypeGroup');
+    const wordRatioGroup = document.getElementById('inlineCreateWordRatioGroup');
     const layoutCostGroup = document.getElementById('inlineCreateLayoutCostGroup');
     if (translatorGroup) translatorGroup.style.display = 'none';
+    if (wordRatioGroup) wordRatioGroup.style.display = 'none';
     if (layoutCostGroup) layoutCostGroup.style.display = 'none';
 }
 
@@ -2004,16 +2011,20 @@ async function initInlineCreateMemberForm() {
 export function onInlineCreateMemberRoleChange() {
     const role = document.getElementById('inlineCreateMemberRole')?.value;
     const translatorGroup = document.getElementById('inlineCreateTranslatorTypeGroup');
+    const wordRatioGroup = document.getElementById('inlineCreateWordRatioGroup');
     const layoutCostGroup = document.getElementById('inlineCreateLayoutCostGroup');
     
     if (role === 'translator') {
         if (translatorGroup) translatorGroup.style.display = 'block';
+        if (wordRatioGroup) wordRatioGroup.style.display = 'block';
         if (layoutCostGroup) layoutCostGroup.style.display = 'none';
-    } else if (role === 'layout') {
+    } else if (role === 'reviewer' || role === 'layout') {
         if (translatorGroup) translatorGroup.style.display = 'none';
-        if (layoutCostGroup) layoutCostGroup.style.display = 'block';
+        if (wordRatioGroup) wordRatioGroup.style.display = 'block';
+        if (layoutCostGroup) layoutCostGroup.style.display = role === 'layout' ? 'block' : 'none';
     } else {
         if (translatorGroup) translatorGroup.style.display = 'none';
+        if (wordRatioGroup) wordRatioGroup.style.display = 'none';
         if (layoutCostGroup) layoutCostGroup.style.display = 'none';
     }
     
@@ -2216,14 +2227,20 @@ export function updateCreateProjectMembersList() {
         const userName = user ? user.name : '未知用户';
         const roleText = roleTextMap[member.role] || member.role;
         const employmentLabel = (member.employmentType || user?.employmentType) === 'part_time' ? '兼职' : '专职';
-    let extraInfo = '';
-    if (member.role === 'translator') {
-      extraInfo = ` (${member.translatorType === 'mtpe' ? 'MTPE' : '深度编辑'}, 占比: ${(member.wordRatio || 1.0).toFixed(2)})`;
-    } else if (member.role === 'layout' && member.layoutCost) {
-      extraInfo = ` (费用: ¥${member.layoutCost.toFixed(2)})`;
-    } else if (member.role === 'part_time_translator' && member.partTimeFee) {
-      extraInfo = ` (兼职翻译费用: ¥${member.partTimeFee.toFixed(2)})`;
-    }
+        let extraInfo = '';
+        if (member.role === 'translator') {
+            extraInfo = ` (${member.translatorType === 'mtpe' ? 'MTPE' : '深度编辑'}, 占比: ${(member.wordRatio || 1.0).toFixed(2)})`;
+        } else if (member.role === 'reviewer' && typeof member.wordRatio === 'number') {
+            extraInfo = ` (占比: ${(member.wordRatio || 1.0).toFixed(2)})`;
+        } else if (member.role === 'layout') {
+            const ratioText = typeof member.wordRatio === 'number' ? `，占比: ${(member.wordRatio || 1.0).toFixed(2)}` : '';
+            const costText = member.layoutCost ? `费用: ¥${member.layoutCost.toFixed(2)}` : '';
+            if (costText || ratioText) {
+                extraInfo = ` (${[costText, ratioText].filter(Boolean).join('，')})`;
+            }
+        } else if (member.role === 'part_time_translator' && member.partTimeFee) {
+            extraInfo = ` (兼职翻译费用: ¥${member.partTimeFee.toFixed(2)})`;
+        }
         return `
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; background: white; border-radius: 4px; margin-bottom: 8px;">
                 <span style="font-size: 13px;">
@@ -2718,9 +2735,16 @@ export function toggleTranslatorFields() {
         if (wordRatioGroup) wordRatioGroup.style.display = 'block';
         if (layoutCostGroup) layoutCostGroup.style.display = 'none';
         if (partTimeFeeGroup) partTimeFeeGroup.style.display = 'none';
-    } else if (role === 'layout') {
+    } else if (role === 'reviewer') {
+        // 审校：只需要占比，不需要翻译类型和排版费用
         if (translatorGroup) translatorGroup.style.display = 'none';
-        if (wordRatioGroup) wordRatioGroup.style.display = 'none';
+        if (wordRatioGroup) wordRatioGroup.style.display = 'block';
+        if (layoutCostGroup) layoutCostGroup.style.display = 'none';
+        if (partTimeFeeGroup) partTimeFeeGroup.style.display = 'none';
+    } else if (role === 'layout') {
+        // 排版：需要占比 + 排版费用
+        if (translatorGroup) translatorGroup.style.display = 'none';
+        if (wordRatioGroup) wordRatioGroup.style.display = 'block';
         if (layoutCostGroup) layoutCostGroup.style.display = 'block';
         if (partTimeFeeGroup) partTimeFeeGroup.style.display = 'none';
     } else if (role === 'part_time_translator') {
@@ -2924,6 +2948,23 @@ export async function addMember(e, projectId) {
             method: 'POST',
             body: JSON.stringify(payload)
         });
+
+        // 先处理非 2xx 情况，展示后端返回的错误信息
+        if (!res.ok) {
+            let errorMessage = '添加失败';
+            try {
+                const errorData = await res.json();
+                if (errorData && (errorData.message || errorData.error || errorData.msg)) {
+                    errorMessage = errorData.message || errorData.error || errorData.msg;
+                }
+            } catch (parseErr) {
+                // 如果解析失败，就退回到状态码提示
+                errorMessage = `添加失败 (HTTP ${res.status})`;
+            }
+            showToast(errorMessage, 'error');
+            return;
+        }
+
         const data = await res.json();
         if (!data.success) {
             showToast(data.message || '添加失败', 'error');
