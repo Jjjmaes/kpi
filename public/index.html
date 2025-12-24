@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>语家 KPI SYSTEM</title>
+    <title>语家 OA 系统</title>
     <link rel="stylesheet" href="styles.css">
     <script>
         // 异步加载 Chart.js，使用多个备用 CDN 源
@@ -50,7 +50,7 @@
     <!-- 登录页面 -->
     <div id="loginSection" class="container">
         <div class="login-form section active">
-            <h2 id="loginTitle">语家 KPI SYSTEM</h2>
+            <h2 id="loginTitle">语家 OA 系统</h2>
             <form id="loginForm">
                 <div class="form-group">
                     <label>用户名</label>
@@ -70,7 +70,7 @@
     <div id="mainApp" style="display: none;">
         <div class="container">
             <header>
-                <h1 id="mainTitle">KPI绩效管理系统</h1>
+                <h1 id="mainTitle">语家 OA 办公自动化系统</h1>
                 <div class="user-info">
                     <div class="user-meta">
                         <span id="userName"></span>
@@ -122,6 +122,7 @@
                 <button data-click="showSection('languages')" id="languagesBtn" style="display:none;">语种管理</button>
                 <button data-click="showSection('permissions')" id="permissionsBtn" style="display:none;">权限配置</button>
                 <button data-click="showSection('backup')" id="backupBtn" style="display:none;">数据备份</button>
+                <button data-click="showSection('help')" style="margin-left: auto;">帮助文档</button>
             </nav>
 
             <!-- 业务看板 -->
@@ -878,6 +879,11 @@
                 <h2>个人中心</h2>
                 <div id="profileAlert"></div>
                 <div id="profileContent"></div>
+            </div>
+
+            <!-- 帮助文档 -->
+            <div id="help" class="section">
+                <!-- 内容由 help.js 动态生成 -->
             </div>
         </div>
     </div>

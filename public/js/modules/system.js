@@ -24,7 +24,7 @@ export async function loadOrgInfo() {
         console.warn('加载机构信息失败，使用默认值', e);
     }
     const baseName = orgInfo.companyName || '语家';
-    const titleText = `${baseName} KPI SYSTEM`;
+    const titleText = `${baseName} OA 系统`;
     document.title = titleText;
     const loginTitle = document.getElementById('loginTitle');
     if (loginTitle) loginTitle.textContent = titleText;

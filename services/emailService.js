@@ -19,7 +19,7 @@ class EmailService {
   init() {
     const apiKey = process.env.RESEND_API_KEY;
     const fromEmail = process.env.RESEND_FROM_EMAIL;
-    const fromName = process.env.RESEND_FROM_NAME || '语家 KPI 系统';
+    const fromName = process.env.RESEND_FROM_NAME || '语家 OA 系统';
     const emailEnabled = process.env.EMAIL_ENABLED !== 'false'; // 默认启用
 
     if (!apiKey || !fromEmail) {
@@ -92,7 +92,7 @@ class EmailService {
                     <!-- Header -->
                     <tr>
                         <td style="padding: 30px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px 8px 0 0; text-align: center;">
-                            <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 600;">语家 KPI 系统</h1>
+                            <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 600;">语家 OA 系统</h1>
                         </td>
                     </tr>
                     
@@ -150,7 +150,7 @@ class EmailService {
                     <tr>
                         <td style="padding: 20px 30px; background-color: #f8f9fa; border-radius: 0 0 8px 8px; text-align: center; border-top: 1px solid #e9ecef;">
                             <p style="margin: 0; font-size: 12px; color: #999999;">此邮件由系统自动发送，请勿回复。</p>
-                            <p style="margin: 5px 0 0 0; font-size: 12px; color: #999999;">© ${new Date().getFullYear()} 语家 KPI 系统</p>
+                            <p style="margin: 5px 0 0 0; font-size: 12px; color: #999999;">© ${new Date().getFullYear()} 语家 OA 系统</p>
                         </td>
                     </tr>
                 </table>
@@ -192,7 +192,7 @@ ${assigner ? `分配人：${assigner.name || assigner.username || '-'}` : ''}
 
 ---
 此邮件由系统自动发送，请勿回复。
-© ${new Date().getFullYear()} 语家 KPI 系统
+© ${new Date().getFullYear()} 语家 OA 系统
     `.trim();
   }
 
@@ -476,7 +476,7 @@ ${expenseRequest.items && expenseRequest.items.length > 0
 
 请登录系统查看详情并审批。
 
-${new Date().getFullYear()} 语家 KPI 系统
+${new Date().getFullYear()} 语家 OA 系统
     `.trim();
   }
 

@@ -1,4 +1,4 @@
-# 语家 KPI 系统 - 完整操作说明文档
+# 语家 OA 系统 - 完整操作说明文档
 
 ## 目录
 
@@ -21,7 +21,7 @@
 
 ### 系统简介
 
-语家 KPI 系统是一个专为翻译公司设计的绩效管理系统，支持项目全生命周期管理、自动化 KPI 计算、财务管理和邮件通知等功能。
+语家 OA 系统是一个专为翻译公司设计的办公自动化系统，支持项目全生命周期管理、自动化 KPI 计算、财务管理、行政办公和邮件通知等功能。
 
 ### 主要功能模块
 
@@ -760,7 +760,7 @@
 ```env
 RESEND_API_KEY=re_xxxxxxxxxxxxx
 RESEND_FROM_EMAIL=noreply@yourdomain.com
-RESEND_FROM_NAME=语家 KPI 系统
+RESEND_FROM_NAME=语家 OA 系统
 APP_URL=http://localhost:3000
 EMAIL_ENABLED=true
 ```

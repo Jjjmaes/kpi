@@ -24,6 +24,7 @@ import { loadExpressList, renderExpressList, switchExpressTab, showCreateExpress
 import { loadOfficeSupplyList, renderOfficeSupplyList, switchOfficeSupplyTab, showCreateOfficeSupplyModal, createOfficeSupplyRequest, addOfficeSupplyItem, viewOfficeSupply, approveOfficeSupply, rejectOfficeSupply, markPurchased, submitMarkPurchased, cancelOfficeSupply, updatePendingCount as updateOfficeSupplyPendingCount, prevOfficeSupplyPage, nextOfficeSupplyPage, jumpOfficeSupplyPage, updateOfficeSupplyUI } from './modules/officeSupply.js';
 import { loadSealList, renderSealList, switchSealTab, showCreateSealModal, createSealRequest, viewSeal, processSeal, returnSeal, submitReturnSeal, cancelSeal, updatePendingCount as updateSealPendingCount, prevSealPage, nextSealPage, jumpSealPage, updateSealUI } from './modules/seal.js';
 import { loadExpenseList, renderExpenseList, switchExpenseTab, showCreateExpenseModal, createExpenseRequest, addExpenseItem, viewExpense, approveExpense, rejectExpense, markExpensePaid, cancelExpense, updateExpensePendingCount, prevExpensePage, nextExpensePage, jumpExpensePage, updateExpenseUI } from './modules/expense.js';
+import { loadHelpList, showHelpTopic, searchHelp, showContextHelp } from './modules/help.js';
 
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', async () => {
@@ -454,6 +455,9 @@ const SECTION_ROUTES = {
             const isFullTime = user?.employmentType === 'full_time';
             createBtn.style.display = isFullTime ? 'inline-block' : 'none';
         }
+    } },
+    help: { onEnter: async () => {
+        loadHelpList();
     } }
 };
 
@@ -774,6 +778,12 @@ const ACTIONS = Object.freeze({
     prevExpensePage: () => prevExpensePage(),
     nextExpensePage: () => nextExpensePage(),
     jumpExpensePage: (page, total) => jumpExpensePage(page, total),
+
+    // Help Documentation (帮助文档)
+    loadHelpList: () => loadHelpList(),
+    showHelpTopic: (topic) => showHelpTopic(topic),
+    searchHelp: () => searchHelp(),
+    showContextHelp: (section) => showContextHelp(section),
 
     // 特殊：阻止冒泡（兼容历史 HTML：event.stopPropagation()）
     "__event_stopPropagation__": (event) => {

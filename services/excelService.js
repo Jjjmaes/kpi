@@ -13,7 +13,7 @@ const KpiConfig = require('../models/KpiConfig');
 async function exportMonthlyKPISheet(month) {
   const workbook = new ExcelJS.Workbook();
   // 设置默认字体以支持中文
-  workbook.creator = 'KPI系统';
+  workbook.creator = '语家 OA 系统';
   const worksheet = workbook.addWorksheet(`KPI分值表-${month}`);
   // 设置默认字体为支持中文的字体
   worksheet.properties.defaultRowHeight = 20;
@@ -191,7 +191,7 @@ async function exportMonthlyKPISheet(month) {
 async function exportUserKPIDetail(userId, month = null, canViewAmount = true) {
   const workbook = new ExcelJS.Workbook();
   // 设置默认字体以支持中文
-  workbook.creator = 'KPI系统';
+  workbook.creator = '语家 OA 系统';
   const user = await User.findById(userId);
   
   if (!user) {
@@ -286,7 +286,7 @@ async function exportUserKPIDetail(userId, month = null, canViewAmount = true) {
  */
 async function exportProjectQuotation(projectId = null, projectData = null) {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'KPI系统';
+  workbook.creator = '语家 OA 系统';
   
   let project, customer, creator;
   

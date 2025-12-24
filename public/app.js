@@ -630,7 +630,7 @@ function getPermission(permission) {
 const isFinanceRole = () => currentRole === 'admin' || currentRole === 'finance';
 const isSalesRole = () => currentRole === 'sales' || currentRole === 'part_time_sales';
 let orgInfo = {
-    companyName: 'KPI绩效管理系统',
+    companyName: '语家 OA 系统',
     companyAddress: '',
     companyContact: '',
     companyPhone: '',
@@ -672,7 +672,7 @@ async function loadOrgInfo() {
     } catch (e) {
         console.warn('加载机构信息失败，使用默认值', e);
     }
-    const titleText = `${orgInfo.companyName || 'KPI'}绩效管理系统`;
+    const titleText = `${orgInfo.companyName || '语家 OA'}系统`;
     document.title = titleText;
     const loginTitle = document.getElementById('loginTitle');
     if (loginTitle) loginTitle.textContent = 'KPI SYSTEM';

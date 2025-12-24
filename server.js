@@ -128,7 +128,7 @@ app.use('/api/expense', expenseRoutes);
 
 // 健康检查
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', message: 'KPI System is running' });
+    res.json({ status: 'ok', message: 'OA System is running' });
 });
 
 // 获取服务器信息（用于前端自动配置API地址）

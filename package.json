@@ -1,7 +1,7 @@
 {
   "name": "kpi-system",
   "version": "1.0.0",
-  "description": "KPI绩效管理系统 - 翻译公司自动化KPI计算系统",
+  "description": "语家 OA 办公自动化系统 - 专为翻译公司设计的OA系统，支持项目管理、KPI计算、财务管理、行政办公等功能",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
