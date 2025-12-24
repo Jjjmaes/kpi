@@ -3400,6 +3400,8 @@ export async function loadProjects(filters = {}) {
         if (filters.businessType) params.append('businessType', filters.businessType);
         if (filters.role) params.append('role', filters.role);
         if (filters.customerId) params.append('customerId', filters.customerId);
+        if (filters.invoiceStatus) params.append('invoiceStatus', filters.invoiceStatus);
+        if (filters.paymentStatus) params.append('paymentStatus', filters.paymentStatus);
         
         const url = `/projects${params.toString() ? '?' + params.toString() : ''}`;
         console.log('[Projects] loadProjects request', { url, filters });
@@ -3477,39 +3479,50 @@ export function renderProjects() {
     const status = document.getElementById('projectStatusFilter')?.value || '';
     const biz = document.getElementById('projectBizFilter')?.value || '';
     const cust = document.getElementById('projectCustomerFilter')?.value || '';
+    const invoiceStatusFilter = document.getElementById('projectInvoiceStatusFilter')?.value || '';
+    const paymentStatusFilter = document.getElementById('projectPaymentStatusFilter')?.value || '';
     const pageSizeSel = document.getElementById('projectPageSize');
     const pageSize = pageSizeSel ? parseInt(pageSizeSel.value, 10) || 10 : 10;
+    const invoiceStatuses = state.projectInvoiceRequestStatuses || {};
     const now = new Date();
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     
-    // 如果用户手动修改了筛选条件（状态、业务类型、月份），需要重新从后端加载数据
+    // 如果用户手动修改了筛选条件（状态、业务类型、月份、开票/回款状态），需要重新从后端加载数据
     if (state.backendFilters) {
         const currentFilters = {};
         if (state.projectFilterMonth) currentFilters.month = state.projectFilterMonth;
         if (status) currentFilters.status = status;
         if (biz) currentFilters.businessType = biz;
+        if (invoiceStatusFilter) currentFilters.invoiceStatus = invoiceStatusFilter;
+        if (paymentStatusFilter) currentFilters.paymentStatus = paymentStatusFilter;
         
         // 检查筛选条件是否与后端不一致
-        // 需要比较：月份、状态、业务类型是否都一致
+        // 需要比较：月份、状态、业务类型、开票/回款状态 是否都一致
         const monthMatch = !state.projectFilterMonth ? !state.backendFilters.month : (state.backendFilters.month === state.projectFilterMonth);
         const statusMatch = !status ? !state.backendFilters.status : (state.backendFilters.status === status);
         const bizMatch = !biz ? !state.backendFilters.businessType : (state.backendFilters.businessType === biz);
-        const filtersMatch = monthMatch && statusMatch && bizMatch;
+        const invoiceMatch = !invoiceStatusFilter ? !state.backendFilters.invoiceStatus : (state.backendFilters.invoiceStatus === invoiceStatusFilter);
+        const paymentMatch = !paymentStatusFilter ? !state.backendFilters.paymentStatus : (state.backendFilters.paymentStatus === paymentStatusFilter);
+        const filtersMatch = monthMatch && statusMatch && bizMatch && invoiceMatch && paymentMatch;
         
         if (!filtersMatch) {
             console.log('[Projects] Filters changed, reloading from backend', {
                 oldFilters: state.backendFilters,
-                newFilters: { month: state.projectFilterMonth, status, businessType: biz },
+                newFilters: { month: state.projectFilterMonth, status, businessType: biz, invoiceStatus: invoiceStatusFilter, paymentStatus: paymentStatusFilter },
                 monthMatch,
                 statusMatch,
-                bizMatch
+                bizMatch,
+                invoiceMatch,
+                paymentMatch
             });
             // 重新从后端加载数据，而不是在前端已筛选的结果上继续筛选
             const newFilters = {};
             if (state.projectFilterMonth) newFilters.month = state.projectFilterMonth;
             if (status) newFilters.status = status;
             if (biz) newFilters.businessType = biz;
+            if (invoiceStatusFilter) newFilters.invoiceStatus = invoiceStatusFilter;
+            if (paymentStatusFilter) newFilters.paymentStatus = paymentStatusFilter;
             // 重置页码
             state.projectPage = 1;
             // 重新加载项目
@@ -3527,6 +3540,8 @@ export function renderProjects() {
         const matchesWarning = warningIdSet ? warningIdSet.has(projectId) : true;
         const matchesSearch = !search || (p.projectName?.toLowerCase().includes(search)) || (p.projectNumber?.toLowerCase().includes(search)) || ((p.customerId?.name || p.customerId?.shortName || p.clientName || '').toLowerCase().includes(search));
         const matchesCust = !cust || (p.customerId && (p.customerId._id === cust || p.customerId === cust));
+        const invoiceStatus = invoiceStatuses[projectId]?.status || 'none';
+        const paymentStatus = p.payment?.paymentStatus || 'unpaid';
         
         // 如果后端已经筛选过，前端只做搜索和客户过滤
         if (backendFiltered) {
@@ -3544,7 +3559,9 @@ export function renderProjects() {
                 p.completedAt &&
                 new Date(p.completedAt) >= sevenDaysAgo
             );
-            return matchesWarning && matchesSearch && matchesCust && matchesDeliveryOverdue && matchesRecentCompleted;
+            const matchesInvoice = !invoiceStatusFilter || invoiceStatus === invoiceStatusFilter;
+            const matchesPayment = !paymentStatusFilter || paymentStatus === paymentStatusFilter;
+            return matchesWarning && matchesSearch && matchesCust && matchesDeliveryOverdue && matchesRecentCompleted && matchesInvoice && matchesPayment;
         }
         
         // 否则，前端需要完整过滤（兼容手动筛选）
@@ -3583,7 +3600,9 @@ export function renderProjects() {
             p.completedAt &&
             new Date(p.completedAt) >= sevenDaysAgo
         );
-        return matchesWarning && matchesSearch && matchesStatus && matchesBiz && matchesCust && matchesMonth && matchesDeliveryOverdue && matchesRecentCompleted;
+        const matchesInvoice = !invoiceStatusFilter || invoiceStatus === invoiceStatusFilter;
+        const matchesPayment = !paymentStatusFilter || paymentStatus === paymentStatusFilter;
+        return matchesWarning && matchesSearch && matchesStatus && matchesBiz && matchesCust && matchesMonth && matchesDeliveryOverdue && matchesRecentCompleted && matchesInvoice && matchesPayment;
     });
 
     console.log('[Projects] renderProjects filters:', {

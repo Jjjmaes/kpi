@@ -115,7 +115,7 @@ router.delete('/:id', authorize('admin', 'sales', 'part_time_sales'), asyncHandl
 
 // 获取项目列表
 router.get('/', asyncHandler(async (req, res) => {
-    const { month, status, businessType, role, customerId } = req.query;
+    const { month, status, businessType, role, customerId, paymentStatus } = req.query;
     let query = {};
     
     // 基于当前角色的权限进行数据过滤
@@ -164,6 +164,7 @@ router.get('/', asyncHandler(async (req, res) => {
     }
     if (businessType) query.businessType = businessType;
     if (customerId) query.customerId = customerId;
+    if (paymentStatus) query['payment.paymentStatus'] = paymentStatus;
 
     // 角色筛选：如果指定了 role，按该角色进一步限定项目范围
     if (role) {

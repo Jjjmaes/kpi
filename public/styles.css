@@ -162,7 +162,7 @@ h2 {
 .projects-filters input,
 .projects-filters select {
     padding: 8px;
-    min-width: 180px;
+    min-width: 150px;
     width: auto;
 }
 
