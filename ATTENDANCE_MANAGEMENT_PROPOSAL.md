@@ -58,7 +58,9 @@
   days: Number,              // 请假天数（自动计算）
   reason: String,            // 请假原因
   status: String,            // 状态：pending（待审批）、approved（已批准）、rejected（已拒绝）、cancelled（已取消）
-  approvedBy: ObjectId,     // 审批人（综合岗）
+  assignedTo: ObjectId,      // 分配的审批人（综合岗，自动分配）
+  assignedAt: Date,          // 分配时间
+  approvedBy: ObjectId,      // 实际审批人（可能与assignedTo不同，如果允许其他人审批）
   approvedAt: Date,          // 审批时间
   rejectReason: String,      // 拒绝原因
   attachments: [String],     // 附件URL（如病假条等）
@@ -123,6 +125,13 @@
   workHoursPerDay: Number,     // 每日标准工作小时数（如：8）
   enableLocationCheck: Boolean, // 是否启用位置打卡
   locationRange: Number,       // 位置范围（米，如：500）
+  // 审批分配策略（默认与现有系统保持一致）
+  approvalAssignment: {
+    strategy: String,           // 默认：'all_notify'（全部通知，与现有报销系统一致）
+                                // 可选：'round_robin' | 'random' | 'load_balance' | 'specified'
+    defaultApprovers: [ObjectId], // 指定审批人列表（strategy='specified'时使用）
+    fallbackRole: String        // 回退角色（如：'admin'）
+  },
   updatedBy: ObjectId,        // 最后更新人
   updatedAt: Date            // 最后更新时间
 }
@@ -168,11 +177,17 @@
   4. 审批通过后自动更新考勤记录
 
 #### 3.2.2 请假审批
-- **审批人**：综合岗
+- **审批人**：综合岗和管理员（与现有报销系统保持一致）
+- **分配机制**：**全部通知**（默认，与现有系统一致）
+  - 申请创建时通知所有有审批权限的人
+  - 任何有权限的人都可以审批
+  - 谁先审批算谁的（通过状态检查防止重复审批）
+  - 记录实际审批人（`approvedBy`）
 - **功能**：
-  - 查看待审批列表
+  - 查看待审批列表（所有待审批的申请）
   - 批准/拒绝申请
   - 填写审批意见
+  - 状态检查防止重复审批
 
 #### 3.2.3 请假统计
 - 个人请假统计（年假余额、已用天数等）
