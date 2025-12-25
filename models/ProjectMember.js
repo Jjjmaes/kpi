@@ -45,6 +45,24 @@ const projectMemberSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
+  // 成员接受状态
+  acceptanceStatus: {
+    type: String,
+    enum: ['pending', 'accepted', 'rejected'],
+    default: 'accepted', // 历史数据兼容：默认为 accepted
+    required: true
+  },
+  // 接受/拒绝时间
+  acceptanceAt: {
+    type: Date,
+    default: null
+  },
+  // 拒绝原因（可选）
+  rejectionReason: {
+    type: String,
+    maxlength: 500,
+    default: null
+  },
   createdAt: {
     type: Date,
     default: Date.now

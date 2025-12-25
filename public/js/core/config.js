@@ -21,6 +21,7 @@ export const ROLE_NAMES = {
     translator: '翻译',
     reviewer: '审校',
     layout: '排版',
+    part_time_translator: '兼职翻译',
     admin_staff: '综合岗'
 };
 

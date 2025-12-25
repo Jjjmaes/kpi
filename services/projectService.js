@@ -566,6 +566,24 @@ class ProjectService {
       ratio = 0;
     }
 
+    // 判断是否为生产人员（需要确认的角色）
+    const productionRoles = ['translator', 'reviewer', 'layout', 'part_time_translator'];
+    const isProductionRole = productionRoles.includes(role);
+
+    // 设置接受状态：生产人员需要确认，管理人员自动接受
+    const acceptanceStatus = isProductionRole ? 'pending' : 'accepted';
+
+    // 初始化 memberAcceptance（如果不存在）
+    if (!project.memberAcceptance) {
+      project.memberAcceptance = {
+        requiresConfirmation: false,
+        pendingCount: 0,
+        acceptedCount: 0,
+        rejectedCount: 0,
+        allConfirmed: false
+      };
+    }
+
     const member = await ProjectMember.create({
       projectId,
       userId,
@@ -579,16 +597,36 @@ class ProjectService {
       ratio_locked: ratio,
       partTimeFee: role === 'part_time_translator'
         ? (parseFloat(partTimeFee || 0) || 0)
-        : 0
+        : 0,
+      acceptanceStatus: acceptanceStatus
     });
 
-    // 如果项目状态是pending，添加成员后自动变为scheduled
-    if (project.status === 'pending') {
-      project.status = 'scheduled';
-      project.startedAt = new Date();
-      project.completionChecks.hasMembers = true;
-      await project.save();
+    // 更新项目确认状态和项目状态
+    if (isProductionRole) {
+      // 生产人员需要确认
+      project.memberAcceptance.pendingCount += 1;
+      project.memberAcceptance.requiresConfirmation = true;
+      
+      // 状态变更：如果项目是 pending，变为 scheduled
+      if (project.status === 'pending') {
+        project.status = 'scheduled';
+        project.startedAt = new Date();
+        project.completionChecks.hasMembers = true;
+      }
+      // 如果已经是 scheduled，保持 scheduled（通过 pendingCount > 0 表示待确认）
+    } else {
+      // 非生产人员自动接受
+      project.memberAcceptance.acceptedCount += 1;
+      
+      // 如果项目是 pending，变为 scheduled
+      if (project.status === 'pending') {
+        project.status = 'scheduled';
+        project.startedAt = new Date();
+        project.completionChecks.hasMembers = true;
+      }
     }
+
+    await project.save();
 
     // 发送站内通知
     try {
@@ -596,13 +634,17 @@ class ProjectService {
         'pm': '项目经理',
         'translator': '翻译',
         'reviewer': '审校',
-        'layout': '排版'
+        'layout': '排版',
+        'part_time_translator': '兼职翻译'
       };
       const roleName = roleNames[role] || role;
+      const message = isProductionRole
+        ? `您已被分配到项目"${project.projectName}"，角色：${roleName}，请确认是否接受`
+        : `您已被分配到项目"${project.projectName}"，角色：${roleName}`;
       await createNotification({
         userId: userId,
         type: NotificationTypes.PROJECT_ASSIGNED,
-        message: `您已被分配到项目"${project.projectName}"，角色：${roleName}`,
+        message: message,
         link: `#projects`
       });
     } catch (notifError) {
@@ -974,6 +1016,28 @@ class ProjectService {
     
     if (members.length === 0) {
       throw new AppError('项目尚未分配成员，无法完成', 400, 'NO_MEMBERS');
+    }
+
+    // 检查生产人员是否都已接受（如果有生产人员）
+    const productionRoles = ['translator', 'reviewer', 'layout', 'part_time_translator'];
+    const productionMembers = members.filter(m => productionRoles.includes(m.role));
+    
+    if (productionMembers.length > 0) {
+      const allAccepted = productionMembers.every(m => 
+        m.acceptanceStatus === 'accepted'
+      );
+      if (!allAccepted) {
+        const pendingMembers = productionMembers.filter(m => m.acceptanceStatus === 'pending');
+        const rejectedMembers = productionMembers.filter(m => m.acceptanceStatus === 'rejected');
+        let errorMsg = '请确保所有生产人员都已接受项目分配';
+        if (pendingMembers.length > 0) {
+          errorMsg += `，还有 ${pendingMembers.length} 人待确认`;
+        }
+        if (rejectedMembers.length > 0) {
+          errorMsg += `，还有 ${rejectedMembers.length} 人已拒绝`;
+        }
+        throw new AppError(errorMsg, 400, 'MEMBERS_NOT_ALL_ACCEPTED');
+      }
     }
 
     if (!project.projectAmount || project.projectAmount <= 0) {

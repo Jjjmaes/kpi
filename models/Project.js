@@ -154,6 +154,37 @@ const projectSchema = new mongoose.Schema({
     hasQualityInfo: { type: Boolean, default: false },
     allCapacitySubmitted: { type: Boolean, default: false }
   },
+  // 成员确认状态追踪
+  memberAcceptance: {
+    // 是否需要成员确认（生产人员需要，PM/销售不需要）
+    requiresConfirmation: {
+      type: Boolean,
+      default: false
+    },
+    // 待确认成员数量
+    pendingCount: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    // 已接受成员数量
+    acceptedCount: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    // 已拒绝成员数量
+    rejectedCount: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    // 所有成员是否都已确认（接受或拒绝）
+    allConfirmed: {
+      type: Boolean,
+      default: false
+    }
+  },
   // 返修次数
   revisionCount: {
     type: Number,

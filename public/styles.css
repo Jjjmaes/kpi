@@ -564,6 +564,73 @@ tr:hover {
     gap: 10px;
 }
 
+/* 成员状态样式 */
+.member-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+.status-badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    display: inline-block;
+}
+
+.status-badge.pending {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffc107;
+}
+
+.status-badge.accepted {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #28a745;
+}
+
+.status-badge.rejected {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #dc3545;
+}
+
+/* 接受/拒绝按钮样式 */
+.member-status .btn-small {
+    padding: 4px 12px;
+    font-size: 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: none;
+}
+
+.member-status .btn-small.btn-success {
+    background: #10b981;
+    color: white;
+}
+
+.member-status .btn-small.btn-success:hover {
+    background: #059669;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
+}
+
+.member-status .btn-small.btn-danger {
+    background: #dc2626;
+    color: white;
+}
+
+.member-status .btn-small.btn-danger:hover {
+    background: #b91c1c;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(220, 38, 38, 0.3);
+}
+
 .badge {
     display: inline-block;
     padding: 4px 8px;

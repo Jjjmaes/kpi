@@ -1552,13 +1552,33 @@ export async function viewProject(projectId) {
                         <h4>项目成员</h4>
                         ${canManageMembers ? `<button class="btn-small" data-click="showAddMemberModal('${projectId}')">添加成员</button>` : ''}
                     </div>
+                    ${project.memberAcceptance && project.memberAcceptance.pendingCount > 0 ? `
+                        <div style="padding: 10px; background: #fff3cd; border-radius: 4px; margin-bottom: 10px; border-left: 4px solid #ffc107;">
+                            <strong>确认进度：</strong>
+                            <span>已接受 ${project.memberAcceptance.acceptedCount || 0} 人，</span>
+                            <span>待确认 ${project.memberAcceptance.pendingCount || 0} 人</span>
+                            ${project.memberAcceptance.rejectedCount > 0 ? `<span style="color: #dc2626;">，已拒绝 ${project.memberAcceptance.rejectedCount} 人</span>` : ''}
+                        </div>
+                    ` : ''}
                     <div id="projectMembers" style="display: flex; flex-direction: column; gap: 10px;">
                         ${project.members && Array.isArray(project.members) && project.members.length > 0 ? project.members.map(m => {
                             // 处理 userId 可能是对象或字符串的情况
                             const userName = (m.userId && typeof m.userId === 'object') ? m.userId.name : (m.userId || '未知用户');
+                            const memberUserId = (m.userId && typeof m.userId === 'object') ? m.userId._id : m.userId;
+                            const currentUserId = state.currentUser?._id;
+                            const isCurrentUserMember = memberUserId && currentUserId && 
+                                memberUserId.toString() === currentUserId.toString();
                             const memberEmploymentType = m.employmentType || (m.userId && typeof m.userId === 'object' ? m.userId.employmentType : null);
                             const employmentLabel = memberEmploymentType === 'part_time' ? '兼职' : '专职';
                             const roleText = getRoleText(m.role);
+                            const productionRoles = ['translator', 'reviewer', 'layout', 'part_time_translator'];
+                            const isProductionRole = productionRoles.includes(m.role);
+                            // 兼容历史数据：如果没有 acceptanceStatus，生产人员默认为 pending，管理人员默认为 accepted
+                            let acceptanceStatus = m.acceptanceStatus;
+                            if (!acceptanceStatus) {
+                                acceptanceStatus = isProductionRole ? 'pending' : 'accepted';
+                            }
+                            
                             let extraInfo = '';
                             if (m.role === 'translator') {
                                 extraInfo = ` (${m.translatorType === 'deepedit' ? '深度编辑' : 'MTPE'}, 字数占比: ${((m.wordRatio || 1) * 100).toFixed(0)}%)`;
@@ -1567,11 +1587,56 @@ export async function viewProject(projectId) {
                             } else if (m.role === 'part_time_translator' && m.partTimeFee) {
                                 extraInfo = ` (兼职翻译费用: ¥${(m.partTimeFee || 0).toFixed(2)})`;
                             }
-                            return `<div class="member-item" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #f5f5f5; border-radius: 4px;">
-                                <div class="member-info" style="flex: 1;">
-                                    <strong>${userName}</strong> - ${roleText} <span style="color:#6b7280;">(${employmentLabel})</span>${extraInfo}
+                            
+                            // 生成状态显示HTML
+                            let statusHtml = '';
+                            if (isProductionRole) {
+                                if (acceptanceStatus === 'pending') {
+                                    if (isCurrentUserMember) {
+                                        // 当前用户的待确认成员，显示接受/拒绝按钮
+                                        statusHtml = `
+                                            <div class="member-status" style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                                <span class="status-badge pending">⏳ 待确认</span>
+                                                <button class="btn-small btn-success" data-click="acceptMember('${projectId}', '${m._id}')" style="background: #10b981; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">接受</button>
+                                                <button class="btn-small btn-danger" data-click="rejectMember('${projectId}', '${m._id}')" style="background: #dc2626; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">拒绝</button>
+                                            </div>
+                                        `;
+                                    } else {
+                                        // 其他用户的待确认成员，只显示状态
+                                        statusHtml = `
+                                            <div class="member-status" style="margin-top: 8px;">
+                                                <span class="status-badge pending">⏳ 待确认</span>
+                                            </div>
+                                        `;
+                                    }
+                                } else if (acceptanceStatus === 'accepted') {
+                                    const acceptedDate = m.acceptanceAt ? new Date(m.acceptanceAt).toLocaleDateString('zh-CN') : '';
+                                    statusHtml = `
+                                        <div class="member-status" style="margin-top: 8px;">
+                                            <span class="status-badge accepted">✅ 已接受</span>
+                                            ${acceptedDate ? `<small style="color: #6b7280; font-size: 11px; margin-left: 8px;">${acceptedDate}</small>` : ''}
+                                        </div>
+                                    `;
+                                } else if (acceptanceStatus === 'rejected') {
+                                    const rejectedDate = m.acceptanceAt ? new Date(m.acceptanceAt).toLocaleDateString('zh-CN') : '';
+                                    statusHtml = `
+                                        <div class="member-status" style="margin-top: 8px;">
+                                            <span class="status-badge rejected">❌ 已拒绝</span>
+                                            ${rejectedDate ? `<small style="color: #6b7280; font-size: 11px; margin-left: 8px;">${rejectedDate}</small>` : ''}
+                                            ${m.rejectionReason ? `<div style="color: #dc2626; font-size: 11px; margin-top: 4px;">原因：${m.rejectionReason}</div>` : ''}
+                                        </div>
+                                    `;
+                                }
+                            }
+                            
+                            return `<div class="member-item" style="display: flex; flex-direction: column; padding: 10px; background: #f5f5f5; border-radius: 4px; margin-bottom: 8px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div class="member-info" style="flex: 1;">
+                                        <strong>${userName}</strong> - ${roleText} <span style="color:#6b7280;">(${employmentLabel})</span>${extraInfo}
+                                    </div>
+                                    ${canManageMembers ? `<div class="member-actions" style="margin-left: 10px;"><button class="btn-small btn-danger" data-click="deleteMember('${projectId}', '${m._id}')" style="background: #dc2626; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">删除</button></div>` : ''}
                                 </div>
-                                ${canManageMembers ? `<div class="member-actions" style="margin-left: 10px;"><button class="btn-small btn-danger" data-click="deleteMember('${projectId}', '${m._id}')" style="background: #dc2626; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">删除</button></div>` : ''}
+                                ${statusHtml}
                             </div>`;
                         }).join('') : '<p style="color: #999; font-size: 14px;">暂无成员</p>'}
                     </div>
@@ -3391,8 +3456,104 @@ export async function loadRealtimeKPI(projectId) {
 
 // --- 核心逻辑 ---
 
+// 初始化角色筛选器
+export async function initProjectRoleFilter() {
+    const roleFilter = document.getElementById('projectRoleFilter');
+    if (!roleFilter) {
+        console.warn('[Projects] 角色筛选器元素不存在');
+        return;
+    }
+    
+    const userRoles = state.currentUser?.roles || [];
+    console.log('[Projects] 初始化角色筛选器，用户角色:', userRoles);
+    
+    // 从API获取项目成员角色列表（包含角色名称）
+    let roleNameMap = {};
+    try {
+        const res = await apiFetch('/roles/project-member-roles');
+        const data = await res.json();
+        if (data.success && Array.isArray(data.data)) {
+            // 构建角色代码到名称的映射
+            data.data.forEach(role => {
+                if (role.isActive && role.canBeProjectMember) {
+                    roleNameMap[role.code] = role.name;
+                }
+            });
+        }
+    } catch (err) {
+        console.error('[Projects] 加载角色列表失败，使用默认名称:', err);
+        // 如果API失败，使用默认的角色名称映射
+        const { ROLE_NAMES } = await import('../core/config.js');
+        roleNameMap = ROLE_NAMES;
+    }
+    
+    // 只显示用户实际拥有的角色，并且是项目成员相关的角色
+    const projectMemberRoles = Object.keys(roleNameMap);
+    const availableRoles = userRoles.filter(role => projectMemberRoles.includes(role));
+    
+    console.log('[Projects] 可用角色:', availableRoles);
+    
+    // 如果用户只有一个角色或没有相关角色，隐藏筛选器
+    if (availableRoles.length <= 1) {
+        roleFilter.style.display = 'none';
+        console.log('[Projects] 用户只有一个或没有相关角色，隐藏筛选器');
+        return;
+    }
+    
+    // 显示筛选器并填充选项
+    roleFilter.style.display = '';
+    roleFilter.innerHTML = '<option value="">全部角色</option>';
+    
+    availableRoles.forEach(role => {
+        const option = document.createElement('option');
+        option.value = role;
+        option.textContent = roleNameMap[role] || role;
+        roleFilter.appendChild(option);
+    });
+    
+    console.log('[Projects] 角色筛选器已初始化，选项数:', availableRoles.length);
+}
+
+// 处理角色筛选器变化
+export async function onProjectRoleFilterChange() {
+    const roleFilter = document.getElementById('projectRoleFilter');
+    if (!roleFilter) return;
+    
+    const selectedRole = roleFilter.value || '';
+    state.projectPage = 1; // 重置页码
+    
+    // 重新加载项目，包含角色筛选
+    const filters = {};
+    const status = document.getElementById('projectStatusFilter')?.value || '';
+    const biz = document.getElementById('projectBizFilter')?.value || '';
+    const invoiceStatusFilter = document.getElementById('projectInvoiceStatusFilter')?.value || '';
+    const paymentStatusFilter = document.getElementById('projectPaymentStatusFilter')?.value || '';
+    
+    if (state.projectFilterMonth) filters.month = state.projectFilterMonth;
+    if (status) filters.status = status;
+    if (biz) filters.businessType = biz;
+    if (invoiceStatusFilter) filters.invoiceStatus = invoiceStatusFilter;
+    if (paymentStatusFilter) filters.paymentStatus = paymentStatusFilter;
+    if (selectedRole) filters.role = selectedRole;
+    
+    await loadProjects(filters);
+}
+
 export async function loadProjects(filters = {}) {
     try {
+        // 如果没有明确指定角色筛选，且用户有多个项目成员相关角色，根据当前角色自动过滤
+        if (!filters.role) {
+            const userRoles = state.currentUser?.roles || [];
+            const projectMemberRoles = ['translator', 'reviewer', 'layout', 'part_time_translator', 'pm', 'sales', 'part_time_sales'];
+            const availableRoles = userRoles.filter(role => projectMemberRoles.includes(role));
+            
+            // 如果用户有多个项目成员相关角色，且当前角色是其中之一，自动使用当前角色过滤
+            if (availableRoles.length > 1 && state.currentRole && availableRoles.includes(state.currentRole)) {
+                filters.role = state.currentRole;
+                console.log('[Projects] 自动根据当前角色过滤项目:', state.currentRole);
+            }
+        }
+        
         // 构建查询参数
         const params = new URLSearchParams();
         if (filters.month) params.append('month', filters.month);
@@ -3488,7 +3649,27 @@ export function renderProjects() {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     
-    // 如果用户手动修改了筛选条件（状态、业务类型、月份、开票/回款状态），需要重新从后端加载数据
+    // 读取角色筛选器
+    let roleFilter = document.getElementById('projectRoleFilter')?.value || '';
+    
+    // 如果角色筛选器为空，且用户有多个项目成员相关角色，根据当前角色自动设置
+    if (!roleFilter) {
+        const userRoles = state.currentUser?.roles || [];
+        const projectMemberRoles = ['translator', 'reviewer', 'layout', 'part_time_translator', 'pm', 'sales', 'part_time_sales'];
+        const availableRoles = userRoles.filter(role => projectMemberRoles.includes(role));
+        
+        // 如果用户有多个项目成员相关角色，且当前角色是其中之一，自动使用当前角色
+        if (availableRoles.length > 1 && state.currentRole && availableRoles.includes(state.currentRole)) {
+            roleFilter = state.currentRole;
+            // 同步更新筛选器的显示值
+            const roleFilterElement = document.getElementById('projectRoleFilter');
+            if (roleFilterElement) {
+                roleFilterElement.value = state.currentRole;
+            }
+        }
+    }
+    
+    // 如果用户手动修改了筛选条件（状态、业务类型、月份、开票/回款状态、角色），需要重新从后端加载数据
     if (state.backendFilters) {
         const currentFilters = {};
         if (state.projectFilterMonth) currentFilters.month = state.projectFilterMonth;
@@ -3496,15 +3677,17 @@ export function renderProjects() {
         if (biz) currentFilters.businessType = biz;
         if (invoiceStatusFilter) currentFilters.invoiceStatus = invoiceStatusFilter;
         if (paymentStatusFilter) currentFilters.paymentStatus = paymentStatusFilter;
+        if (roleFilter) currentFilters.role = roleFilter;
         
         // 检查筛选条件是否与后端不一致
-        // 需要比较：月份、状态、业务类型、开票/回款状态 是否都一致
+        // 需要比较：月份、状态、业务类型、开票/回款状态、角色 是否都一致
         const monthMatch = !state.projectFilterMonth ? !state.backendFilters.month : (state.backendFilters.month === state.projectFilterMonth);
         const statusMatch = !status ? !state.backendFilters.status : (state.backendFilters.status === status);
         const bizMatch = !biz ? !state.backendFilters.businessType : (state.backendFilters.businessType === biz);
         const invoiceMatch = !invoiceStatusFilter ? !state.backendFilters.invoiceStatus : (state.backendFilters.invoiceStatus === invoiceStatusFilter);
         const paymentMatch = !paymentStatusFilter ? !state.backendFilters.paymentStatus : (state.backendFilters.paymentStatus === paymentStatusFilter);
-        const filtersMatch = monthMatch && statusMatch && bizMatch && invoiceMatch && paymentMatch;
+        const roleMatch = !roleFilter ? !state.backendFilters.role : (state.backendFilters.role === roleFilter);
+        const filtersMatch = monthMatch && statusMatch && bizMatch && invoiceMatch && paymentMatch && roleMatch;
         
         if (!filtersMatch) {
             console.log('[Projects] Filters changed, reloading from backend', {
@@ -3523,6 +3706,7 @@ export function renderProjects() {
             if (biz) newFilters.businessType = biz;
             if (invoiceStatusFilter) newFilters.invoiceStatus = invoiceStatusFilter;
             if (paymentStatusFilter) newFilters.paymentStatus = paymentStatusFilter;
+            if (roleFilter) newFilters.role = roleFilter;
             // 重置页码
             state.projectPage = 1;
             // 重新加载项目
@@ -4222,3 +4406,55 @@ window.showProjectEvaluationsList = async function(projectId) {
 }
 
 // --- 暴露给 Window ---
+
+// 接受项目分配
+export async function acceptMember(projectId, memberId) {
+    try {
+        const res = await apiFetch(`/projects/${projectId}/members/${memberId}/accept`, {
+            method: 'POST'
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+            showToast('已接受项目分配', 'success');
+            // 刷新项目详情
+            await viewProject(projectId);
+        } else {
+            showToast(data.message || '操作失败', 'error');
+        }
+    } catch (error) {
+        console.error('接受项目分配失败:', error);
+        showToast(error.message || '操作失败', 'error');
+    }
+}
+
+// 拒绝项目分配
+export async function rejectMember(projectId, memberId) {
+    // 显示拒绝原因输入弹窗（使用更友好的方式）
+    const reason = prompt('请输入拒绝原因（可选，可直接点击确定跳过）：');
+    if (reason === null) return; // 用户取消
+    
+    try {
+        const res = await apiFetch(`/projects/${projectId}/members/${memberId}/reject`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ reason: reason ? reason.trim() : null })
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+            showToast('已拒绝项目分配', 'success');
+            // 刷新项目详情
+            await viewProject(projectId);
+        } else {
+            showToast(data.message || '操作失败', 'error');
+        }
+    } catch (error) {
+        console.error('拒绝项目分配失败:', error);
+        showToast(error.message || '操作失败', 'error');
+    }
+}

@@ -87,7 +87,8 @@ export function switchRole(newRole) {
         if (!isDashboardActive) {
             loadDashboard(); // 如果不在看板 section，也刷新一下（可能在其他地方需要）
         }
-        loadProjects();
+        // 重新加载项目列表（会根据当前角色自动过滤）
+        loadProjects({});
         loadKPI();
         if (window.hasPermission?.('finance.view') || PERMISSIONS[newRole]?.['finance.view']) {
             loadReceivables();

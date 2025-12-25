@@ -175,8 +175,13 @@ router.get('/', asyncHandler(async (req, res) => {
         const createdProjects = await Project.find({ createdBy: req.user._id }).distinct('_id');
         roleProjectIds = [...new Set([...salesMemberProjects.map(String), ...createdProjects.map(String)])];
       } else {
-        // 其他角色：仅本人作为该角色成员参与的项目
-        const memberProjects = await ProjectMember.find({ userId: req.user._id, role }).distinct('projectId');
+        // 其他角色：仅本人作为该角色成员参与的项目（排除拒绝的成员）
+        // 注意：拒绝的成员不应该显示在项目列表中，因为已经被重新安排
+        const memberProjects = await ProjectMember.find({ 
+          userId: req.user._id, 
+          role,
+          acceptanceStatus: { $ne: 'rejected' } // 排除拒绝的成员
+        }).distinct('projectId');
         roleProjectIds = memberProjects.map(String);
       }
 
@@ -214,7 +219,12 @@ router.get('/', asyncHandler(async (req, res) => {
         const createdProjects = await Project.find({ createdBy: req.user._id }).distinct('_id');
         allowedIds = [...new Set([...salesMemberProjects.map(String), ...createdProjects.map(String)])];
       } else {
-        const memberProjects = await ProjectMember.find({ userId: req.user._id, role }).distinct('projectId');
+        // 排除拒绝的成员
+        const memberProjects = await ProjectMember.find({ 
+          userId: req.user._id, 
+          role,
+          acceptanceStatus: { $ne: 'rejected' } // 排除拒绝的成员
+        }).distinct('projectId');
         allowedIds = memberProjects.map(String);
       }
       if (allowedIds.length > 0) {
@@ -297,66 +307,232 @@ router.get('/:id', asyncHandler(async (req, res) => {
   });
 }));
 
-// 导出项目合同（Word）
-router.get('/:id/contract', authenticate, asyncHandler(async (req, res) => {
-  // 校验访问权限
-  const project = await checkProjectAccess(
-    req.params.id,
-    req.user,
-    req.user.roles
-  );
-
-  // 补充所需字段
-  await project.populate('createdBy', 'name username roles');
-  await project.populate('customerId', 'name shortName contactPerson phone email address');
-  await project.populate('partTimeLayout.layoutAssignedTo', 'name username');
-
-  // 成员列表
-  const members = await ProjectMember.find({ projectId: project._id })
-    .populate('userId', 'name username roles');
-
-  const isAdmin = req.user.roles.includes('admin');
-  const isCreator = project.createdBy && project.createdBy._id && project.createdBy._id.toString() === req.user._id.toString();
-  const isPMMember = members.some(m => m.role === 'pm' && m.userId && m.userId._id && m.userId._id.toString() === req.user._id.toString());
-
-  if (!isAdmin && !isCreator && !isPMMember) {
-    throw new AppError('无权导出合同', 403, 'NO_CONTRACT_PERMISSION');
-  }
-
-  const rawProject = project.toObject();
-
-  // 脱敏联系人：仅管理员或创建人+销售角色可查看明文
-  const currentRole = req.currentRole || (req.user.roles[0] || null);
-  const isSalesRole = currentRole === 'sales' || currentRole === 'part_time_sales';
-  const canViewContact = isAdmin || (isCreator && isSalesRole);
-  const projectData = { ...rawProject };
-  if (!canViewContact) {
-    if (projectData.contactInfo) {
-      projectData.contactInfo = {
-        name: '*****',
-        phone: '*****',
-        email: '*****',
-        position: ''
+// 接受项目分配（必须在所有 /:id 路由之前，确保正确匹配）
+router.post('/:id/members/:memberId/accept', 
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { id: projectId, memberId } = req.params;
+    const userId = req.user._id;
+    
+    // 验证成员是否属于当前用户
+    const member = await ProjectMember.findOne({
+      _id: memberId,
+      projectId: projectId,
+      userId: userId,
+      acceptanceStatus: 'pending'
+    });
+    
+    if (!member) {
+      throw new AppError('成员记录不存在或已处理', 404, 'MEMBER_NOT_FOUND');
+    }
+    
+    // 获取项目信息
+    const project = await Project.findById(projectId);
+    if (!project) {
+      throw new AppError('项目不存在', 404, 'PROJECT_NOT_FOUND');
+    }
+    
+    // 更新成员状态
+    member.acceptanceStatus = 'accepted';
+    member.acceptanceAt = new Date();
+    await member.save();
+    
+    // 更新项目确认状态
+    if (!project.memberAcceptance) {
+      project.memberAcceptance = {
+        requiresConfirmation: true,
+        pendingCount: 0,
+        acceptedCount: 0,
+        rejectedCount: 0,
+        allConfirmed: false
       };
     }
-    if (projectData.customerId) {
-      projectData.customerId = {
-        ...projectData.customerId,
-        contactPerson: '*****',
-        phone: '*****',
-        email: '*****'
+    
+    project.memberAcceptance.pendingCount = Math.max(0, project.memberAcceptance.pendingCount - 1);
+    project.memberAcceptance.acceptedCount += 1;
+    
+    // 检查是否所有生产人员都已接受
+    const productionRoles = ['translator', 'reviewer', 'layout', 'part_time_translator'];
+    const productionMembers = await ProjectMember.find({
+      projectId: projectId,
+      role: { $in: productionRoles }
+    });
+    
+    // 按角色分组，检查每个角色是否都有有效的（非拒绝的）成员
+    const membersByRole = {};
+    productionMembers.forEach(m => {
+      if (!membersByRole[m.role]) {
+        membersByRole[m.role] = [];
+      }
+      membersByRole[m.role].push(m);
+    });
+    
+    // 检查每个角色是否都有有效的成员且都已接受
+    let allRolesHaveValidMembers = true;
+    let allValidMembersAccepted = true;
+    
+    for (const role of productionRoles) {
+      const roleMembers = membersByRole[role] || [];
+      // 只检查有效的成员（排除已拒绝的成员）
+      const validMembers = roleMembers.filter(m => m.acceptanceStatus !== 'rejected');
+      
+      if (validMembers.length === 0) {
+        // 如果该角色没有任何有效成员（可能都被拒绝了，且没有重新安排），需要等待
+        // 但如果该角色本来就不需要成员（比如某些项目可能不需要审校），则跳过
+        // 这里假设如果曾经分配过该角色，就需要有有效成员
+        if (roleMembers.length > 0) {
+          // 曾经分配过该角色，但现在没有有效成员，说明需要重新安排
+          allRolesHaveValidMembers = false;
+          break;
+        }
+        // 如果从未分配过该角色，跳过检查
+        continue;
+      }
+      
+      // 检查该角色的所有有效成员是否都已接受
+      const allAccepted = validMembers.every(m => m.acceptanceStatus === 'accepted');
+      if (!allAccepted) {
+        allValidMembersAccepted = false;
+        break;
+      }
+    }
+    
+    // 如果所有角色都有有效成员且都已接受，且没有待确认的成员，项目可以开始
+    if (allRolesHaveValidMembers && allValidMembersAccepted && project.memberAcceptance.pendingCount === 0) {
+      project.status = 'in_progress';
+      project.startedAt = project.startedAt || new Date();
+      project.memberAcceptance.allConfirmed = true;
+    } else {
+      // 还有成员未确认或需要重新安排，保持 scheduled
+      project.status = 'scheduled';
+    }
+    
+    await project.save();
+    
+    // 通知项目经理（包括项目创建者和所有PM）
+    const roleNames = {
+      'translator': '翻译',
+      'reviewer': '审校',
+      'layout': '排版',
+      'part_time_translator': '兼职翻译'
+    };
+    const roleName = roleNames[member.role] || member.role;
+    
+    // 获取所有PM成员
+    const pmMembers = await ProjectMember.find({ 
+      projectId: projectId, 
+      role: 'pm' 
+    }).distinct('userId');
+    
+    // 通知项目创建者和所有PM
+    const notificationRecipients = [
+      project.createdBy.toString(),
+      ...pmMembers.map(String)
+    ].filter((id, index, arr) => arr.indexOf(id) === index); // 去重
+    
+    await createNotificationsForUsers(
+      notificationRecipients,
+      NotificationTypes.MEMBER_ACCEPTED,
+      `${req.user.name}已接受项目"${project.projectName}"的${roleName}任务`,
+      `#projects/${projectId}`
+    );
+    
+    res.json({
+      success: true,
+      message: '已接受项目分配',
+      data: { member, project }
+    });
+  })
+);
+
+// 拒绝项目分配
+router.post('/:id/members/:memberId/reject',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { id: projectId, memberId } = req.params;
+    const { reason } = req.body;
+    const userId = req.user._id;
+    
+    // 验证成员是否属于当前用户
+    const member = await ProjectMember.findOne({
+      _id: memberId,
+      projectId: projectId,
+      userId: userId,
+      acceptanceStatus: 'pending'
+    });
+    
+    if (!member) {
+      throw new AppError('成员记录不存在或已处理', 404, 'MEMBER_NOT_FOUND');
+    }
+    
+    // 获取项目信息
+    const project = await Project.findById(projectId);
+    if (!project) {
+      throw new AppError('项目不存在', 404, 'PROJECT_NOT_FOUND');
+    }
+    
+    // 更新成员状态
+    member.acceptanceStatus = 'rejected';
+    member.acceptanceAt = new Date();
+    member.rejectionReason = reason ? reason.trim().substring(0, 500) : null;
+    await member.save();
+    
+    // 更新项目确认状态
+    if (!project.memberAcceptance) {
+      project.memberAcceptance = {
+        requiresConfirmation: true,
+        pendingCount: 0,
+        acceptedCount: 0,
+        rejectedCount: 0,
+        allConfirmed: false
       };
     }
-  }
-
-  const buffer = await generateProjectContract(projectData, members);
-  const filenameBase = project.projectNumber || project.projectName || 'Contract';
-  const filenameSafe = filenameBase.replace(/[^\w\u4e00-\u9fa5-]/g, '_');
-
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filenameSafe)}.docx"`);
-  res.send(buffer);
-}));
+    
+    project.memberAcceptance.pendingCount = Math.max(0, project.memberAcceptance.pendingCount - 1);
+    project.memberAcceptance.rejectedCount += 1;
+    project.memberAcceptance.allConfirmed = false;
+    
+    // 项目保持 scheduled，等待重新安排
+    project.status = 'scheduled';
+    
+    await project.save();
+    
+    // 通知项目经理（包括项目创建者和所有PM）
+    const roleNames = {
+      'translator': '翻译',
+      'reviewer': '审校',
+      'layout': '排版',
+      'part_time_translator': '兼职翻译'
+    };
+    const roleName = roleNames[member.role] || member.role;
+    const reasonText = reason ? `，原因：${reason.trim().substring(0, 200)}` : '';
+    
+    // 获取所有PM成员
+    const pmMembers = await ProjectMember.find({ 
+      projectId: projectId, 
+      role: 'pm' 
+    }).distinct('userId');
+    
+    // 通知项目创建者和所有PM
+    const notificationRecipients = [
+      project.createdBy.toString(),
+      ...pmMembers.map(String)
+    ].filter((id, index, arr) => arr.indexOf(id) === index); // 去重
+    
+    await createNotificationsForUsers(
+      notificationRecipients,
+      NotificationTypes.MEMBER_REJECTED,
+      `${req.user.name}拒绝了项目"${project.projectName}"的${roleName}任务${reasonText}`,
+      `#projects/${projectId}`
+    );
+    
+    res.json({
+      success: true,
+      message: '已拒绝项目分配',
+      data: { member, project }
+    });
+  })
+);
 
 // 添加项目成员
 router.post('/:id/add-member', asyncHandler(async (req, res) => {

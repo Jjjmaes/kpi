@@ -8,7 +8,7 @@ import { showSection, closeModal } from './core/ui.js';
 // 导入业务模块
 import { initAuth, checkAuth, showLogin, showMainApp, logout, bindAuthEvents, submitForcePasswordChange } from './modules/auth.js';
 import { loadDashboard, navigateFromDashboardCard, initDashboard, updateDashboardMonth } from './modules/dashboard.js';
-import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectPayments, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, exportProjectContract, createProject, updateProject, setLayoutCost, addMember, showAddMemberModal, showPaymentModalForProject, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter, showAddMemberModalForCreate, addMemberForCreate, removeCreateProjectMember, toggleCreateTranslatorFields, filterCreateUsersByRole, validateCreateMemberLayoutCost, updateCreateProjectMembersList, onMemberRoleChange, onCreateMemberRoleChange, toggleTranslatorFields, filterUsersByRole, validateAddMemberLayoutCost, closeAddMemberModalAndReturnToCreate, addInlineMemberForCreate, onInlineCreateMemberRoleChange, filterInlineCreateUsersByRole, validateInlineCreateMemberLayoutCost, quickRequestInvoice, viewProjectInvoiceRequest, selectAllProjectsForInvoice, deselectAllProjectsForInvoice, batchRequestInvoice, toggleProjectForInvoice, toggleSelectAllProjects } from './modules/project.js';
+import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectPayments, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, acceptMember, rejectMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, exportProjectContract, createProject, updateProject, setLayoutCost, addMember, showAddMemberModal, showPaymentModalForProject, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter, showAddMemberModalForCreate, addMemberForCreate, removeCreateProjectMember, toggleCreateTranslatorFields, filterCreateUsersByRole, validateCreateMemberLayoutCost, updateCreateProjectMembersList, onMemberRoleChange, onCreateMemberRoleChange, toggleTranslatorFields, filterUsersByRole, validateAddMemberLayoutCost, closeAddMemberModalAndReturnToCreate, addInlineMemberForCreate, onInlineCreateMemberRoleChange, filterInlineCreateUsersByRole, validateInlineCreateMemberLayoutCost, quickRequestInvoice, viewProjectInvoiceRequest, selectAllProjectsForInvoice, deselectAllProjectsForInvoice, batchRequestInvoice, toggleProjectForInvoice, toggleSelectAllProjects, initProjectRoleFilter, onProjectRoleFilterChange } from './modules/project.js';
 import { loadCustomers, searchCustomers, showCreateCustomerModal, showCreateCustomerModalFromProject, editCustomer, deleteCustomer, createCustomer, updateCustomer, updateCustomerInfo, addCustomerContactRow, removeCustomerContactRow } from './modules/customer.js';
 import { loadKPI, exportKPI, generateMonthlyKPI, showEvaluateModal, submitEvaluation } from './modules/kpi.js';
 import { loadReceivables, renderReceivables, exportReceivables, loadInvoiceProjects, renderInvoiceProjects, addInvoice, addInvoiceForProject, loadPaymentRecordsProjects, renderPaymentRecordsProjects, addPaymentRecord, addPaymentRecordForProject, loadPaymentRecords, clearPaymentRecordFilter, showFinanceSection, loadFinanceSummary, exportFinanceSummary, loadPendingKpi, reviewKpiRecord, rejectKpiRecord, batchReviewKpiRecords, selectAllPendingKpi, deselectAllPendingKpi, toggleSelectAllPendingKpi, loadReconciliation, exportReconciliation, togglePaymentRecords, toggleInvoiceRecords, clearPaymentRecordsFilters, removePaymentRecord, jumpReceivablePage, prevReceivablePage, nextReceivablePage, jumpPaymentRecordsProjectsPage, prevPaymentRecordsProjectsPage, nextPaymentRecordsProjectsPage, jumpInvoiceProjectsPage, prevInvoiceProjectsPage, nextInvoiceProjectsPage, backToFinanceNav, showProjectSelector, filterProjectSelector, selectProject, loadInvoiceRequests, renderInvoiceRequests, loadMyInvoiceRequests, renderMyInvoiceRequests, viewInvoiceRequest, approveInvoiceRequest, rejectInvoiceRequest, deleteInvoiceRequest, showCreateInvoiceRequestModal, jumpInvoiceRequestPage, prevInvoiceRequestPage, nextInvoiceRequestPage, jumpMyInvoiceRequestPage, prevMyInvoiceRequestPage, nextMyInvoiceRequestPage, handlePaymentMethodChange } from './modules/finance.js';
@@ -342,7 +342,14 @@ const SECTION_ROUTES = {
             await loadDashboard();
         }
     },
-    projects: { onEnter: async () => loadProjects() },
+    projects: { 
+        onEnter: async () => {
+            // 初始化角色筛选器（异步）
+            await initProjectRoleFilter();
+            // 加载项目列表（会根据当前角色自动过滤）
+            loadProjects({});
+        }
+    },
     customers: { onEnter: async () => loadCustomers() },
     kpi: { 
         onEnter: async () => {
@@ -530,6 +537,9 @@ const ACTIONS = Object.freeze({
     setComplaint: (id) => setComplaint(id),
     finishProject: (id) => finishProject(id),
     deleteMember: (projectId, memberId) => deleteMember(projectId, memberId),
+    acceptMember: (projectId, memberId) => acceptMember(projectId, memberId),
+    rejectMember: (projectId, memberId) => rejectMember(projectId, memberId),
+    onProjectRoleFilterChange: () => onProjectRoleFilterChange(),
     exportProjectQuotation: (id) => exportProjectQuotation(id),
     exportProjectContract: (id) => exportProjectContract(id),
     showSetLayoutCostModal: (projectId) => showSetLayoutCostModal(projectId),

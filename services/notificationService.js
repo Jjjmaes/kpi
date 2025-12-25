@@ -57,6 +57,8 @@ async function createNotificationsForUsers(userIds, type, message, link = null, 
  */
 const NotificationTypes = {
   PROJECT_ASSIGNED: 'project_assigned',      // 项目分配
+  MEMBER_ACCEPTED: 'member_accepted',       // 成员接受项目（新增）
+  MEMBER_REJECTED: 'member_rejected',       // 成员拒绝项目（新增）
   PROJECT_MEMBER_REMOVED: 'project_member_removed', // 项目成员移除
   PROJECT_STATUS_CHANGED: 'project_status_changed', // 项目状态变更
   PROJECT_COMPLETED: 'project_completed',     // 项目完成
