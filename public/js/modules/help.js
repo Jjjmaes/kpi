@@ -285,8 +285,21 @@ const helpContent = {
             <li>进入"KPI 管理"页面</li>
             <li>选择要生成的月份</li>
             <li>点击"生成月度 KPI"按钮</li>
-            <li>系统会自动计算所有用户的 KPI</li>
+            <li>系统会自动计算所有用户的 KPI，并区分专职与兼职</li>
           </ol>
+          <h4>计算规则（当前版本）</h4>
+          <ul>
+            <li><strong>专职角色</strong>（如翻译、审校、PM 等）：按项目金额 × 角色系数 × 完成系数计算，单位为<strong>分</strong></li>
+            <li><strong>兼职角色（除兼职销售外）</strong>：
+              <ul>
+                <li>在项目成员中录入的 <code>兼职费用（partTimeFee）</code> 直接作为该成员的绩效金额</li>
+                <li>不再根据比例参与项目金额拆分，不走专职 KPI 公式</li>
+                <li>在 KPI 页面中以<strong>元</strong>为单位单独汇总展示</li>
+              </ul>
+            </li>
+            <li><strong>兼职销售（part_time_sales）</strong>：按配置的佣金/返点规则计算，记为兼职费用（元）</li>
+            <li><strong>综合岗、财务等管理/支持角色</strong>：不参与项目级 KPI 计算，在月度汇总时可结合评价结果单独统计</li>
+          </ul>
         `
       },
       {
@@ -304,6 +317,13 @@ const helpContent = {
             <li>选择用户、月份和角色（可选）</li>
             <li>查看 KPI 记录</li>
           </ol>
+          <h4>专职 KPI 与兼职费用的展示</h4>
+          <ul>
+            <li>系统会将记录按照用户当时的 <code>employmentType</code>（专职/兼职）以及角色类型自动归类</li>
+            <li><strong>专职 KPI（分）</strong>：显示各角色的 KPI 分值及合计，用于内部绩效考核</li>
+            <li><strong>兼职费用（元）</strong>：显示兼职翻译、兼职排版、兼职销售等实际支付费用及合计，用于财务统计</li>
+            <li>同一页面中会同时展示两类汇总，便于区分人力绩效与兼职成本</li>
+          </ul>
         `
       },
       {
