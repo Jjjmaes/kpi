@@ -344,6 +344,8 @@ const SECTION_ROUTES = {
     },
     projects: { 
         onEnter: async () => {
+            // 先加载客户列表，确保筛选下拉可用
+            await loadCustomers();
             // 初始化角色筛选器（异步）
             await initProjectRoleFilter();
             // 加载项目列表（会根据当前角色自动过滤）

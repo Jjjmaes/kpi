@@ -3735,6 +3735,11 @@ export async function loadProjects(filters = {}) {
             }
         }
         
+        // 确保客户列表已加载（用于筛选下拉框）
+        if (!state.allCustomers || state.allCustomers.length === 0) {
+            await loadCustomers();
+        }
+        
         // 构建查询参数
         const params = new URLSearchParams();
         if (filters.month) params.append('month', filters.month);
@@ -3764,6 +3769,9 @@ export async function loadProjects(filters = {}) {
             
             // 加载项目的发票申请状态
             await loadProjectInvoiceRequestStatuses();
+            
+            // 填充客户筛选下拉框（确保客户数据已加载）
+            fillProjectCustomerFilter();
             
             renderProjects();
             // fillFinanceProjectSelects 在后续批次完成
@@ -4505,8 +4513,22 @@ export function exportProjects() {
 
 export function fillProjectCustomerFilter() {
     const sel = document.getElementById('projectCustomerFilter');
-    if (!sel) return;
-    sel.innerHTML = '<option value="">全部客户</option>' + (state.allCustomers || []).map(c => `<option value="${c._id}">${c.name}</option>`).join('');
+    if (!sel) {
+        console.warn('[Projects] 客户筛选下拉框不存在');
+        return;
+    }
+    
+    const customers = state.allCustomers || [];
+    console.log('[Projects] 填充客户筛选下拉框，客户数量:', customers.length);
+    
+    if (customers.length === 0) {
+        console.warn('[Projects] 客户列表为空，无法填充筛选下拉框');
+        sel.innerHTML = '<option value="">全部客户（暂无客户数据）</option>';
+        return;
+    }
+    
+    sel.innerHTML = '<option value="">全部客户</option>' + customers.map(c => `<option value="${c._id}">${c.name}</option>`).join('');
+    console.log('[Projects] 客户筛选下拉框已填充，选项数量:', customers.length + 1);
 }
 
 export function fillFinanceFilters() {
