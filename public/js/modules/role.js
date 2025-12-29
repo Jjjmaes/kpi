@@ -193,7 +193,8 @@ async function submitCreateRole() {
     document.querySelectorAll('.permission-select').forEach(select => {
       const permKey = select.dataset.permission;
       const selectValue = select.value?.trim();
-      if (!permKey || selectValue === undefined) {
+      // 如果值为空或未定义，跳过该权限（不设置，保持默认值）
+      if (!permKey || !selectValue || selectValue === '') {
         return;
       }
 
@@ -206,6 +207,9 @@ async function submitCreateRole() {
           permissions[permKey] = true;
         } else if (selectValue === 'false') {
           permissions[permKey] = false;
+        } else if (selectValue === 'all' || selectValue === 'self' || selectValue === 'sales' || selectValue === 'assigned') {
+          // 这些是有效的字符串权限值
+          permissions[permKey] = selectValue;
         } else {
           // 其他字符串值直接写入
           permissions[permKey] = selectValue;
@@ -316,9 +320,13 @@ export async function editRole(roleId) {
   // permissions 已经是对象，直接使用
   const permissions = role.permissions || {};
   
+  // 调试：打印权限数据
+  console.log(`[Role] 编辑角色 ${role.code}，权限数据:`, JSON.stringify(permissions));
+  console.log(`[Role] 权限对象类型:`, typeof permissions, '是否为对象:', permissions instanceof Object);
+  
   const modalContent = `
     <div style="padding:20px;max-width:800px;max-height:80vh;overflow-y:auto;">
-      <form id="editRoleForm">
+      <form id="editRoleForm" data-submit="submitEditRole('${roleId}')">
         <div class="form-group">
           <label>角色代码：</label>
           <input type="text" id="editRoleCode" value="${role.code}" ${role.isSystem ? 'readonly' : ''} 
@@ -357,17 +365,40 @@ export async function editRole(roleId) {
         <div id="editPermissionsConfig" style="border:1px solid #ddd;border-radius:4px;padding:12px;max-height:400px;overflow-y:auto;">
           ${ALL_PERMISSIONS.map(perm => {
             const currentValue = permissions[perm.key];
-            const currentValueStr = currentValue === undefined ? 'false' : JSON.stringify(currentValue);
+            // 如果值为 undefined 或 null，使用 false
+            // 注意：如果 currentValue 是 false（布尔值），应该保持为 false
+            const normalizedValue = currentValue === undefined || currentValue === null ? false : currentValue;
+            const currentValueStr = JSON.stringify(normalizedValue);
             const hint = PERMISSION_HINTS[perm.key];
+            
+            // 生成选项HTML，确保只有一个选项被选中
+            const options = [];
+            // false 的 JSON.stringify 结果是 "false"（字符串）
+            const falseValueStr = JSON.stringify(false);
+            const isFalseSelected = currentValueStr === falseValueStr;
+            
+            // 调试信息
+            console.log(`[Role] 生成权限选择器 ${perm.key}: currentValue=${currentValue} (${typeof currentValue}), normalizedValue=${normalizedValue} (${typeof normalizedValue}), currentValueStr="${currentValueStr}", falseValueStr="${falseValueStr}", isFalseSelected=${isFalseSelected}`);
+            
+            // 生成第一个选项（false）
+            // 确保 value 属性正确设置
+            const falseOptionValue = JSON.stringify(false);
+            options.push(`<option value="${falseOptionValue}" ${isFalseSelected ? 'selected="selected"' : ''}>无权限</option>`);
+            
+            // 生成其他选项
+            perm.values.filter(v => v !== false).forEach(v => {
+              const vStr = JSON.stringify(v);
+              const isSelected = currentValueStr === vStr;
+              // 确保 value 属性正确设置，使用 HTML 转义
+              const escapedValue = vStr.replace(/"/g, '&quot;');
+              options.push(`<option value="${escapedValue}" ${isSelected ? 'selected="selected"' : ''}>${v === true ? '是' : v === 'all' ? '全部' : v === 'self' ? '自己' : v === 'sales' ? '销售' : v === 'assigned' ? '分配的' : v}</option>`);
+            });
+            
             return `
               <div style="margin-bottom:12px;padding:8px;background:#f8f9fa;border-radius:4px;">
                 <label style="font-weight:bold;display:block;margin-bottom:4px;">${perm.label} (${perm.key})</label>
-                <select class="edit-permission-select" data-permission="${perm.key}" style="width:100%;padding:6px;">
-                  <option value="false" ${currentValueStr === 'false' ? 'selected' : ''}>无权限</option>
-                  ${perm.values.filter(v => v !== false).map(v => {
-                    const vStr = JSON.stringify(v);
-                    return `<option value="${vStr}" ${currentValueStr === vStr ? 'selected' : ''}>${v === true ? '是' : v === 'all' ? '全部' : v === 'self' ? '自己' : v === 'sales' ? '销售' : v === 'assigned' ? '分配的' : v}</option>`;
-                  }).join('')}
+                <select class="edit-permission-select" data-permission="${perm.key}" style="width:100%;padding:6px;" data-expected-value="${currentValueStr}">
+                  ${options.join('')}
                 </select>
                 ${hint ? `<div style="font-size:12px;color:#666;margin-top:4px;">${hint}</div>` : ''}
               </div>
@@ -384,17 +415,71 @@ export async function editRole(roleId) {
   
   showModal({ title: '编辑角色', body: modalContent });
   
+  // 等待DOM更新后，确保权限选择器有正确的初始值
+  // 使用 requestAnimationFrame 确保DOM完全渲染
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      ALL_PERMISSIONS.forEach(perm => {
+        const select = document.querySelector(`.edit-permission-select[data-permission="${perm.key}"]`);
+        if (!select) {
+          console.warn(`[Role] 未找到权限选择器: ${perm.key}`);
+          return;
+        }
+        
+        // 打印所有选项的值，用于调试
+        const optionValues = Array.from(select.options).map((opt, idx) => `[${idx}]="${opt.value}"`).join(', ');
+        console.log(`[Role] 权限选择器 ${perm.key} 初始化: 选项数=${select.options.length}, 选项值=[${optionValues}], 当前selectedIndex=${select.selectedIndex}, 当前value="${select.value}"`);
+        
+        const currentValue = permissions[perm.key];
+        // 规范化值：如果为 undefined 或 null，使用 false
+        const normalizedValue = currentValue === undefined || currentValue === null ? false : currentValue;
+        const expectedValue = JSON.stringify(normalizedValue);
+        
+        // 检查当前值是否匹配预期值
+        if (select.value !== expectedValue) {
+          // 直接设置 selectedIndex，找到匹配的选项
+          let found = false;
+          for (let i = 0; i < select.options.length; i++) {
+            if (select.options[i].value === expectedValue) {
+              select.selectedIndex = i;
+              found = true;
+              console.log(`[Role] 已设置 ${perm.key} 的 selectedIndex 为 ${i}，值="${select.value}"`);
+              // 验证设置是否成功
+              if (select.value !== expectedValue) {
+                console.warn(`[Role] 设置 ${perm.key} 的 selectedIndex 为 ${i} 后，值仍为 "${select.value}"，预期 "${expectedValue}"`);
+              }
+              break;
+            }
+          }
+          
+          // 如果找不到匹配的选项，使用第一个选项（通常是 "false"）
+          if (!found && select.options.length > 0) {
+            select.selectedIndex = 0;
+            console.warn(`[Role] 未找到匹配选项，已设置 ${perm.key} 为第一个选项: ${select.options[0].value}`);
+          }
+        } else {
+          console.log(`[Role] 权限选择器 ${perm.key} 的值已正确: "${select.value}"`);
+        }
+      });
+    }, 100);
+  });
+  
   const form = document.getElementById('editRoleForm');
   if (form) {
+    console.log(`[Role] 绑定表单提交事件，roleId=${roleId}`);
     form.onsubmit = async (e) => {
       e.preventDefault();
+      console.log(`[Role] 表单提交事件触发，roleId=${roleId}`);
       await submitEditRole(roleId);
     };
+  } else {
+    console.error(`[Role] 未找到表单 editRoleForm`);
   }
 }
 
 // 提交编辑角色
-async function submitEditRole(roleId) {
+export async function submitEditRole(roleId) {
+  console.log(`[Role] ========== 开始提交编辑角色: ${roleId} ==========`);
   try {
     const name = document.getElementById('editRoleName')?.value?.trim();
     const description = document.getElementById('editRoleDescription')?.value?.trim() || '';
@@ -403,36 +488,74 @@ async function submitEditRole(roleId) {
     const canBeProjectMember = document.getElementById('editRoleCanBeProjectMember')?.checked !== false;
     const canBeKpiRole = document.getElementById('editRoleCanBeKpiRole')?.checked !== false;
     
+    console.log(`[Role] 基本信息: name=${name}, priority=${priority}, isActive=${isActive}`);
+    
     // 收集权限配置
+    // 重要：必须收集所有权限，包括 false 值，否则后端会认为该权限未设置
     const permissions = {};
+    console.log(`[Role] 开始收集权限配置，共有 ${ALL_PERMISSIONS.length} 个权限需要收集`);
     try {
-      document.querySelectorAll('.edit-permission-select').forEach(select => {
-        const permKey = select.dataset.permission;
-        if (!permKey) {
-          console.warn('[Role] 权限选择器缺少 data-permission 属性');
+      // 首先，确保遍历 ALL_PERMISSIONS，为每个权限都设置一个值
+      ALL_PERMISSIONS.forEach(perm => {
+        const select = document.querySelector(`.edit-permission-select[data-permission="${perm.key}"]`);
+        if (!select) {
+          console.warn(`[Role] 未找到权限选择器: ${perm.key}`);
+          permissions[perm.key] = false; // 默认值
           return;
         }
         
-        const selectValue = select.value?.trim();
-        if (selectValue === undefined) {
+        // 直接使用 selectedIndex 获取当前选中的选项（这是最可靠的方法）
+        const selectedIndex = select.selectedIndex;
+        
+        if (selectedIndex < 0 || selectedIndex >= select.options.length) {
+          console.warn(`[Role] 权限 ${perm.key} 的选择器 selectedIndex 无效: ${selectedIndex}, 选项数: ${select.options.length}`);
+          permissions[perm.key] = false;
           return;
         }
+        
+        const selectedOption = select.options[selectedIndex];
+        if (!selectedOption) {
+          console.warn(`[Role] 权限 ${perm.key} 的选择器没有选项`);
+          permissions[perm.key] = false;
+          return;
+        }
+        
+        const selectValue = selectedOption.value;
+        
+        // 如果选项值为空，使用默认值 false
+        if (!selectValue || selectValue.trim() === '') {
+          console.warn(`[Role] 权限 ${perm.key} 的选择器选项值为空，使用 false`);
+          permissions[perm.key] = false;
+          return;
+        }
+        
+        console.log(`[Role] 收集权限 ${perm.key}: selectedIndex=${selectedIndex}, option.value="${selectValue}", select.value="${select.value}"`);
         
         try {
+          // 尝试解析JSON值（包括 "false", "true", '"all"', '"self"' 等）
           const value = JSON.parse(selectValue);
-          permissions[permKey] = value; // 包含 false，便于保留显式配置
+          permissions[perm.key] = value; // 包含 false，便于保留显式配置
+          console.log(`[Role] 权限 ${perm.key} 解析成功: ${JSON.stringify(value)} (${typeof value})`);
         } catch (parseError) {
-          console.error('[Role] 解析权限值失败:', selectValue, parseError);
+          console.error(`[Role] 解析权限值失败: ${perm.key} = "${selectValue}"`, parseError);
           // 如果解析失败，尝试直接使用字符串值
           if (selectValue === 'true') {
-            permissions[permKey] = true;
+            permissions[perm.key] = true;
           } else if (selectValue === 'false') {
-            permissions[permKey] = false;
+            permissions[perm.key] = false;
+          } else if (selectValue === 'all' || selectValue === 'self' || selectValue === 'sales' || selectValue === 'assigned') {
+            // 这些是有效的字符串权限值
+            permissions[perm.key] = selectValue;
           } else {
-            permissions[permKey] = selectValue;
+            // 其他情况，默认使用 false
+            console.warn(`[Role] 权限 ${perm.key} 的值 "${selectValue}" 无法解析，使用 false`);
+            permissions[perm.key] = false;
           }
         }
       });
+      
+      console.log(`[Role] 收集到 ${Object.keys(permissions).length} 个权限配置（应该为 ${ALL_PERMISSIONS.length} 个）`);
+      console.log(`[Role] 权限配置详情:`, JSON.stringify(permissions, null, 2));
     } catch (permError) {
       console.error('[Role] 收集权限配置失败:', permError);
       showToast('收集权限配置失败: ' + permError.message, 'error');
@@ -449,7 +572,10 @@ async function submitEditRole(roleId) {
       canBeKpiRole
     };
     
-    console.log('[Role] 提交更新角色:', roleId, requestData);
+    console.log('[Role] 提交更新角色:', roleId);
+    console.log('[Role] 请求数据:', JSON.stringify(requestData, null, 2));
+    console.log('[Role] 权限对象:', permissions);
+    console.log('[Role] 权限数量:', Object.keys(permissions).length);
     
     const res = await apiFetch(`/roles/${roleId}`, {
       method: 'PUT',

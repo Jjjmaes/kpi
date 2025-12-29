@@ -96,6 +96,15 @@ export async function loadConfig() {
                     <label>完成系数（基础值）</label>
                     <input type="number" step="0.001" value="${config.completion_factor}" name="completion_factor" required>
                 </div>
+                
+                <h3 style="margin: 20px 0 10px; color: #333; border-bottom: 2px solid #667eea; padding-bottom: 8px;">角色KPI系数配置</h3>
+                <p style="color: #666; font-size: 14px; margin-bottom: 12px; background: #f0f4ff; padding: 10px; border-radius: 4px; border-left: 4px solid #667eea;">
+                    <strong>说明：</strong>为可用于KPI的角色配置系数。固定角色的系数（翻译、审校、PM、销售、综合岗、财务）在上面已配置，这里可以配置新增角色的系数。
+                </p>
+                <div id="roleRatiosConfig" style="margin-bottom: 16px; min-height: 100px; border: 1px solid #e0e0e0; border-radius: 4px; padding: 12px; background: #fafafa;">
+                    <div style="color: #999; font-style: italic; text-align: center; padding: 20px;">正在加载角色列表...</div>
+                </div>
+                
                 <div class="form-group">
                     <label>变更原因</label>
                     <textarea name="reason" rows="3" placeholder="请说明变更原因"></textarea>
@@ -106,7 +115,26 @@ export async function loadConfig() {
             </form>
         `;
         const container = document.getElementById('configForm');
-        if (container) container.innerHTML = html;
+        if (!container) {
+            console.error('[System] configForm 容器不存在');
+            return;
+        }
+        
+        container.innerHTML = html;
+
+        // 等待DOM更新后再加载角色系数配置
+        setTimeout(async () => {
+            try {
+                await loadRoleRatiosConfig(config);
+            } catch (error) {
+                console.error('[System] 加载角色系数配置失败:', error);
+                const roleRatiosContainer = document.getElementById('roleRatiosConfig');
+                if (roleRatiosContainer) {
+                    roleRatiosContainer.innerHTML = 
+                        '<div style="color: #f44336; padding: 12px; background: #ffebee; border-radius: 4px;">加载失败: ' + error.message + '</div>';
+                }
+            }
+        }, 100);
 
         const form = document.getElementById('configUpdateForm');
         if (form) {
@@ -118,6 +146,21 @@ export async function loadConfig() {
                 Object.keys(payload).forEach(k => {
                     if (numberFields.includes(k) && payload[k]) payload[k] = parseFloat(payload[k]);
                 });
+                
+                // 收集动态角色系数配置
+                const roleRatios = {};
+                const roleRatioInputs = document.querySelectorAll('input[data-role-ratio]');
+                roleRatioInputs.forEach(input => {
+                    const roleCode = input.getAttribute('data-role-ratio');
+                    const value = parseFloat(input.value);
+                    if (roleCode && !isNaN(value) && value >= 0) {
+                        roleRatios[roleCode] = { base: value };
+                    }
+                });
+                if (Object.keys(roleRatios).length > 0) {
+                    payload.roleRatios = roleRatios;
+                }
+                
                 try {
                     const res = await apiFetch('/config/update', { method: 'POST', body: JSON.stringify(payload) });
                     const result = await res.json();
@@ -419,6 +462,138 @@ export async function savePermissionsConfig() {
     } catch (error) {
         console.error('保存权限配置失败:', error);
         showToast('保存失败: ' + error.message, 'error');
+    }
+}
+
+// 加载角色系数配置
+async function loadRoleRatiosConfig(config) {
+    const container = document.getElementById('roleRatiosConfig');
+    if (!container) {
+        console.error('[System] roleRatiosConfig 容器不存在');
+        return;
+    }
+    
+    try {
+        console.log('[System] 开始加载角色系数配置...');
+        const res = await apiFetch('/config/kpi-roles');
+        const data = await res.json();
+        
+        console.log('[System] 角色列表API响应:', data);
+        
+        if (!data.success || !Array.isArray(data.data)) {
+            container.innerHTML = 
+                '<div style="color: #f44336; padding: 12px; background: #ffebee; border-radius: 4px;">加载角色列表失败: ' + (data.message || '未知错误') + '</div>';
+            return;
+        }
+        
+        const roles = data.data;
+        const roleRatios = config.roleRatios || {};
+        
+        console.log('[System] 获取到角色数量:', roles.length);
+        console.log('[System] 当前角色系数配置:', roleRatios);
+        
+        // 使用Role模型的字段动态判断（替代硬编码列表）
+        // 固定角色（isFixedRole为true）：这些角色的系数在上面已配置，这里不显示
+        // 系统角色（isSystem为true）：这些角色不应该在这里配置KPI系数
+        // 特殊角色（isSpecialRole为true）：这些角色有特殊处理逻辑，不使用基础系数
+        
+        // 过滤出真正需要配置的新角色（排除固定角色、系统角色和特殊角色）
+        const configurableRoles = roles.filter(role => {
+            // 排除系统角色
+            if (role.isSystem === true) {
+                return false;
+            }
+            // 排除固定角色
+            if (role.isFixedRole === true) {
+                return false;
+            }
+            // 排除特殊角色
+            if (role.isSpecialRole === true) {
+                return false;
+            }
+            // 只显示可以用于KPI记录的角色
+            return role.canBeKpiRole === true;
+        });
+        
+        console.log('[System] 总角色数量:', roles.length);
+        console.log('[System] 所有角色详情:', roles.map(r => ({ 
+            code: r.code, 
+            name: r.name,
+            isSystem: r.isSystem,
+            isFixedRole: r.isFixedRole,
+            isSpecialRole: r.isSpecialRole,
+            canBeKpiRole: r.canBeKpiRole
+        })));
+        console.log('[System] 可配置角色数量:', configurableRoles.length);
+        console.log('[System] 可配置角色列表:', configurableRoles.map(r => r.code));
+        
+        // 如果没有任何可配置角色，显示提示
+        if (configurableRoles.length === 0) {
+            container.innerHTML = `
+                <div style="padding: 20px; text-align: center; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px;">
+                    <p style="color: #856404; margin: 0 0 8px 0; font-weight: 600;">暂无需要配置的新角色</p>
+                    <p style="color: #856404; margin: 0; font-size: 13px;">
+                        固定角色（翻译、审校、PM、销售、综合岗、财务）的系数在上面已配置。
+                    </p>
+                    <p style="color: #856404; margin: 8px 0 0 0; font-size: 12px;">
+                        创建新角色并设置"可用于KPI记录"后，会显示在这里。
+                    </p>
+                </div>
+            `;
+            return;
+        }
+        
+        // 构建HTML：只显示可配置的新角色
+        const tableRows = configurableRoles.map(role => {
+            const roleConfig = roleRatios[role.code] || {};
+            const currentRatio = role.ratio || roleConfig.base || 0;
+            
+            return `
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #dee2e6;">${role.name}</td>
+                    <td style="padding: 8px; border: 1px solid #dee2e6;">
+                        <code style="background: #f1f3f5; padding: 2px 6px; border-radius: 3px; font-size: 12px;">${role.code}</code>
+                    </td>
+                    <td style="padding: 8px; border: 1px solid #dee2e6;">
+                        <input type="number" 
+                               step="0.001" 
+                               min="0" 
+                               max="1" 
+                               value="${currentRatio}" 
+                               data-role-ratio="${role.code}"
+                               style="width: 100px; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;"
+                               placeholder="0.000">
+                    </td>
+                    <td style="padding: 8px; border: 1px solid #dee2e6; color: #666; font-size: 13px;">
+                        ${role.description || '无'}
+                    </td>
+                </tr>
+            `;
+        }).join('');
+        
+        const html = `
+            <div style="background: #f8f9fa; padding: 12px; border-radius: 4px; margin-bottom: 12px;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background: #e9ecef;">
+                            <th style="padding: 8px; text-align: left; border: 1px solid #dee2e6;">角色名称</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #dee2e6;">角色代码</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #dee2e6;">KPI系数</th>
+                            <th style="padding: 8px; text-align: left; border: 1px solid #dee2e6;">说明</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tableRows}
+                    </tbody>
+                </table>
+            </div>
+        `;
+        
+        document.getElementById('roleRatiosConfig').innerHTML = html;
+    } catch (error) {
+        console.error('加载角色系数配置失败:', error);
+        document.getElementById('roleRatiosConfig').innerHTML = 
+            '<div style="color: #f44336;">加载角色列表失败: ' + error.message + '</div>';
     }
 }
 

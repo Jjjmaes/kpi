@@ -1,9 +1,29 @@
+/**
+ * 初始化基础角色脚本
+ *
+ * 角色列表：
+ * - admin        管理员
+ * - finance      财务
+ * - sales        销售
+ * - translator   翻译
+ * - reviewer     审校
+ * - layout       排版
+ * - admin_staff  综合岗
+ *
+ * 使用方式：
+ *   node scripts/initBasicRoles.js
+ *
+ * 特点：
+ * - 使用 upsert（有则更新，无则创建），可安全多次执行
+ * - 只影响以上基础角色，不修改其他自定义角色
+ */
+
 require('dotenv').config();
 const mongoose = require('mongoose');
 const Role = require('../models/Role');
 
-// 默认角色配置（从 config/permissions.js 迁移）
-const defaultRoles = [
+// 基础角色配置（与 initRoles.js 中保持一致）
+const basicRoles = [
   {
     code: 'admin',
     name: '管理员',
@@ -16,6 +36,8 @@ const defaultRoles = [
     canRecordCapacity: false,
     canBeEvaluator: false,
     canBeEvaluated: false,
+    canBeProjectMember: false,
+    canBeKpiRole: false,
     permissions: {
       'project.view': 'all',
       'project.edit': 'all',
@@ -46,6 +68,8 @@ const defaultRoles = [
     canRecordCapacity: false,
     canBeEvaluator: false,
     canBeEvaluated: false,
+    canBeProjectMember: false,
+    canBeKpiRole: true,
     permissions: {
       'project.view': 'all',
       'project.edit': false,
@@ -64,65 +88,6 @@ const defaultRoles = [
     }
   },
   {
-    code: 'pm',
-    name: '项目经理',
-    description: '项目经理，可创建和管理项目',
-    priority: 80,
-    isSystem: true,
-    isManagementRole: true,
-    isFixedRole: true,
-    isSpecialRole: false,
-    canRecordCapacity: false,
-    canBeEvaluator: true,
-    canBeEvaluated: true,
-    permissions: {
-      // 只查看“分配给自己”的项目（包括自己作为 PM 成员的项目）
-      'project.view': 'assigned',
-      'project.edit': false,
-      'project.create': true,
-      'project.delete': false,
-      'project.member.manage': true,
-      'kpi.view': 'self',
-      'kpi.view.self': true,
-      'kpi.config': false,
-      'finance.view': false,
-      'finance.edit': false,
-      'customer.view': false,
-      'customer.edit': true,
-      'user.manage': false,
-      'system.config': false
-    }
-  },
-  {
-    code: 'admin_staff',
-    name: '综合岗',
-    description: '综合岗人员',
-    priority: 75,
-    isSystem: true,
-    isManagementRole: true,
-    isFixedRole: true,
-    isSpecialRole: false,
-    canRecordCapacity: false,
-    canBeEvaluator: false,
-    canBeEvaluated: false,
-    permissions: {
-      'project.view': 'all',
-      'project.edit': false,
-      'project.create': true,
-      'project.delete': false,
-      'project.member.manage': true,
-      'kpi.view': 'self',
-      'kpi.view.self': true,
-      'kpi.config': false,
-      'finance.view': false,
-      'finance.edit': false,
-      'customer.view': false,
-      'customer.edit': false,
-      'user.manage': false,
-      'system.config': false
-    }
-  },
-  {
     code: 'sales',
     name: '销售',
     description: '销售人员，可创建和管理自己的项目',
@@ -134,6 +99,8 @@ const defaultRoles = [
     canRecordCapacity: false,
     canBeEvaluator: false,
     canBeEvaluated: true,
+    canBeProjectMember: true,
+    canBeKpiRole: true,
     permissions: {
       'project.view': 'sales',
       'project.edit': 'sales',
@@ -152,39 +119,10 @@ const defaultRoles = [
     }
   },
   {
-    code: 'part_time_sales',
-    name: '兼职销售',
-    description: '兼职销售人员',
-    priority: 65,
-    isSystem: true,
-    isManagementRole: true,
-    isFixedRole: false,
-    isSpecialRole: true,
-    canRecordCapacity: false,
-    canBeEvaluator: false,
-    canBeEvaluated: true,
-    permissions: {
-      'project.view': 'sales',
-      'project.edit': 'sales',
-      'project.create': true,
-      'project.delete': false,
-      'project.member.manage': false,
-      'kpi.view': 'self',
-      'kpi.view.self': true,
-      'kpi.config': false,
-      'finance.view': false,
-      'finance.edit': false,
-      'customer.view': true,
-      'customer.edit': false,
-      'user.manage': false,
-      'system.config': false
-    }
-  },
-  {
-    code: 'reviewer',
-    name: '审校',
-    description: '审校人员',
-    priority: 50,
+    code: 'translator',
+    name: '翻译',
+    description: '翻译人员',
+    priority: 40,
     isSystem: true,
     isManagementRole: false,
     isFixedRole: true,
@@ -192,6 +130,8 @@ const defaultRoles = [
     canRecordCapacity: true,
     canBeEvaluator: true,
     canBeEvaluated: false,
+    canBeProjectMember: true,
+    canBeKpiRole: true,
     permissions: {
       'project.view': 'assigned',
       'project.edit': false,
@@ -210,10 +150,10 @@ const defaultRoles = [
     }
   },
   {
-    code: 'translator',
-    name: '翻译',
-    description: '翻译人员',
-    priority: 40,
+    code: 'reviewer',
+    name: '审校',
+    description: '审校人员',
+    priority: 50,
     isSystem: true,
     isManagementRole: false,
     isFixedRole: true,
@@ -221,6 +161,8 @@ const defaultRoles = [
     canRecordCapacity: true,
     canBeEvaluator: true,
     canBeEvaluated: false,
+    canBeProjectMember: true,
+    canBeKpiRole: true,
     permissions: {
       'project.view': 'assigned',
       'project.edit': false,
@@ -250,6 +192,8 @@ const defaultRoles = [
     canRecordCapacity: false,
     canBeEvaluator: true,
     canBeEvaluated: false,
+    canBeProjectMember: true,
+    canBeKpiRole: true,
     permissions: {
       'project.view': 'assigned',
       'project.edit': false,
@@ -266,40 +210,71 @@ const defaultRoles = [
       'user.manage': false,
       'system.config': false
     }
+  },
+  {
+    code: 'admin_staff',
+    name: '综合岗',
+    description: '综合岗人员',
+    priority: 75,
+    isSystem: true,
+    isManagementRole: true,
+    isFixedRole: true,
+    isSpecialRole: false,
+    canRecordCapacity: false,
+    canBeEvaluator: false,
+    canBeEvaluated: false,
+    canBeProjectMember: true,
+    canBeKpiRole: true,
+    permissions: {
+      'project.view': 'all',
+      'project.edit': false,
+      'project.create': true,
+      'project.delete': false,
+      'project.member.manage': true,
+      'kpi.view': 'self',
+      'kpi.view.self': true,
+      'kpi.config': false,
+      'finance.view': false,
+      'finance.edit': false,
+      'customer.view': false,
+      'customer.edit': false,
+      'user.manage': false,
+      'system.config': false
+    }
   }
 ];
 
-async function initRoles() {
+async function initBasicRoles() {
   try {
-    // 连接数据库
     await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/kpi_system');
     console.log('✅ 已连接到 MongoDB');
 
-    // 检查是否已有角色数据
-    const existingRoles = await Role.countDocuments();
-    if (existingRoles > 0) {
-      console.log(`⚠️  数据库中已有 ${existingRoles} 个角色，将跳过初始化`);
-      console.log('   如需重新初始化，请先清空 roles 集合');
-      process.exit(0);
+    for (const roleData of basicRoles) {
+      const { code, ...rest } = roleData;
+      const result = await Role.findOneAndUpdate(
+        { code },
+        {
+          $set: {
+            ...rest,
+            permissions: rest.permissions || {}
+          }
+        },
+        {
+          upsert: true,
+          new: true
+        }
+      );
+      console.log(`✅ 角色已创建/更新: ${result.name} (${result.code})`);
     }
 
-    // 创建默认角色
-    console.log('📝 开始创建默认角色...');
-    for (const roleData of defaultRoles) {
-      const role = await Role.create({
-        ...roleData,
-        permissions: roleData.permissions || {}
-      });
-      console.log(`   ✅ 创建角色: ${role.name} (${role.code})`);
-    }
-
-    console.log(`\n✅ 成功初始化 ${defaultRoles.length} 个默认角色`);
+    console.log('\n✅ 基础角色初始化完成');
     process.exit(0);
   } catch (error) {
-    console.error('❌ 初始化失败:', error);
+    console.error('❌ 初始化基础角色失败:', error);
     process.exit(1);
   }
 }
 
-initRoles();
+initBasicRoles();
+
 

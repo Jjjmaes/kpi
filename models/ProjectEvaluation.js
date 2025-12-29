@@ -21,7 +21,9 @@ const projectEvaluationSchema = new mongoose.Schema({
   evaluatorRole: {
     type: String,
     required: true,
-    enum: ['pm', 'translator', 'reviewer', 'layout']
+    trim: true
+    // 移除enum限制，允许动态角色
+    // 验证逻辑在业务层处理（检查角色是否允许评价）
   },
   // 被评价人
   evaluatedUserId: {
@@ -32,7 +34,9 @@ const projectEvaluationSchema = new mongoose.Schema({
   evaluatedRole: {
     type: String,
     required: true,
-    enum: ['sales', 'part_time_sales', 'pm']
+    trim: true
+    // 移除enum限制，允许动态角色
+    // 验证逻辑在业务层处理（检查角色是否允许被评价）
   },
   // 评价类型
   evaluationType: {

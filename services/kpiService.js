@@ -6,6 +6,7 @@ const User = require('../models/User');
 const KpiConfig = require('../models/KpiConfig');
 const { calculateKPIByRole, calculateAdminStaff, calculateFinance } = require('../utils/kpiCalculator');
 const { createNotificationsForUsers, NotificationTypes } = require('./notificationService');
+const { validateKpiRole } = require('../utils/roleValidator');
 
 /**
  * 计算销售的完成系数（基于回款周期）
@@ -237,7 +238,31 @@ async function generateMonthlyKPIRecords(month, force = false) {
         // 为每个成员计算KPI（使用 upsert 确保幂等性）
         for (const member of members) {
           try {
-            const ratio = member.ratio_locked;
+            // 优先使用成员锁定的系数，如果没有则从项目锁定系数中读取
+            let ratio = member.ratio_locked;
+            if (!ratio || ratio === 0) {
+              // 从项目锁定系数中读取
+              const roleForRatio = member.role;
+              if (roleForRatio === 'translator') {
+                // 翻译需要根据类型选择系数
+                const translatorType = member.translatorType || 'mtpe';
+                ratio = translatorType === 'deepedit' 
+                  ? (project.locked_ratios.translator_deepedit ?? project.locked_ratios[`translator_deepedit`] ?? 0)
+                  : (project.locked_ratios.translator_mtpe ?? project.locked_ratios[`translator_mtpe`] ?? 0);
+              } else if (roleForRatio === 'reviewer') {
+                ratio = project.locked_ratios.reviewer ?? project.locked_ratios[roleForRatio] ?? 0;
+              } else if (roleForRatio === 'pm') {
+                ratio = project.locked_ratios.pm ?? project.locked_ratios[roleForRatio] ?? 0;
+              } else if (roleForRatio === 'sales') {
+                ratio = project.locked_ratios.sales_bonus ?? project.locked_ratios[`${roleForRatio}_bonus`] ?? 0;
+              } else if (roleForRatio === 'admin_staff') {
+                ratio = project.locked_ratios.admin ?? project.locked_ratios[roleForRatio] ?? 0;
+              } else {
+                // 新角色：从项目锁定系数中读取
+                ratio = project.locked_ratios[roleForRatio] ?? 0;
+              }
+            }
+            
             let effectiveRatio = ratio;
             const wordRatio = member.wordRatio || 1.0;
             const translatorType = member.translatorType || 'mtpe';
@@ -247,6 +272,10 @@ async function generateMonthlyKPIRecords(month, force = false) {
               : member.role;
 
             let kpiResult;
+
+            // 判断是否为兼职角色（除兼职销售外）
+            const isPartTime = member.employmentType === 'part_time';
+            const isPartTimeSales = roleForCalc === 'part_time_sales';
 
             if (roleForCalc === 'sales') {
               // 销售：金额奖励 + 回款奖励（均计入）
@@ -271,21 +300,13 @@ async function generateMonthlyKPIRecords(month, force = false) {
                 kpiValue: commission,
                 formula: `成交额(${totalAmount}) - 公司应收(${companyReceivable}) = 应收金额(${receivableAmount})；应收金额(${receivableAmount}) - 税费(${taxAmount.toFixed(2)}) = 返还佣金(${commission})`
               };
-            } else if (member.role === 'layout') {
-              // 兼职排版：使用总排版费用按占比分摊给多人
-              const layoutCost = project.partTimeLayout?.layoutCost || 0;
-              const layoutRatio = member.wordRatio || 1.0;
-              const layoutKPI = layoutCost * layoutRatio;
-              kpiResult = {
-                kpiValue: layoutKPI,
-                formula: `排版总费用(${layoutCost}元) × 占比(${layoutRatio}) = 排版KPI(${layoutKPI.toFixed(2)})`
-              };
-            } else if (member.role === 'part_time_translator') {
-              // 兼职翻译：直接使用成员上记录的兼职费用作为KPI
+            } else if (isPartTime && !isPartTimeSales) {
+              // 所有兼职角色（除兼职销售外）：直接使用partTimeFee，不计算KPI
               const fee = member.partTimeFee || 0;
+              const roleName = member.role;
               kpiResult = {
                 kpiValue: fee,
-                formula: `兼职翻译费用：${fee}元`
+                formula: `兼职${roleName}费用：${fee}元`
               };
             } else if (member.role === 'admin_staff' || member.role === 'finance') {
               // 综合岗和财务岗：跳过项目级计算，将在最后按月汇总计算
@@ -322,6 +343,20 @@ async function generateMonthlyKPIRecords(month, force = false) {
                 hasComplaint: !!project.hasComplaint
               }
             };
+
+            // 验证角色是否允许用于KPI记录
+            try {
+              await validateKpiRole(member.role, true);
+            } catch (validationError) {
+              // 如果角色不允许用于KPI，记录错误但继续处理其他成员
+              errors.push({
+                project: project.projectName,
+                member: member.userId?.name || 'Unknown',
+                role: member.role,
+                error: validationError.message || '角色不允许用于KPI记录'
+              });
+              continue;
+            }
 
             // 使用 findOneAndUpdate 实现 upsert（如果不存在则创建，存在则更新）
             const existing = await KpiRecord.findOne({
@@ -404,6 +439,18 @@ async function generateMonthlyKPIRecords(month, force = false) {
               }
               // 如果不强制，保留原有评价
             } else {
+              // 验证角色是否允许用于KPI记录
+              try {
+                await validateKpiRole('admin_staff', true);
+              } catch (validationError) {
+                errors.push({
+                  user: user.name,
+                  role: 'admin_staff',
+                  error: validationError.message || '角色不允许用于KPI记录'
+                });
+                continue;
+              }
+
               // 创建新记录（默认评价为"中"，系数1.0）
               // 使用与财务岗相同的计算公式：calculateFinance
               const kpiValue = calculateFinance(totalCompanyAmount, adminRatio, 1.0);
@@ -459,6 +506,18 @@ async function generateMonthlyKPIRecords(month, force = false) {
               }
               // 如果不强制，保留原有评价
             } else {
+              // 验证角色是否允许用于KPI记录
+              try {
+                await validateKpiRole('finance', true);
+              } catch (validationError) {
+                errors.push({
+                  user: user.name,
+                  role: 'finance',
+                  error: validationError.message || '角色不允许用于KPI记录'
+                });
+                continue;
+              }
+
               // 创建新记录（默认评价为"中"，系数1.0）
               const kpiValue = calculateFinance(totalCompanyAmount, adminRatio, 1.0);
               await MonthlyRoleKPI.create({
@@ -624,7 +683,31 @@ async function generateProjectKPI(projectId) {
   // 为每个成员计算KPI
   for (const member of members) {
     try {
-      const ratio = member.ratio_locked;
+      // 优先使用成员锁定的系数，如果没有则从项目锁定系数中读取
+      let ratio = member.ratio_locked;
+      if (!ratio || ratio === 0) {
+        // 从项目锁定系数中读取
+        const roleForRatio = member.role;
+        if (roleForRatio === 'translator') {
+          // 翻译需要根据类型选择系数
+          const translatorType = member.translatorType || 'mtpe';
+          ratio = translatorType === 'deepedit' 
+            ? (project.locked_ratios.translator_deepedit ?? project.locked_ratios[`translator_deepedit`] ?? 0)
+            : (project.locked_ratios.translator_mtpe ?? project.locked_ratios[`translator_mtpe`] ?? 0);
+        } else if (roleForRatio === 'reviewer') {
+          ratio = project.locked_ratios.reviewer ?? project.locked_ratios[roleForRatio] ?? 0;
+        } else if (roleForRatio === 'pm') {
+          ratio = project.locked_ratios.pm ?? project.locked_ratios[roleForRatio] ?? 0;
+        } else if (roleForRatio === 'sales') {
+          ratio = project.locked_ratios.sales_bonus ?? project.locked_ratios[`${roleForRatio}_bonus`] ?? 0;
+        } else if (roleForRatio === 'admin_staff') {
+          ratio = project.locked_ratios.admin ?? project.locked_ratios[roleForRatio] ?? 0;
+        } else {
+          // 新角色：从项目锁定系数中读取
+          ratio = project.locked_ratios[roleForRatio] ?? 0;
+        }
+      }
+      
       let effectiveRatio = ratio;
       const wordRatio = member.wordRatio || 1.0;
       const translatorType = member.translatorType || 'mtpe';
@@ -634,6 +717,10 @@ async function generateProjectKPI(projectId) {
         : member.role;
 
       let kpiResult;
+
+      // 判断是否为兼职角色（除兼职销售外）
+      const isPartTime = member.employmentType === 'part_time';
+      const isPartTimeSales = roleForCalc === 'part_time_sales';
 
       if (roleForCalc === 'sales') {
         // 销售：金额奖励 + 回款奖励（均计入）
@@ -651,6 +738,14 @@ async function generateProjectKPI(projectId) {
           kpiValue: commission,
           formula: `返还佣金 = (成交额 - 公司应收) - (成交额 - 公司应收) × 税率`
         };
+      } else if (isPartTime && !isPartTimeSales) {
+        // 所有兼职角色（除兼职销售外）：直接使用partTimeFee，不计算KPI
+        const fee = member.partTimeFee || 0;
+        const roleName = member.role;
+        kpiResult = {
+          kpiValue: fee,
+          formula: `兼职${roleName}费用：${fee}元`
+        };
       } else if (roleForCalc === 'admin_staff' || roleForCalc === 'finance') {
         // 综合岗和财务岗：跳过项目级计算，将在月度汇总时使用管理员评价的完成系数
         continue;
@@ -666,11 +761,24 @@ async function generateProjectKPI(projectId) {
         });
       }
 
+      // 验证角色是否允许用于KPI记录
+      try {
+        await validateKpiRole(roleForCalc, true);
+      } catch (validationError) {
+        errors.push({
+          member: member.userId?.name || 'Unknown',
+          role: roleForCalc,
+          error: validationError.message || '角色不允许用于KPI记录'
+        });
+        continue;
+      }
+
       // 创建KPI记录
       await KpiRecord.create({
         userId: member.userId._id,
         projectId: project._id,
         role: roleForCalc,
+        employmentType: member.employmentType || 'full_time', // 保存employmentType用于前端判断
         month,
         kpiValue: kpiResult.kpiValue,
         calculationDetails: {
@@ -683,8 +791,8 @@ async function generateProjectKPI(projectId) {
           hasComplaint: roleForCalc === 'sales' ? false : !!project.hasComplaint,
           // 兼职销售相关
           partTimeSalesCommission: roleForCalc === 'part_time_sales' ? kpiResult.kpiValue : undefined,
-          // 兼职排版相关
-          layoutCost: roleForCalc === 'layout' ? kpiResult.kpiValue : undefined
+          // 兼职费用相关（统一使用partTimeFee，不再单独保存layoutCost）
+          partTimeFee: isPartTime && !isPartTimeSales ? member.partTimeFee : undefined
         }
       });
 
@@ -777,7 +885,31 @@ async function calculateProjectRealtime(projectId) {
   const results = [];
 
   for (const member of members) {
-    const ratio = member.ratio_locked;
+    // 优先使用成员锁定的系数，如果没有则从项目锁定系数中读取
+    let ratio = member.ratio_locked;
+    if (!ratio || ratio === 0) {
+      // 从项目锁定系数中读取
+      const roleForRatio = member.role;
+      if (roleForRatio === 'translator') {
+        // 翻译需要根据类型选择系数
+        const translatorType = member.translatorType || 'mtpe';
+        ratio = translatorType === 'deepedit' 
+          ? (project.locked_ratios.translator_deepedit ?? project.locked_ratios[`translator_deepedit`] ?? 0)
+          : (project.locked_ratios.translator_mtpe ?? project.locked_ratios[`translator_mtpe`] ?? 0);
+      } else if (roleForRatio === 'reviewer') {
+        ratio = project.locked_ratios.reviewer ?? project.locked_ratios[roleForRatio] ?? 0;
+      } else if (roleForRatio === 'pm') {
+        ratio = project.locked_ratios.pm ?? project.locked_ratios[roleForRatio] ?? 0;
+      } else if (roleForRatio === 'sales') {
+        ratio = project.locked_ratios.sales_bonus ?? project.locked_ratios[`${roleForRatio}_bonus`] ?? 0;
+      } else if (roleForRatio === 'admin_staff') {
+        ratio = project.locked_ratios.admin ?? project.locked_ratios[roleForRatio] ?? 0;
+      } else {
+        // 新角色：从项目锁定系数中读取
+        ratio = project.locked_ratios[roleForRatio] ?? 0;
+      }
+    }
+    
     let effectiveRatio = ratio;
     const wordRatio = member.wordRatio || 1.0;
     const translatorType = member.translatorType || 'mtpe';
@@ -786,6 +918,10 @@ async function calculateProjectRealtime(projectId) {
       : member.role;
 
     let kpiResult;
+
+    // 判断是否为兼职角色（除兼职销售外）
+    const isPartTime = member.employmentType === 'part_time';
+    const isPartTimeSales = roleForCalc === 'part_time_sales';
 
     if (roleForCalc === 'sales') {
       // 销售：金额奖励 + 回款奖励（均计入），不受客诉扣减，但受返修/延期影响
@@ -799,7 +935,7 @@ async function calculateProjectRealtime(projectId) {
         commissionPart: salesResult.commissionPart
       };
       } else if (roleForCalc === 'part_time_sales') {
-        // 兼职销售：成交额 - 公司应收 - 税费 = 返还佣金（直接作为“预估分成金额”）
+        // 兼职销售：成交额 - 公司应收 - 税费 = 返还佣金（直接作为"预估分成金额"）
         const commission = project.calculatePartTimeSalesCommission();
         const totalAmount = project.projectAmount || 0;
         const companyReceivable = project.partTimeSales?.companyReceivable || 0;
@@ -812,20 +948,14 @@ async function calculateProjectRealtime(projectId) {
           commission,
           formula: `成交额(${totalAmount}) - 公司应收(${companyReceivable}) = 应收金额(${receivableAmount})；应收金额(${receivableAmount}) - 税费(${taxAmount.toFixed(2)}) = 返还佣金(${commission})`
         };
-      } else if (roleForCalc === 'layout') {
-        // 兼职排版：直接使用排版费用作为KPI
-        const layoutCost = project.partTimeLayout?.layoutCost || 0;
+      } else if (isPartTime && !isPartTimeSales) {
+        // 所有兼职角色（除兼职销售外）：直接使用partTimeFee，不计算KPI
+        const fee = member.partTimeFee || 0;
+        const roleName = member.role;
         kpiResult = {
-          kpiValue: layoutCost,
-          formula: `排版费用：${layoutCost}元`
+          kpiValue: fee,
+          formula: `兼职${roleName}费用：${fee}元`
         };
-    } else if (roleForCalc === 'part_time_translator') {
-      // 兼职翻译：直接使用成员上记录的兼职费用作为KPI
-      const fee = member.partTimeFee || 0;
-      kpiResult = {
-        kpiValue: fee,
-        formula: `兼职翻译费用：${fee}元`
-      };
     } else if (roleForCalc === 'admin_staff' || roleForCalc === 'finance') {
       // 综合岗和财务岗：需要按月汇总计算，使用管理员评价的完成系数
       // 实时计算时，提示需要按月汇总
@@ -998,7 +1128,12 @@ async function calculateProjectsRealtimeBatch(projectIds) {
 
       let kpiResult;
 
-      if (member.role === 'sales') {
+      // 判断是否为兼职角色（除兼职销售外）
+      const isPartTime = member.employmentType === 'part_time';
+      const isPartTimeSales = member.role === 'part_time_sales' || (member.role === 'sales' && isPartTime);
+
+      if (member.role === 'sales' && !isPartTime) {
+        // 专职销售
         const salesCompletion = calculateCompletionFactorForSales(project);
         const salesResult = calculateSalesCombined(project, salesCompletion);
         effectiveRatio = project.locked_ratios?.sales_bonus || 0;
@@ -1008,7 +1143,8 @@ async function calculateProjectsRealtimeBatch(projectIds) {
           bonusPart: salesResult.bonusPart,
           commissionPart: salesResult.commissionPart
         };
-      } else if (member.role === 'part_time_sales') {
+      } else if (isPartTimeSales) {
+        // 兼职销售
         const commission = project.calculatePartTimeSalesCommission();
         const totalAmount = project.projectAmount || 0;
         const companyReceivable = project.partTimeSales?.companyReceivable || 0;
@@ -1020,19 +1156,13 @@ async function calculateProjectsRealtimeBatch(projectIds) {
           kpiValue: commission,
           formula: `成交额(${totalAmount}) - 公司应收(${companyReceivable}) = 应收金额(${receivableAmount})；应收金额(${receivableAmount}) - 税费(${taxAmount.toFixed(2)}) = 返还佣金(${commission})`
         };
-      } else if (member.role === 'layout') {
-        const layoutCost = project.partTimeLayout?.layoutCost || 0;
-        const layoutRatio = member.wordRatio || 1.0;
-        const layoutKPI = layoutCost * layoutRatio;
-        kpiResult = {
-          kpiValue: layoutKPI,
-          formula: `排版总费用(${layoutCost}元) × 占比(${layoutRatio}) = 排版KPI(${layoutKPI.toFixed(2)})`
-        };
-      } else if (member.role === 'part_time_translator') {
+      } else if (isPartTime && !isPartTimeSales) {
+        // 所有兼职角色（除兼职销售外）：直接使用partTimeFee，不计算KPI
         const fee = member.partTimeFee || 0;
+        const roleName = member.role;
         kpiResult = {
           kpiValue: fee,
-          formula: `兼职翻译费用：${fee}元`
+          formula: `兼职${roleName}费用：${fee}元`
         };
       } else if (member.role === 'admin_staff' || member.role === 'finance') {
         kpiResult = {

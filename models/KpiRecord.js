@@ -14,10 +14,19 @@ const kpiRecordSchema = new mongoose.Schema({
     required: true
   },
   // 角色
+  // 注意：不再使用enum限制，通过Role模型的canBeKpiRole标志控制
+  // 在创建/更新KPI记录时，需要通过验证确保角色允许用于KPI
   role: {
     type: String,
-    enum: ['translator', 'reviewer', 'pm', 'sales', 'admin_staff', 'part_time_sales', 'layout'],
-    required: true
+    required: true,
+    trim: true
+  },
+  // 就业类型（用于区分专职/兼职，统一前后端判断逻辑）
+  employmentType: {
+    type: String,
+    enum: ['full_time', 'part_time'],
+    default: 'full_time',
+    index: true
   },
   // 计算月份（YYYY-MM格式）
   month: {

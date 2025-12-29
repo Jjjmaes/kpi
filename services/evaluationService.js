@@ -1,6 +1,7 @@
 const ProjectEvaluation = require('../models/ProjectEvaluation');
 const Project = require('../models/Project');
 const ProjectMember = require('../models/ProjectMember');
+const Role = require('../models/Role');
 const { AppError } = require('../middleware/errorHandler');
 
 /**
@@ -42,9 +43,14 @@ class EvaluationService {
 
     if (evaluationType === 'pm_to_sales') {
       // PM评价销售：评价项目创建人（销售）
-      // 检查用户是否有PM角色（不仅是项目成员，只要用户有PM角色就可以评价）
+      // 检查用户是否有可以作为评价人的角色（动态判断）
+      // 对于PM评价销售，检查用户是否有PM角色且该角色允许评价
+      const pmRole = await Role.findOne({ 
+        code: 'pm', 
+        isActive: true 
+      });
       const hasPMRole = evaluator.roles && evaluator.roles.includes('pm');
-      if (!hasPMRole) {
+      if (!hasPMRole || !pmRole || !pmRole.canBeEvaluator) {
         throw new AppError('只有项目经理可以评价销售', 403, 'INVALID_EVALUATOR_ROLE');
       }
 
@@ -75,9 +81,13 @@ class EvaluationService {
         throw new AppError('您不是该项目成员，无法评价', 403, 'NOT_PROJECT_MEMBER');
       }
 
-      const executorRoles = ['translator', 'reviewer', 'layout'];
-      if (!executorRoles.includes(evaluatorMember.role)) {
-        throw new AppError('只有翻译、审校、排版可以评价项目经理', 403, 'INVALID_EVALUATOR_ROLE');
+      // 动态检查角色是否可以作为评价人
+      const evaluatorRoleDoc = await Role.findOne({ 
+        code: evaluatorMember.role, 
+        isActive: true 
+      });
+      if (!evaluatorRoleDoc || !evaluatorRoleDoc.canBeEvaluator) {
+        throw new AppError('您的角色不允许评价项目经理', 403, 'INVALID_EVALUATOR_ROLE');
       }
 
       // 查找项目中的PM成员
@@ -345,8 +355,12 @@ class EvaluationService {
         }
       }
 
-      // 执行人员可以评价PM
-      if (['translator', 'reviewer', 'layout'].includes(memberRole)) {
+      // 动态检查角色是否可以作为评价人
+      const memberRoleDoc = await Role.findOne({ 
+        code: memberRole, 
+        isActive: true 
+      });
+      if (memberRoleDoc && memberRoleDoc.canBeEvaluator) {
         const pmMembers = await ProjectMember.find({
           projectId: project._id,
           role: 'pm'

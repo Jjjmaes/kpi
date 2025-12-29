@@ -36,7 +36,11 @@ async function ensureProjectMemberRoles() {
             if (data.success) {
                 const roles = (data.data || [])
                     .filter(r => r.isActive && r.canBeProjectMember)
-                    .map(r => ({ value: r.code, label: r.name }));
+                    .map(r => ({ 
+                        value: r.code, 
+                        label: r.name,
+                        isManagementRole: r.isManagementRole || false // 保存isManagementRole字段
+                    }));
                 window.projectMemberRoles = roles;
                 return roles;
             }
@@ -1571,12 +1575,28 @@ export async function viewProject(projectId) {
                             const memberEmploymentType = m.employmentType || (m.userId && typeof m.userId === 'object' ? m.userId.employmentType : null);
                             const employmentLabel = memberEmploymentType === 'part_time' ? '兼职' : '专职';
                             const roleText = getRoleText(m.role);
-                            const productionRoles = ['translator', 'reviewer', 'layout', 'part_time_translator'];
-                            const isProductionRole = productionRoles.includes(m.role);
-                            // 兼容历史数据：如果没有 acceptanceStatus，生产人员默认为 pending，管理人员默认为 accepted
+                            
+                            // 兼容历史数据：如果没有 acceptanceStatus，根据角色判断
+                            // 管理角色（isManagementRole为true）默认 accepted，其他角色默认 pending
                             let acceptanceStatus = m.acceptanceStatus;
                             if (!acceptanceStatus) {
-                                acceptanceStatus = isProductionRole ? 'pending' : 'accepted';
+                                // 尝试从角色信息中获取isManagementRole，如果没有则使用默认判断
+                                let isManagementRole = false;
+                                if (window.projectMemberRoles) {
+                                    const roleInfo = window.projectMemberRoles.find(r => r.value === m.role);
+                                    if (roleInfo && roleInfo.isManagementRole !== undefined) {
+                                        isManagementRole = roleInfo.isManagementRole;
+                                    } else {
+                                        // 后备方案：使用传统管理角色列表
+                                        const traditionalManagementRoles = ['pm', 'sales', 'part_time_sales', 'admin_staff', 'finance', 'admin'];
+                                        isManagementRole = traditionalManagementRoles.includes(m.role);
+                                    }
+                                } else {
+                                    // 后备方案：使用传统管理角色列表
+                                    const traditionalManagementRoles = ['pm', 'sales', 'part_time_sales', 'admin_staff', 'finance', 'admin'];
+                                    isManagementRole = traditionalManagementRoles.includes(m.role);
+                                }
+                                acceptanceStatus = isManagementRole ? 'accepted' : 'pending';
                             }
                             
                             let extraInfo = '';
@@ -1589,44 +1609,43 @@ export async function viewProject(projectId) {
                             }
                             
                             // 生成状态显示HTML
+                            // 如果成员需要确认（acceptanceStatus === 'pending'），显示确认/拒绝按钮
                             let statusHtml = '';
-                            if (isProductionRole) {
-                                if (acceptanceStatus === 'pending') {
-                                    if (isCurrentUserMember) {
-                                        // 当前用户的待确认成员，显示接受/拒绝按钮
-                                        statusHtml = `
-                                            <div class="member-status" style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                                                <span class="status-badge pending">⏳ 待确认</span>
-                                                <button class="btn-small btn-success" data-click="acceptMember('${projectId}', '${m._id}')" style="background: #10b981; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">接受</button>
-                                                <button class="btn-small btn-danger" data-click="rejectMember('${projectId}', '${m._id}')" style="background: #dc2626; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">拒绝</button>
-                                            </div>
-                                        `;
-                                    } else {
-                                        // 其他用户的待确认成员，只显示状态
-                                        statusHtml = `
-                                            <div class="member-status" style="margin-top: 8px;">
-                                                <span class="status-badge pending">⏳ 待确认</span>
-                                            </div>
-                                        `;
-                                    }
-                                } else if (acceptanceStatus === 'accepted') {
-                                    const acceptedDate = m.acceptanceAt ? new Date(m.acceptanceAt).toLocaleDateString('zh-CN') : '';
+                            if (acceptanceStatus === 'pending') {
+                                if (isCurrentUserMember) {
+                                    // 当前用户的待确认成员，显示接受/拒绝按钮
                                     statusHtml = `
-                                        <div class="member-status" style="margin-top: 8px;">
-                                            <span class="status-badge accepted">✅ 已接受</span>
-                                            ${acceptedDate ? `<small style="color: #6b7280; font-size: 11px; margin-left: 8px;">${acceptedDate}</small>` : ''}
+                                        <div class="member-status" style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                            <span class="status-badge pending">⏳ 待确认</span>
+                                            <button class="btn-small btn-success" data-click="acceptMember('${projectId}', '${m._id}')" style="background: #10b981; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">接受</button>
+                                            <button class="btn-small btn-danger" data-click="rejectMember('${projectId}', '${m._id}')" style="background: #dc2626; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">拒绝</button>
                                         </div>
                                     `;
-                                } else if (acceptanceStatus === 'rejected') {
-                                    const rejectedDate = m.acceptanceAt ? new Date(m.acceptanceAt).toLocaleDateString('zh-CN') : '';
+                                } else {
+                                    // 其他用户的待确认成员，只显示状态
                                     statusHtml = `
                                         <div class="member-status" style="margin-top: 8px;">
-                                            <span class="status-badge rejected">❌ 已拒绝</span>
-                                            ${rejectedDate ? `<small style="color: #6b7280; font-size: 11px; margin-left: 8px;">${rejectedDate}</small>` : ''}
-                                            ${m.rejectionReason ? `<div style="color: #dc2626; font-size: 11px; margin-top: 4px;">原因：${m.rejectionReason}</div>` : ''}
+                                            <span class="status-badge pending">⏳ 待确认</span>
                                         </div>
                                     `;
                                 }
+                            } else if (acceptanceStatus === 'accepted') {
+                                const acceptedDate = m.acceptanceAt ? new Date(m.acceptanceAt).toLocaleDateString('zh-CN') : '';
+                                statusHtml = `
+                                    <div class="member-status" style="margin-top: 8px;">
+                                        <span class="status-badge accepted">✅ 已接受</span>
+                                        ${acceptedDate ? `<small style="color: #6b7280; font-size: 11px; margin-left: 8px;">${acceptedDate}</small>` : ''}
+                                    </div>
+                                `;
+                            } else if (acceptanceStatus === 'rejected') {
+                                const rejectedDate = m.acceptanceAt ? new Date(m.acceptanceAt).toLocaleDateString('zh-CN') : '';
+                                statusHtml = `
+                                    <div class="member-status" style="margin-top: 8px;">
+                                        <span class="status-badge rejected">❌ 已拒绝</span>
+                                        ${rejectedDate ? `<small style="color: #6b7280; font-size: 11px; margin-left: 8px;">${rejectedDate}</small>` : ''}
+                                        ${m.rejectionReason ? `<div style="color: #dc2626; font-size: 11px; margin-top: 4px;">原因：${m.rejectionReason}</div>` : ''}
+                                    </div>
+                                `;
                             }
                             
                             return `<div class="member-item" style="display: flex; flex-direction: column; padding: 10px; background: #f5f5f5; border-radius: 4px; margin-bottom: 8px;">
@@ -2300,11 +2319,13 @@ export function updateCreateProjectMembersList() {
         } else if (member.role === 'layout') {
             const ratioText = typeof member.wordRatio === 'number' ? `，占比: ${(member.wordRatio || 1.0).toFixed(2)}` : '';
             const costText = member.layoutCost ? `费用: ¥${member.layoutCost.toFixed(2)}` : '';
-            if (costText || ratioText) {
-                extraInfo = ` (${[costText, ratioText].filter(Boolean).join('，')})`;
+            const partTimeFeeText = member.partTimeFee ? `费用: ¥${member.partTimeFee.toFixed(2)}` : '';
+            if (costText || partTimeFeeText || ratioText) {
+                extraInfo = ` (${[costText || partTimeFeeText, ratioText].filter(Boolean).join('，')})`;
             }
-        } else if (member.role === 'part_time_translator' && member.partTimeFee) {
-            extraInfo = ` (兼职翻译费用: ¥${member.partTimeFee.toFixed(2)})`;
+        } else if (member.partTimeFee) {
+            // 所有兼职角色（除兼职销售外）的费用
+            extraInfo = ` (费用: ¥${member.partTimeFee.toFixed(2)})`;
         }
         return `
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; background: white; border-radius: 4px; margin-bottom: 8px;">
@@ -2396,7 +2417,7 @@ export async function showAddMemberModalForCreate() {
             </div>
             <div class="form-group">
                 <label>选择用户 *</label>
-                <select name="userId" id="createMemberUserId" required>
+                <select name="userId" id="createMemberUserId" data-change="onCreateMemberUserChange()" required>
                     <option value="">请先选择角色</option>
                 </select>
             </div>
@@ -2418,9 +2439,9 @@ export async function showAddMemberModalForCreate() {
                 <div id="createMemberLayoutCostValidation" style="margin-top: 5px;"></div>
             </div>
             <div class="form-group" id="createPartTimeFeeGroup" style="display: none;">
-                <label>兼职翻译费用（元）</label>
+                <label id="createPartTimeFeeLabel">兼职费用（元）</label>
                 <input type="number" name="partTimeFee" id="createMemberPartTimeFee" step="0.01" min="0">
-                <small style="color: #666; font-size: 12px;">用于兼职翻译的实际支付金额</small>
+                <small style="color: #666; font-size: 12px;">用于兼职角色的实际支付金额（除兼职销售外，所有兼职角色都需要输入费用）</small>
                 <div id="createMemberPartTimeFeeValidation" style="margin-top: 5px;"></div>
             </div>
             <div class="action-buttons">
@@ -2486,7 +2507,40 @@ export async function addMemberForCreate(e) {
         member.wordRatio = formData.get('wordRatio') ? parseFloat(formData.get('wordRatio')) : 1.0;
     }
     
-    if (role === 'layout') {
+    // 检查用户是否为兼职（除兼职销售外）
+    const selectedUser = (state.allUsers || []).find(u => u._id === userId);
+    const isPartTime = selectedUser?.employmentType === 'part_time';
+    const isPartTimeSales = role === 'part_time_sales' || (role === 'sales' && isPartTime);
+    
+    // 兼职角色（除兼职销售外）需要输入费用
+    if (isPartTime && !isPartTimeSales) {
+        const partTimeFee = formData.get('partTimeFee') ? parseFloat(formData.get('partTimeFee')) : 0;
+        const projectAmount = parseFloat(document.getElementById('addMemberFormForCreate')?.dataset?.projectAmount || 0);
+        
+        if (!partTimeFee || partTimeFee <= 0) {
+            const roleName = role === 'layout' ? '排版' : role === 'part_time_translator' ? '翻译' : role;
+            showToast(`请输入${roleName}费用，且必须大于0`, 'error');
+            return;
+        }
+        if (projectAmount && partTimeFee > projectAmount) {
+            showToast('费用不能大于项目总金额', 'error');
+            return;
+        }
+        
+        // 兼职排版还需要验证费用不超过项目总金额的5%
+        if (role === 'layout') {
+            if (projectAmount > 0) {
+                const percentage = (partTimeFee / projectAmount) * 100;
+                if (percentage > 5) {
+                    showToast(`排版费用不能超过项目总金额的5%，当前占比为${percentage.toFixed(2)}%`, 'error');
+                    return;
+                }
+            }
+        }
+        
+        member.partTimeFee = partTimeFee;
+    } else if (role === 'layout' && !isPartTime) {
+        // 专职排版：保持向后兼容，使用layoutCost
         const layoutCost = formData.get('layoutCost') ? parseFloat(formData.get('layoutCost')) : 0;
         if (layoutCost > 0) {
             const projectAmount = parseFloat(document.getElementById('addMemberFormForCreate')?.dataset?.projectAmount || 0);
@@ -2499,20 +2553,6 @@ export async function addMemberForCreate(e) {
             }
         }
         member.layoutCost = layoutCost;
-    }
-
-    if (role === 'part_time_translator') {
-        const partTimeFee = formData.get('partTimeFee') ? parseFloat(formData.get('partTimeFee')) : 0;
-        const projectAmount = parseFloat(document.getElementById('addMemberFormForCreate')?.dataset?.projectAmount || 0);
-        if (!partTimeFee || partTimeFee <= 0) {
-            showToast('请输入兼职翻译费用，且必须大于0', 'error');
-            return;
-        }
-        if (projectAmount && partTimeFee > projectAmount) {
-            showToast('兼职翻译费用不能大于项目总金额', 'error');
-            return;
-        }
-        member.partTimeFee = partTimeFee;
     }
     
     createProjectMembers.push(member);
@@ -2584,6 +2624,62 @@ export function toggleCreateTranslatorFields() {
 export function onCreateMemberRoleChange() {
     toggleCreateTranslatorFields();
     filterCreateUsersByRole();
+    // 重置用户选择，以便重新检查兼职状态
+    const userIdSelect = document.getElementById('createMemberUserId');
+    if (userIdSelect) {
+        userIdSelect.value = '';
+        const partTimeFeeGroup = document.getElementById('createPartTimeFeeGroup');
+        if (partTimeFeeGroup) partTimeFeeGroup.style.display = 'none';
+    }
+}
+
+// 当创建项目时用户选择改变时，检查是否为兼职并显示费用输入字段
+export function onCreateMemberUserChange() {
+    const role = document.getElementById('createMemberRole')?.value;
+    const userId = document.getElementById('createMemberUserId')?.value;
+    const partTimeFeeGroup = document.getElementById('createPartTimeFeeGroup');
+    const partTimeFeeLabel = document.getElementById('createPartTimeFeeLabel');
+    const partTimeFeeInput = document.getElementById('createMemberPartTimeFee');
+    const layoutCostGroup = document.getElementById('createLayoutCostGroup');
+    
+    if (!role || !userId || !partTimeFeeGroup) return;
+    
+    // 查找选中的用户
+    const selectedUser = (state.allUsers || []).find(u => u._id === userId);
+    if (!selectedUser) return;
+    
+    // 判断是否为兼职角色（除兼职销售外）
+    const isPartTime = selectedUser.employmentType === 'part_time';
+    const isPartTimeSales = role === 'part_time_sales' || (role === 'sales' && isPartTime);
+    
+    // 如果是兼职角色（除兼职销售外），显示费用输入字段
+    if (isPartTime && !isPartTimeSales) {
+        partTimeFeeGroup.style.display = 'block';
+        // 如果是layout角色且是兼职，隐藏layoutCostGroup（专职排版费用字段）
+        if (role === 'layout' && layoutCostGroup) {
+            layoutCostGroup.style.display = 'none';
+        }
+        if (partTimeFeeLabel) {
+            const roleName = role === 'part_time_translator' ? '兼职翻译' : 
+                           role === 'layout' ? '兼职排版' : 
+                           `兼职${getRoleText(role)}`;
+            partTimeFeeLabel.textContent = `${roleName}费用（元）`;
+        }
+        if (partTimeFeeInput) {
+            partTimeFeeInput.required = true;
+        }
+    } else {
+        // 专职角色或兼职销售，隐藏费用输入字段
+        partTimeFeeGroup.style.display = 'none';
+        // 如果是layout角色且是专职，显示layoutCostGroup（专职排版费用字段）
+        if (role === 'layout' && layoutCostGroup) {
+            layoutCostGroup.style.display = 'block';
+        }
+        if (partTimeFeeInput) {
+            partTimeFeeInput.required = false;
+            partTimeFeeInput.value = '';
+        }
+    }
 }
 
 // 根据角色过滤用户（用于创建项目时）
@@ -2745,7 +2841,7 @@ export async function showAddMemberModal(projectId) {
             </div>
             <div class="form-group">
                 <label>选择用户 *</label>
-                <select name="userId" id="memberUserId" required>
+                <select name="userId" id="memberUserId" data-change="onMemberUserChange()" required>
                     <option value="">请先选择角色</option>
                 </select>
             </div>
@@ -2767,9 +2863,9 @@ export async function showAddMemberModal(projectId) {
                 <div id="addMemberLayoutCostValidation" style="margin-top: 5px;"></div>
             </div>
             <div class="form-group" id="partTimeFeeGroup" style="display: none;">
-                <label>兼职翻译费用（元）</label>
+                <label id="partTimeFeeLabel">兼职费用（元）</label>
                 <input type="number" name="partTimeFee" id="addMemberPartTimeFee" step="0.01" min="0">
-                <small style="color: #666; font-size: 12px;">用于兼职翻译的实际支付金额</small>
+                <small style="color: #666; font-size: 12px;">用于兼职角色的实际支付金额（除兼职销售外，所有兼职角色都需要输入费用）</small>
                 <div id="addMemberPartTimeFeeValidation" style="margin-top: 5px;"></div>
             </div>
             <div class="action-buttons">
@@ -2829,6 +2925,62 @@ export function toggleTranslatorFields() {
 export function onMemberRoleChange() {
     toggleTranslatorFields();
     filterUsersByRole();
+    // 重置用户选择，以便重新检查兼职状态
+    const userIdSelect = document.getElementById('memberUserId');
+    if (userIdSelect) {
+        userIdSelect.value = '';
+        const partTimeFeeGroup = document.getElementById('partTimeFeeGroup');
+        if (partTimeFeeGroup) partTimeFeeGroup.style.display = 'none';
+    }
+}
+
+// 当用户选择改变时，检查是否为兼职并显示费用输入字段
+export function onMemberUserChange() {
+    const role = document.getElementById('memberRole')?.value;
+    const userId = document.getElementById('memberUserId')?.value;
+    const partTimeFeeGroup = document.getElementById('partTimeFeeGroup');
+    const partTimeFeeLabel = document.getElementById('partTimeFeeLabel');
+    const partTimeFeeInput = document.getElementById('addMemberPartTimeFee');
+    const layoutCostGroup = document.getElementById('layoutCostGroup');
+    
+    if (!role || !userId || !partTimeFeeGroup) return;
+    
+    // 查找选中的用户
+    const selectedUser = (state.allUsers || []).find(u => u._id === userId);
+    if (!selectedUser) return;
+    
+    // 判断是否为兼职角色（除兼职销售外）
+    const isPartTime = selectedUser.employmentType === 'part_time';
+    const isPartTimeSales = role === 'part_time_sales' || (role === 'sales' && isPartTime);
+    
+    // 如果是兼职角色（除兼职销售外），显示费用输入字段
+    if (isPartTime && !isPartTimeSales) {
+        partTimeFeeGroup.style.display = 'block';
+        // 如果是layout角色且是兼职，隐藏layoutCostGroup（专职排版费用字段）
+        if (role === 'layout' && layoutCostGroup) {
+            layoutCostGroup.style.display = 'none';
+        }
+        if (partTimeFeeLabel) {
+            const roleName = role === 'part_time_translator' ? '兼职翻译' : 
+                           role === 'layout' ? '兼职排版' : 
+                           `兼职${getRoleText(role)}`;
+            partTimeFeeLabel.textContent = `${roleName}费用（元）`;
+        }
+        if (partTimeFeeInput) {
+            partTimeFeeInput.required = true;
+        }
+    } else {
+        // 专职角色或兼职销售，隐藏费用输入字段
+        partTimeFeeGroup.style.display = 'none';
+        // 如果是layout角色且是专职，显示layoutCostGroup（专职排版费用字段）
+        if (role === 'layout' && layoutCostGroup) {
+            layoutCostGroup.style.display = 'block';
+        }
+        if (partTimeFeeInput) {
+            partTimeFeeInput.required = false;
+            partTimeFeeInput.value = '';
+        }
+    }
 }
 
 export function filterUsersByRole() {
@@ -2992,20 +3144,49 @@ export async function addMember(e, projectId) {
         }
     }
 
+    // 检查用户是否为兼职（除兼职销售外）
+    const selectedUser = (state.allUsers || []).find(u => u._id === userId);
+    const isPartTime = selectedUser?.employmentType === 'part_time';
+    const isPartTimeSales = role === 'part_time_sales' || (role === 'sales' && isPartTime);
+    
     let payload = { role, userId };
     if (role === 'translator') {
         payload.translatorType = formData.get('translatorType') || 'mtpe';
         payload.wordRatio = formData.get('wordRatio') ? parseFloat(formData.get('wordRatio')) : 1.0;
     }
-    if (role === 'layout') {
+    
+    // 兼职角色（除兼职销售外）需要输入费用
+    if (isPartTime && !isPartTimeSales) {
+        const partTimeFee = formData.get('partTimeFee') ? parseFloat(formData.get('partTimeFee')) : 0;
+        const projectAmount = parseFloat(document.getElementById('addMemberForm')?.dataset?.projectAmount || 0);
+        
+        if (!partTimeFee || partTimeFee <= 0) {
+            const roleName = role === 'layout' ? '排版' : role === 'part_time_translator' ? '翻译' : role;
+            showToast(`请输入${roleName}费用，且必须大于0`, 'error');
+            return;
+        }
+        if (projectAmount && partTimeFee > projectAmount) {
+            showToast('费用不能大于项目总金额', 'error');
+            return;
+        }
+        
+        // 兼职排版还需要验证费用不超过项目总金额的5%
+        if (role === 'layout') {
+            if (projectAmount > 0) {
+                const percentage = (partTimeFee / projectAmount) * 100;
+                if (percentage > 5) {
+                    showToast(`排版费用不能超过项目总金额的5%，当前占比为${percentage.toFixed(2)}%`, 'error');
+                    return;
+                }
+            }
+        }
+        
+        payload.partTimeFee = partTimeFee;
+    } else if (role === 'layout' && !isPartTime) {
+        // 专职排版：保持向后兼容，使用layoutCost
         const layoutCost = formData.get('layoutCost') ? parseFloat(formData.get('layoutCost')) : 0;
         if (layoutCost > 0 && !validateAddMemberLayoutCost()) return;
         payload.layoutCost = layoutCost;
-    }
-    if (role === 'part_time_translator') {
-        const partTimeFee = formData.get('partTimeFee') ? parseFloat(formData.get('partTimeFee')) : 0;
-        if (!validateAddMemberPartTimeFee()) return;
-        payload.partTimeFee = partTimeFee;
     }
 
     try {

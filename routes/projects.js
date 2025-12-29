@@ -352,7 +352,13 @@ router.post('/:id/members/:memberId/accept',
     project.memberAcceptance.acceptedCount += 1;
     
     // 检查是否所有生产人员都已接受
-    const productionRoles = ['translator', 'reviewer', 'layout', 'part_time_translator'];
+    // 使用Role模型的isManagementRole字段动态判断生产角色
+    const Role = require('../models/Role');
+    const allRoles = await Role.find({ isActive: true, canBeProjectMember: true });
+    const productionRoles = allRoles
+      .filter(r => !r.isManagementRole)
+      .map(r => r.code);
+    
     const productionMembers = await ProjectMember.find({
       projectId: projectId,
       role: { $in: productionRoles }
@@ -566,6 +572,8 @@ router.post('/:id/add-member', asyncHandler(async (req, res) => {
     if (error.code === 11000) {
       throw new AppError('该用户在此项目中已存在相同角色', 400, 'DUPLICATE_MEMBER');
     }
+    // 记录详细错误信息用于调试
+    console.error('[Projects] 添加成员失败:', error.message, error.code, error);
     throw error; // 其他错误继续向上抛出
   }
 }));

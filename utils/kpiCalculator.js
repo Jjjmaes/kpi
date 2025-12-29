@@ -140,8 +140,38 @@ function calculateKPIByRole(params) {
       formula = `兼职翻译费用(${projectAmount})`;
       break;
 
+    case 'layout':
+      // 排版：按 PM 录入的排版费用直接记入 KPI
+      // 此时调用方应将 projectAmount 传入为「排版费用」
+      kpiValue = projectAmount;
+      formula = `排版费用(${projectAmount})`;
+      break;
+
+    case 'part_time_sales':
+      // 兼职销售：按 PM 录入的兼职销售费用直接记入 KPI
+      // 此时调用方应将 projectAmount 传入为「兼职销售费用」
+      kpiValue = projectAmount;
+      formula = `兼职销售费用(${projectAmount})`;
+      break;
+
+    case 'finance':
+      // 财务岗：使用综合岗的计算方式，需要全公司总额
+      // 这里先返回0，需要在调用时传入totalCompanyAmount
+      kpiValue = 0;
+      formula = '财务岗需要全公司总额计算';
+      break;
+
     default:
-      throw new Error(`未知的角色类型: ${role}`);
+      // 对于新角色，使用通用的KPI计算方式：项目金额 × 系数 × 完成系数
+      // 如果提供了 wordRatio，也参与计算
+      if (wordRatio && wordRatio !== 1) {
+        kpiValue = projectAmount * ratio * wordRatio * completionFactor;
+        formula = `项目金额(${projectAmount}) × 系数(${ratio}) × 占比(${wordRatio}) × 完成系数(${completionFactor})`;
+      } else {
+        kpiValue = projectAmount * ratio * completionFactor;
+        formula = `项目金额(${projectAmount}) × 系数(${ratio}) × 完成系数(${completionFactor})`;
+      }
+      break;
   }
 
   return {

@@ -122,7 +122,10 @@ router.put('/:id', authorize('admin'), asyncHandler(async (req, res) => {
   // 更新权限（直接使用对象）
   if (permissions !== undefined) {
     if (typeof permissions === 'object' && !Array.isArray(permissions)) {
+      console.log('[Roles] 更新权限前:', JSON.stringify(role.permissions));
+      console.log('[Roles] 更新权限数据:', JSON.stringify(permissions));
       role.permissions = permissions;
+      console.log('[Roles] 更新权限后:', JSON.stringify(role.permissions));
     } else {
       console.warn('[Roles] 权限数据格式不正确:', permissions);
       throw new AppError('权限数据格式不正确', 400, 'VALIDATION_ERROR');

@@ -8,7 +8,7 @@ import { showSection, closeModal } from './core/ui.js';
 // 导入业务模块
 import { initAuth, checkAuth, showLogin, showMainApp, logout, bindAuthEvents, submitForcePasswordChange } from './modules/auth.js';
 import { loadDashboard, navigateFromDashboardCard, initDashboard, updateDashboardMonth } from './modules/dashboard.js';
-import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectPayments, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, acceptMember, rejectMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, exportProjectContract, createProject, updateProject, setLayoutCost, addMember, showAddMemberModal, showPaymentModalForProject, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter, showAddMemberModalForCreate, addMemberForCreate, removeCreateProjectMember, toggleCreateTranslatorFields, filterCreateUsersByRole, validateCreateMemberLayoutCost, updateCreateProjectMembersList, onMemberRoleChange, onCreateMemberRoleChange, toggleTranslatorFields, filterUsersByRole, validateAddMemberLayoutCost, closeAddMemberModalAndReturnToCreate, addInlineMemberForCreate, onInlineCreateMemberRoleChange, filterInlineCreateUsersByRole, validateInlineCreateMemberLayoutCost, quickRequestInvoice, viewProjectInvoiceRequest, selectAllProjectsForInvoice, deselectAllProjectsForInvoice, batchRequestInvoice, toggleProjectForInvoice, toggleSelectAllProjects, initProjectRoleFilter, onProjectRoleFilterChange } from './modules/project.js';
+import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectPayments, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, acceptMember, rejectMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, exportProjectContract, createProject, updateProject, setLayoutCost, addMember, showAddMemberModal, showPaymentModalForProject, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter, showAddMemberModalForCreate, addMemberForCreate, removeCreateProjectMember, toggleCreateTranslatorFields, filterCreateUsersByRole, validateCreateMemberLayoutCost, updateCreateProjectMembersList, onMemberRoleChange, onCreateMemberRoleChange, onMemberUserChange, onCreateMemberUserChange, toggleTranslatorFields, filterUsersByRole, validateAddMemberLayoutCost, closeAddMemberModalAndReturnToCreate, addInlineMemberForCreate, onInlineCreateMemberRoleChange, filterInlineCreateUsersByRole, validateInlineCreateMemberLayoutCost, quickRequestInvoice, viewProjectInvoiceRequest, selectAllProjectsForInvoice, deselectAllProjectsForInvoice, batchRequestInvoice, toggleProjectForInvoice, toggleSelectAllProjects, initProjectRoleFilter, onProjectRoleFilterChange } from './modules/project.js';
 import { loadCustomers, searchCustomers, showCreateCustomerModal, showCreateCustomerModalFromProject, editCustomer, deleteCustomer, createCustomer, updateCustomer, updateCustomerInfo, addCustomerContactRow, removeCustomerContactRow } from './modules/customer.js';
 import { loadKPI, exportKPI, generateMonthlyKPI, showEvaluateModal, submitEvaluation } from './modules/kpi.js';
 import { loadReceivables, renderReceivables, exportReceivables, loadInvoiceProjects, renderInvoiceProjects, addInvoice, addInvoiceForProject, loadPaymentRecordsProjects, renderPaymentRecordsProjects, addPaymentRecord, addPaymentRecordForProject, loadPaymentRecords, clearPaymentRecordFilter, showFinanceSection, loadFinanceSummary, exportFinanceSummary, loadPendingKpi, reviewKpiRecord, rejectKpiRecord, batchReviewKpiRecords, selectAllPendingKpi, deselectAllPendingKpi, toggleSelectAllPendingKpi, loadReconciliation, exportReconciliation, togglePaymentRecords, toggleInvoiceRecords, clearPaymentRecordsFilters, removePaymentRecord, jumpReceivablePage, prevReceivablePage, nextReceivablePage, jumpPaymentRecordsProjectsPage, prevPaymentRecordsProjectsPage, nextPaymentRecordsProjectsPage, jumpInvoiceProjectsPage, prevInvoiceProjectsPage, nextInvoiceProjectsPage, backToFinanceNav, showProjectSelector, filterProjectSelector, selectProject, loadInvoiceRequests, renderInvoiceRequests, loadMyInvoiceRequests, renderMyInvoiceRequests, viewInvoiceRequest, approveInvoiceRequest, rejectInvoiceRequest, deleteInvoiceRequest, showCreateInvoiceRequestModal, jumpInvoiceRequestPage, prevInvoiceRequestPage, nextInvoiceRequestPage, jumpMyInvoiceRequestPage, prevMyInvoiceRequestPage, nextMyInvoiceRequestPage, handlePaymentMethodChange } from './modules/finance.js';
@@ -16,7 +16,7 @@ import { loadUsers, loadUsersForSelect, showCreateUserModal, editUser, deleteUse
 import { loadLanguages, showCreateLanguageModal, showEditLanguageModal, createLanguage, updateLanguage } from './modules/language.js';
 import { loadBackups, createBackup, cleanupOldBackups, restoreBackup, deleteBackupFile } from './modules/backup.js';
 import { loadConfig, loadConfigHistory, loadPermissionsConfig, savePermissionsConfig, loadOrgInfo, viewConfigChange } from './modules/system.js';
-import { loadRoles, showCreateRoleModal, viewRole, editRole, deleteRole } from './modules/role.js';
+import { loadRoles, showCreateRoleModal, viewRole, editRole, deleteRole, submitEditRole } from './modules/role.js';
 import { startNotificationPolling, stopNotificationPolling, toggleNotificationPanel, markAllNotificationsRead, initNotificationAudio } from './modules/notification.js';
 import { loadPaymentCompletionDetail, renderPaymentCompletionDetail, pcdPrevPage, pcdNextPage, pcdJumpPage, pcdToggleProject, pcdToggleOverdue } from './modules/paymentDetail.js';
 import { showEvaluationModal, showProjectEvaluationsList, submitProjectEvaluation, showEvaluationStats } from './modules/evaluation.js';
@@ -558,6 +558,7 @@ const ACTIONS = Object.freeze({
     showAddMemberModal: (projectId) => showAddMemberModal(projectId),
     showPaymentModalForProject: (projectId) => showPaymentModalForProject(projectId),
     onMemberRoleChange: () => onMemberRoleChange(),
+    onMemberUserChange: () => onMemberUserChange(),
     toggleTranslatorFields: () => toggleTranslatorFields(),
     filterUsersByRole: () => filterUsersByRole(),
     validateAddMemberLayoutCost: () => validateAddMemberLayoutCost(),
@@ -567,6 +568,7 @@ const ACTIONS = Object.freeze({
     toggleCreateTranslatorFields: () => toggleCreateTranslatorFields(),
     filterCreateUsersByRole: () => filterCreateUsersByRole(),
     onCreateMemberRoleChange: () => onCreateMemberRoleChange(),
+    onCreateMemberUserChange: () => onCreateMemberUserChange(),
     validateCreateMemberLayoutCost: () => validateCreateMemberLayoutCost(),
     closeAddMemberModalAndReturnToCreate: () => closeAddMemberModalAndReturnToCreate(),
     updateCreateProjectMembersList: () => updateCreateProjectMembersList(),
@@ -713,6 +715,7 @@ const ACTIONS = Object.freeze({
     showCreateRoleModal: () => showCreateRoleModal(),
     viewRole: (roleId) => viewRole(roleId),
     editRole: (roleId) => editRole(roleId),
+    submitEditRole: (roleId) => submitEditRole(roleId),
     deleteRole: (roleId) => deleteRole(roleId),
     loadPermissionsConfig: () => loadPermissionsConfig(),
     savePermissionsConfig: () => savePermissionsConfig(),

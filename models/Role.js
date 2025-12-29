@@ -53,6 +53,37 @@ const roleSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  // 是否为管理角色（用于判断是否需要成员确认等）
+  isManagementRole: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  // 是否为固定角色（固定角色的KPI系数在KPI配置页面中配置，不在角色系数配置中）
+  isFixedRole: {
+    type: Boolean,
+    default: false
+  },
+  // 是否为特殊角色（有特殊处理逻辑，如part_time_sales、part_time_translator、layout）
+  isSpecialRole: {
+    type: Boolean,
+    default: false
+  },
+  // 是否可用于产能记录（如翻译、审校等需要记录工作量的角色）
+  canRecordCapacity: {
+    type: Boolean,
+    default: false
+  },
+  // 是否可以作为评价人（如pm、translator、reviewer、layout等）
+  canBeEvaluator: {
+    type: Boolean,
+    default: false
+  },
+  // 是否可以被评价（如sales、part_time_sales、pm等）
+  canBeEvaluated: {
+    type: Boolean,
+    default: false
+  },
   createdAt: {
     type: Date,
     default: Date.now

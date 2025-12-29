@@ -64,6 +64,7 @@ router.post('/update', async (req, res) => {
       companyContact,
       companyPhone,
       companyEmail,
+      roleRatios, // 新增：动态角色系数配置
       reason
     } = req.body;
 
@@ -101,6 +102,10 @@ router.post('/update', async (req, res) => {
     if (companyContact !== undefined) currentConfig.companyContact = companyContact;
     if (companyPhone !== undefined) currentConfig.companyPhone = companyPhone;
     if (companyEmail !== undefined) currentConfig.companyEmail = companyEmail;
+    // 更新动态角色系数配置
+    if (roleRatios !== undefined && typeof roleRatios === 'object') {
+      currentConfig.roleRatios = roleRatios;
+    }
 
     currentConfig.version += 1;
     currentConfig.updatedAt = Date.now();
@@ -123,7 +128,8 @@ router.post('/update', async (req, res) => {
         companyAddress: currentConfig.companyAddress,
         companyContact: currentConfig.companyContact,
         companyPhone: currentConfig.companyPhone,
-        companyEmail: currentConfig.companyEmail
+        companyEmail: currentConfig.companyEmail,
+        roleRatios: currentConfig.roleRatios
       },
       reason: reason || '未提供原因'
     });
@@ -345,6 +351,121 @@ module.exports = {
     res.status(500).json({ 
       success: false, 
       message: error.message 
+    });
+  }
+});
+
+// 获取所有可用于KPI的角色及其系数配置
+router.get('/kpi-roles', async (req, res) => {
+  try {
+    const Role = require('../models/Role');
+    const config = await KpiConfig.getActiveConfig();
+    
+    // 获取所有允许用于KPI的角色
+    const roles = await Role.find({
+      isActive: true,
+      canBeKpiRole: true
+    }).sort({ priority: -1 });
+    
+    // 构建角色及其系数配置（包含完整的角色字段用于前端过滤）
+    const roleConfigs = roles.map(role => {
+      const roleRatios = config.roleRatios || {};
+      const roleConfig = roleRatios[role.code] || {};
+      
+      return {
+        code: role.code,
+        name: role.name,
+        description: role.description,
+        // 从固定字段或动态配置中获取系数
+        ratio: config.getRoleRatio(role.code, 'base'),
+        // 完整的角色配置（如果有）
+        ratioConfig: roleConfig,
+        // 包含完整的角色字段用于前端过滤
+        isSystem: role.isSystem || false,
+        isFixedRole: role.isFixedRole || false,
+        isSpecialRole: role.isSpecialRole || false,
+        canBeKpiRole: role.canBeKpiRole !== undefined ? role.canBeKpiRole : true,
+        isActive: role.isActive !== undefined ? role.isActive : true
+      };
+    });
+    
+    res.json({
+      success: true,
+      data: roleConfigs
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// 更新特定角色的KPI系数配置
+router.put('/kpi-roles/:roleCode', async (req, res) => {
+  try {
+    const { roleCode } = req.params;
+    const { ratio, ratioConfig } = req.body;
+    
+    // 验证角色是否存在且允许用于KPI
+    const Role = require('../models/Role');
+    const role = await Role.findOne({
+      code: roleCode,
+      isActive: true,
+      canBeKpiRole: true
+    });
+    
+    if (!role) {
+      return res.status(400).json({
+        success: false,
+        message: '角色不存在或不允许用于KPI'
+      });
+    }
+    
+    const config = await KpiConfig.getActiveConfig();
+    const roleRatios = config.roleRatios || {};
+    
+    // 更新角色系数配置
+    if (ratioConfig !== undefined && typeof ratioConfig === 'object') {
+      roleRatios[roleCode] = ratioConfig;
+    } else if (ratio !== undefined) {
+      // 如果只提供了单个ratio值，作为base系数
+      roleRatios[roleCode] = { base: ratio };
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: '请提供ratio或ratioConfig参数'
+      });
+    }
+    
+    config.roleRatios = roleRatios;
+    config.version += 1;
+    config.updatedAt = Date.now();
+    
+    // 记录变更历史
+    config.changeHistory.push({
+      changedBy: req.user._id,
+      changedAt: Date.now(),
+      oldValues: {},
+      newValues: { roleRatios: { [roleCode]: roleRatios[roleCode] } },
+      reason: `更新角色 ${role.name} (${roleCode}) 的KPI系数配置`
+    });
+    
+    await config.save();
+    
+    res.json({
+      success: true,
+      message: `角色 ${role.name} 的KPI系数配置已更新`,
+      data: {
+        code: roleCode,
+        name: role.name,
+        ratioConfig: roleRatios[roleCode]
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
     });
   }
 });

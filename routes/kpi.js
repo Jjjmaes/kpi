@@ -25,8 +25,88 @@ const { exportMonthlyKPISheet, exportUserKPIDetail } = require('../services/exce
 router.use(authenticate);
 
 // Dashboard 汇总（按权限）
-// 允许兼职销售/排版/兼职翻译查看自己的数据
-router.get('/dashboard', authorize('admin', 'finance', 'pm', 'sales', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout', 'part_time_translator'), async (req, res) => {
+// 允许所有有 kpi.view 或 project.view 权限的用户查看（支持动态角色）
+router.get('/dashboard', async (req, res) => {
+  // 检查用户是否有查看KPI或项目的权限
+  // 支持动态角色：检查当前角色，如果当前角色没有权限，检查用户的其他角色
+  const userRoles = req.user?.roles || [];
+  
+  if (!req.currentRole && userRoles.length === 0) {
+    return res.status(403).json({
+      success: false,
+      error: {
+        code: 'INSUFFICIENT_PERMISSIONS',
+        message: '未指定当前角色且用户无可用角色',
+        statusCode: 403
+      }
+    });
+  }
+  
+  // 先检查当前角色的权限
+  let hasPermission = false;
+  if (req.currentRole) {
+    const kpiViewPerm = getCurrentPermission(req, 'kpi.view');
+    const projectViewPerm = getCurrentPermission(req, 'project.view');
+    const hasKpiPermission = kpiViewPerm && kpiViewPerm !== false;
+    const hasProjectPermission = projectViewPerm && projectViewPerm !== false;
+    hasPermission = hasKpiPermission || hasProjectPermission;
+  }
+  
+  // 如果当前角色没有权限，检查用户的其他角色是否有权限
+  if (!hasPermission && userRoles.length > 0) {
+    for (const role of userRoles) {
+      const { getPermissionSync } = require('../config/permissions');
+      const kpiViewPerm = getPermissionSync(role, 'kpi.view');
+      const projectViewPerm = getPermissionSync(role, 'project.view');
+      const hasKpiPermission = kpiViewPerm && kpiViewPerm !== false;
+      const hasProjectPermission = projectViewPerm && projectViewPerm !== false;
+      if (hasKpiPermission || hasProjectPermission) {
+        hasPermission = true;
+        break;
+      }
+    }
+  }
+  
+  if (!hasPermission) {
+    // 检查角色是否存在以及是否配置了权限
+    const Role = require('../models/Role');
+    let roleInfo = null;
+    if (req.currentRole) {
+      try {
+        roleInfo = await Role.findOne({ code: req.currentRole, isActive: true });
+      } catch (err) {
+        console.error('[Dashboard] 查询角色失败:', err);
+      }
+    }
+    
+    console.warn('[Dashboard] 权限检查失败:', {
+      currentRole: req.currentRole,
+      userRoles: userRoles,
+      userId: req.user?._id,
+      username: req.user?.username,
+      roleExists: !!roleInfo,
+      roleHasPermissions: roleInfo ? Object.keys(roleInfo.permissions || {}).length > 0 : false
+    });
+    
+    let errorMessage = `权限不足：角色 "${req.currentRole || '未指定'}" 没有 kpi.view 或 project.view 权限。`;
+    if (roleInfo && Object.keys(roleInfo.permissions || {}).length === 0) {
+      errorMessage += ' 请前往"角色权限配置"页面为该角色配置权限。';
+    } else if (roleInfo) {
+      errorMessage += ` 该角色已配置了 ${Object.keys(roleInfo.permissions || {}).length} 项权限，但缺少 kpi.view 或 project.view 权限。`;
+    } else if (req.currentRole) {
+      errorMessage += ` 角色 "${req.currentRole}" 不存在或已被禁用。`;
+    }
+    
+    return res.status(403).json({
+      success: false,
+      error: {
+        code: 'INSUFFICIENT_PERMISSIONS',
+        message: errorMessage,
+        statusCode: 403
+      }
+    });
+  }
+  
   try {
     const { month, status, businessType, role, customerId } = req.query;
 
@@ -1051,8 +1131,29 @@ router.post('/calculate-project/:projectId', async (req, res) => {
 });
 
 // 实时计算单个项目的每人KPI（不落库，含权限校验）
-// 允许兼职销售/排版/兼职翻译查看自己所在项目的实时KPI
-router.get('/project/:projectId/realtime', authorize('admin', 'finance', 'pm', 'sales', 'translator', 'reviewer', 'admin_staff', 'part_time_sales', 'layout', 'part_time_translator'), async (req, res) => {
+// 允许所有有 kpi.view 或 project.view 权限的用户查看（支持动态角色）
+router.get('/project/:projectId/realtime', async (req, res) => {
+  // 检查用户是否有查看KPI或项目的权限
+  // getCurrentPermission 可能返回 'all', 'self', true, false 等值
+  const kpiViewPerm = getCurrentPermission(req, 'kpi.view');
+  const projectViewPerm = getCurrentPermission(req, 'project.view');
+  
+  // 如果两个权限都是 false 或 undefined，则拒绝访问
+  // 注意：'self', 'all', true 等都是有效权限值
+  const hasKpiPermission = kpiViewPerm && kpiViewPerm !== false;
+  const hasProjectPermission = projectViewPerm && projectViewPerm !== false;
+  
+  if (!hasKpiPermission && !hasProjectPermission) {
+    return res.status(403).json({
+      success: false,
+      error: {
+        code: 'INSUFFICIENT_PERMISSIONS',
+        message: '权限不足：需要 kpi.view 或 project.view 权限',
+        statusCode: 403
+      }
+    });
+  }
+  
   try {
     const { projectId } = req.params;
 

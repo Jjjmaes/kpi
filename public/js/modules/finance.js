@@ -1861,11 +1861,26 @@ export async function loadPendingKpi() {
         }
 
         const rows = (data.data || []).map(r => {
-            // 兼职销售和兼职排版按金额计算（元），其他角色按分值计算（分）
+            // 判断是否为兼职角色（除兼职销售外，所有兼职角色都按金额计算）
             const roleStr = String(r.role || '').trim();
-            const isPartTimeRole = roleStr === 'part_time_sales' || roleStr === 'layout';
-            const unit = isPartTimeRole ? '元' : '分';
-            const prefix = isPartTimeRole ? '¥' : '';
+            const formula = r.calculationDetails?.formula || '';
+            // 统一使用employmentType判断兼职角色（优先使用employmentType，后备使用角色代码）
+            const isPartTimeRole = (record) => {
+                // 优先使用employmentType字段（最准确）
+                if (record.employmentType === 'part_time') {
+                    return true;
+                }
+                // 后备方案：通过角色代码判断（兼容历史数据）
+                const roleStr = String(record.role || '').trim();
+                return roleStr === 'part_time_sales' || 
+                       roleStr === 'part_time_translator' ||
+                       roleStr.includes('part_time');
+            };
+            
+            const isPartTime = isPartTimeRole(r);
+            // 兼职角色按金额计算（元），专职KPI按分值计算（分）
+            const unit = isPartTime ? '元' : '分';
+            const prefix = isPartTime ? '¥' : '';
             return `
                 <tr>
                     <td style="text-align: center;">

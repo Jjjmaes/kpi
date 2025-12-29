@@ -12,10 +12,12 @@ const monthlyRoleKPISchema = new mongoose.Schema({
     required: true
   },
   // 角色
+  // 注意：不再使用enum限制，通过Role模型的canBeKpiRole标志控制
+  // 在创建/更新月度角色KPI记录时，需要通过验证确保角色允许用于KPI
   role: {
     type: String,
-    enum: ['admin_staff', 'finance'],
-    required: true
+    required: true,
+    trim: true
   },
   // 计算月份（YYYY-MM格式）
   month: {

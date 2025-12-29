@@ -38,6 +38,19 @@ export async function loadKPI() {
         const roles = state.currentUser?.roles || [];
         const isAdminOrFinance = roles.includes('admin') || roles.includes('finance');
         if (isAllUsers && data.data?.summary && isAdminOrFinance) {
+            // 判断是否为兼职角色的函数（统一使用employmentType判断）
+            const isPartTimeRole = (record) => {
+                // 优先使用employmentType字段（最准确）
+                if (record.employmentType === 'part_time') {
+                    return true;
+                }
+                // 后备方案：通过角色代码判断（兼容历史数据）
+                const roleStr = String(record.role || '').trim();
+                return roleStr === 'part_time_sales' || 
+                       roleStr === 'part_time_translator' ||
+                       roleStr.includes('part_time');
+            };
+
             const html = `
                 <h3>全部用户KPI汇总 - ${month}</h3>
                 <table>
@@ -45,44 +58,66 @@ export async function loadKPI() {
                         <tr>
                             <th>用户</th>
                             <th>角色</th>
-                            <th>各角色KPI</th>
+                            <th>专职KPI（分）</th>
+                            <th>兼职费用（元）</th>
                             <th>总计</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${data.data.summary.map(user => {
-                            const partTimeRoles = Object.keys(user.byRole).filter(role => 
-                                role === 'part_time_sales' || role === 'layout' || role === 'part_time_translator'
-                            );
-                            const fullTimeRoles = Object.keys(user.byRole).filter(role => 
-                                !['part_time_sales', 'layout', 'part_time_translator'].includes(role)
-                            );
+                            // 分离专职和兼职（需要从records中获取employmentType信息）
+                            const roleEmploymentMap = {};
+                            (data.data?.records || []).forEach(r => {
+                                if (r.userId?._id === user.userId || r.userId === user.userId) {
+                                    roleEmploymentMap[r.role] = r.employmentType || 'full_time';
+                                }
+                            });
+                            
+                            const partTimeRoles = Object.keys(user.byRole).filter(role => {
+                                const empType = roleEmploymentMap[role];
+                                return empType === 'part_time' || role.includes('part_time');
+                            });
+                            const fullTimeRoles = Object.keys(user.byRole).filter(role => {
+                                const empType = roleEmploymentMap[role];
+                                return empType !== 'part_time' && !role.includes('part_time');
+                            });
                             const partTimeTotal = partTimeRoles.reduce((sum, role) => sum + (user.byRole[role] || 0), 0);
                             const fullTimeTotal = fullTimeRoles.reduce((sum, role) => sum + (user.byRole[role] || 0), 0);
 
+                            // 构建专职KPI显示
+                            const fullTimeDisplay = fullTimeRoles.length > 0 
+                                ? fullTimeRoles.map(role => {
+                                    const value = user.byRole[role] || 0;
+                                    return `${getRoleText(role)}: ${value.toLocaleString()} 分`;
+                                }).join('<br>')
+                                : '-';
+
+                            // 构建兼职费用显示
+                            const partTimeDisplay = partTimeRoles.length > 0 
+                                ? partTimeRoles.map(role => {
+                                    const value = user.byRole[role] || 0;
+                                    return `${getRoleText(role)}: ¥${value.toLocaleString()} 元`;
+                                }).join('<br>')
+                                : '-';
+
+                            // 总计显示
                             let totalDisplay = '';
                             if (partTimeRoles.length > 0 && fullTimeRoles.length === 0) {
-                                totalDisplay = `<strong>¥${user.totalKPI.toLocaleString()} 元</strong>`;
+                                totalDisplay = `<strong>¥${partTimeTotal.toLocaleString()} 元</strong>`;
                             } else if (partTimeRoles.length === 0 && fullTimeRoles.length > 0) {
-                                totalDisplay = `<strong>${user.totalKPI.toLocaleString()} 分</strong>`;
+                                totalDisplay = `<strong>${fullTimeTotal.toLocaleString()} 分</strong>`;
                             } else if (partTimeRoles.length > 0 && fullTimeRoles.length > 0) {
                                 totalDisplay = `<strong>兼职: ¥${partTimeTotal.toLocaleString()} 元<br>专职: ${fullTimeTotal.toLocaleString()} 分</strong>`;
                             } else {
-                                totalDisplay = `<strong>${user.totalKPI.toLocaleString()} 分</strong>`;
+                                totalDisplay = `<strong>-</strong>`;
                             }
 
                             return `
                             <tr>
                                 <td>${user.userName}</td>
                                 <td>${user.roles.map(r => getRoleText(r)).join(', ')}</td>
-                                <td style="font-size: 12px;">
-                                    ${Object.entries(user.byRole).map(([role, value]) => {
-                                        const isPartTimeRole = role === 'part_time_sales' || role === 'layout' || role === 'part_time_translator';
-                                        const unit = isPartTimeRole ? '元' : '分';
-                                        const prefix = isPartTimeRole ? '¥' : '';
-                                        return `${getRoleText(role)}: ${prefix}${value.toLocaleString()} ${unit}`;
-                                    }).join('<br>')}
-                                </td>
+                                <td style="font-size: 12px; color: #1e40af;">${fullTimeDisplay}</td>
+                                <td style="font-size: 12px; color: #0f766e;">${partTimeDisplay}</td>
                                 <td>${totalDisplay}</td>
                             </tr>`;
                         }).join('')}
@@ -199,12 +234,30 @@ export async function loadKPI() {
                 byRole[role] += r.kpiValue || 0;
             });
 
-            const partTimeRolesForUser = Object.keys(byRole).filter(role => 
-                role === 'part_time_sales' || role === 'layout' || role === 'part_time_translator'
-            );
-            const fullTimeRolesForUser = Object.keys(byRole).filter(role => 
-                !['part_time_sales', 'layout', 'part_time_translator'].includes(role)
-            );
+            // 统一使用employmentType判断兼职角色
+            const isPartTimeRole = (record) => {
+                // 优先使用employmentType字段（最准确）
+                if (record.employmentType === 'part_time') {
+                    return true;
+                }
+                // 后备方案：通过角色代码判断（兼容历史数据）
+                const roleStr = String(record.role || '').trim();
+                return roleStr === 'part_time_sales' || 
+                       roleStr === 'part_time_translator' ||
+                       roleStr.includes('part_time');
+            };
+
+            const partTimeRolesForUser = Object.keys(byRole).filter(role => {
+                // 从records中找到对应的记录来判断employmentType
+                const record = (data.data?.records || []).find(r => String(r.role || '').trim() === role);
+                if (!record) return false;
+                return isPartTimeRole(record);
+            });
+            const fullTimeRolesForUser = Object.keys(byRole).filter(role => {
+                const record = (data.data?.records || []).find(r => String(r.role || '').trim() === role);
+                if (!record) return true; // 如果没有记录，默认视为专职
+                return !isPartTimeRole(record);
+            });
             const partTimeTotalForUser = partTimeRolesForUser.reduce((sum, role) => sum + (byRole[role] || 0), 0);
             const fullTimeTotalForUser = fullTimeRolesForUser.reduce((sum, role) => sum + (byRole[role] || 0), 0);
 
@@ -233,39 +286,65 @@ export async function loadKPI() {
                 </div>
             `;
 
+            // 将记录分为专职KPI和兼职费用两类（统一使用employmentType判断）
+            const isPartTimeRecord = (record) => {
+                // 优先使用employmentType字段
+                if (record.employmentType === 'part_time') {
+                    return true;
+                }
+                // 后备方案：通过角色代码判断（兼容历史数据）
+                const roleStr = String(record.role || '').trim();
+                return roleStr === 'part_time_sales' || 
+                       roleStr === 'part_time_translator' ||
+                       roleStr.includes('part_time');
+            };
+            
+            const fullTimeRecords = (data.data?.records || []).filter(r => !isPartTimeRecord(r));
+            const partTimeRecords = (data.data?.records || []).filter(r => isPartTimeRecord(r));
+
+            const renderRecordsTable = (records, title, isPartTime) => {
+                if (!records || records.length === 0) return '';
+                const unit = isPartTime ? '元' : '分';
+                const prefix = isPartTime ? '¥' : '';
+                return `
+                    <div style="margin-top: 20px;">
+                        <h4 style="margin-bottom: 10px; color: ${isPartTime ? '#0f766e' : '#1e40af'};">
+                            ${title} ${isPartTime ? '(按元计算)' : '(按分计算)'}
+                        </h4>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>项目名称</th>
+                                    <th>客户名称</th>
+                                    ${shouldHideAmount ? '' : '<th>项目金额</th>'}
+                                    <th>角色</th>
+                                    <th>${isPartTime ? '费用' : 'KPI值'}</th>
+                                    <th>计算公式</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${records.map(r => `
+                                    <tr>
+                                        <td>${r.projectId?.projectName || '-'}</td>
+                                        <td>${r.projectId?.clientName || '-'}</td>
+                                        ${shouldHideAmount ? '' : `<td>¥${(r.projectId?.projectAmount || 0).toLocaleString()}</td>`}
+                                        <td>${getRoleText(r.role)}</td>
+                                        <td>${prefix}${(r.kpiValue || 0).toLocaleString()} ${unit}</td>
+                                        <td style="font-size: 12px;">${r.calculationDetails?.formula || ''}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            };
+
             const html = `
                 <h3>${user?.name || ''} 的KPI - ${month}</h3>
                 ${summaryHtml}
                 ${(!data.data?.records || data.data.records.length === 0) && (!data.data?.monthlyRoleKPIs || data.data?.monthlyRoleKPIs.length === 0) ? '<p>该月暂无KPI记录</p>' : `
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>项目名称</th>
-                                <th>客户名称</th>
-                                ${shouldHideAmount ? '' : '<th>项目金额</th>'}
-                                <th>角色</th>
-                                <th>KPI值</th>
-                                <th>计算公式</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${(data.data?.records || []).map(r => {
-                                const roleStr = String(r.role || '').trim();
-                                const isPartTimeRole = roleStr === 'part_time_sales' || roleStr === 'layout' || roleStr === 'part_time_translator';
-                                const unit = isPartTimeRole ? '元' : '分';
-                                const prefix = isPartTimeRole ? '¥' : '';
-                                return `
-                                <tr>
-                                    <td>${r.projectId?.projectName || '-'}</td>
-                                    <td>${r.projectId?.clientName || '-'}</td>
-                                    ${shouldHideAmount ? '' : `<td>¥${(r.projectId?.projectAmount || 0).toLocaleString()}</td>`}
-                                    <td>${getRoleText(r.role)}</td>
-                                    <td>${prefix}${(r.kpiValue || 0).toLocaleString()} ${unit}</td>
-                                    <td style="font-size: 12px;">${r.calculationDetails?.formula || ''}</td>
-                                </tr>`;
-                            }).join('')}
-                        </tbody>
-                    </table>
+                    ${renderRecordsTable(partTimeRecords, '兼职费用', true)}
+                    ${renderRecordsTable(fullTimeRecords, '专职KPI', false)}
                 `}
                 ${monthlyRoleKPIHtml}
             `;

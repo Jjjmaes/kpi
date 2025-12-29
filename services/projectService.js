@@ -475,7 +475,17 @@ class ProjectService {
     // 校验角色是否允许用于项目成员
     const roleDoc = await Role.findOne({ code: role, isActive: true, canBeProjectMember: true });
     if (!roleDoc) {
-      throw new AppError('该角色不可用于项目成员或已禁用', 400, 'INVALID_ROLE');
+      // 检查角色是否存在但不符合条件
+      const roleExists = await Role.findOne({ code: role });
+      if (!roleExists) {
+        throw new AppError(`角色 '${role}' 不存在`, 400, 'ROLE_NOT_FOUND');
+      } else if (!roleExists.isActive) {
+        throw new AppError(`角色 '${role}' 已禁用`, 400, 'ROLE_DISABLED');
+      } else if (!roleExists.canBeProjectMember) {
+        throw new AppError(`角色 '${role}' 不允许用于项目成员`, 400, 'ROLE_NOT_FOR_PROJECT_MEMBER');
+      } else {
+        throw new AppError(`角色 '${role}' 不可用于项目成员`, 400, 'INVALID_ROLE');
+      }
     }
 
     const project = await Project.findById(projectId);
@@ -506,69 +516,85 @@ class ProjectService {
     // 获取项目的锁定系数（使用项目创建时的配置）
     const lockedRatios = project.locked_ratios;
 
-    // 兼职翻译费用校验（按金额结算）
-    if (role === 'part_time_translator') {
+    // 兼职角色费用校验（除兼职销售外，所有兼职角色都需要输入费用）
+    // 兼职销售通过项目配置计算，不需要在这里输入费用
+    const isPartTime = employmentType === 'part_time';
+    const isPartTimeSales = role === 'part_time_sales' || (role === 'sales' && isPartTime);
+    
+    if (isPartTime && !isPartTimeSales) {
+      // 所有兼职角色（除兼职销售外）都需要输入费用
       const fee = parseFloat(partTimeFee || 0);
+      const roleName = roleDoc.name || role;
       if (!fee || fee <= 0) {
-        throw new AppError('请填写兼职翻译费用，且必须大于0', 400, 'INVALID_PART_TIME_FEE');
+        throw new AppError(`请填写${roleName}费用，且必须大于0`, 400, 'INVALID_PART_TIME_FEE');
       }
       if (project.projectAmount && fee > project.projectAmount) {
-        throw new AppError('兼职翻译费用不能大于项目总金额', 400, 'INVALID_PART_TIME_FEE');
+        throw new AppError(`${roleName}费用不能大于项目总金额`, 400, 'INVALID_PART_TIME_FEE');
       }
-    }
-
-    // 如果是兼职排版且提供了排版费用，验证并更新项目信息
-    if (role === 'layout' && layoutCost && layoutCost > 0) {
-      const validation = project.validateLayoutCost(layoutCost);
-      if (!validation.valid) {
-        throw new AppError(validation.message, 400, 'INVALID_LAYOUT_COST');
-      }
-
-      project.partTimeLayout = {
-        isPartTime: true,
-        layoutCost: layoutCost,
-        layoutAssignedTo: userId,
-        layoutCostPercentage: validation.percentage || 0
-      };
-      await project.save();
-    } else if (role === 'layout') {
-      if (!project.partTimeLayout) {
+      
+      // 如果是兼职排版，还需要验证费用不超过项目总金额的5%
+      if (role === 'layout') {
+        const validation = project.validateLayoutCost(fee);
+        if (!validation.valid) {
+          throw new AppError(validation.message, 400, 'INVALID_LAYOUT_COST');
+        }
+        
+        // 更新项目信息（仅标记为兼职排版，费用统一存储在ProjectMember.partTimeFee中）
         project.partTimeLayout = {
           isPartTime: true,
-          layoutCost: 0,
+          layoutCost: 0, // 不再使用，保留用于向后兼容
+          layoutAssignedTo: userId,
+          layoutCostPercentage: validation.percentage || 0
+        };
+        await project.save();
+      }
+    } else if (role === 'layout' && !isPartTime) {
+      // 专职排版：专职排版走KPI计算，不存储费用
+      // 仅更新项目信息中的layoutAssignedTo和isPartTime标记
+      if (!project.partTimeLayout) {
+        project.partTimeLayout = {
+          isPartTime: false,
+          layoutCost: 0, // 不再使用，保留用于向后兼容
           layoutAssignedTo: userId,
           layoutCostPercentage: 0
         };
+        await project.save();
       } else {
         project.partTimeLayout.layoutAssignedTo = userId;
-        project.partTimeLayout.isPartTime = true;
+        project.partTimeLayout.isPartTime = false;
+        await project.save();
       }
-      await project.save();
     }
 
     // 确定使用的系数
+    // 优先从固定字段读取（向后兼容），如果没有则从动态配置读取
     let ratio = 0;
     if (role === 'translator') {
       ratio = translatorType === 'deepedit' 
-        ? project.locked_ratios.translator_deepedit 
-        : project.locked_ratios.translator_mtpe;
+        ? (project.locked_ratios.translator_deepedit ?? project.locked_ratios[`translator_deepedit`] ?? 0)
+        : (project.locked_ratios.translator_mtpe ?? project.locked_ratios[`translator_mtpe`] ?? 0);
     } else if (role === 'reviewer') {
-      ratio = project.locked_ratios.reviewer;
+      ratio = project.locked_ratios.reviewer ?? project.locked_ratios[role] ?? 0;
     } else if (role === 'pm') {
-      ratio = project.locked_ratios.pm;
+      ratio = project.locked_ratios.pm ?? project.locked_ratios[role] ?? 0;
     } else if (role === 'sales') {
-      ratio = project.locked_ratios.sales_bonus;
+      ratio = project.locked_ratios.sales_bonus ?? project.locked_ratios[`${role}_bonus`] ?? 0;
     } else if (role === 'admin_staff') {
-      ratio = project.locked_ratios.admin;
-    } else if (role === 'part_time_sales') {
+      ratio = project.locked_ratios.admin ?? project.locked_ratios[role] ?? 0;
+    } else if (role === 'part_time_sales' || role === 'layout' || role === 'part_time_translator') {
+      // 这些角色不使用系数计算，直接使用费用
       ratio = 0;
-    } else if (role === 'layout') {
-      ratio = 0;
+    } else {
+      // 新角色：从动态配置读取
+      ratio = project.locked_ratios[role] ?? 0;
     }
 
     // 判断是否为生产人员（需要确认的角色）
-    const productionRoles = ['translator', 'reviewer', 'layout', 'part_time_translator'];
-    const isProductionRole = productionRoles.includes(role);
+    // 使用Role模型的isManagementRole字段动态判断
+    // 生产角色：非管理角色且canBeProjectMember为true
+    // 管理角色（isManagementRole为true）不需要确认
+    const isManagementRole = roleDoc.isManagementRole === true;
+    const isProductionRole = !isManagementRole && roleDoc.canBeProjectMember === true;
 
     // 设置接受状态：生产人员需要确认，管理人员自动接受
     const acceptanceStatus = isProductionRole ? 'pending' : 'accepted';
@@ -595,9 +621,10 @@ class ProjectService {
         ? (typeof wordRatio === 'number' ? (wordRatio || 1.0) : 1.0)
         : 1.0,
       ratio_locked: ratio,
-      partTimeFee: role === 'part_time_translator'
+      // 兼职角色（除兼职销售外）都使用partTimeFee字段
+      partTimeFee: (isPartTime && !isPartTimeSales)
         ? (parseFloat(partTimeFee || 0) || 0)
-        : 0,
+        : (role === 'part_time_translator' ? (parseFloat(partTimeFee || 0) || 0) : 0),
       acceptanceStatus: acceptanceStatus
     });
 
@@ -1019,8 +1046,14 @@ class ProjectService {
     }
 
     // 检查生产人员是否都已接受（如果有生产人员）
-    const productionRoles = ['translator', 'reviewer', 'layout', 'part_time_translator'];
-    const productionMembers = members.filter(m => productionRoles.includes(m.role));
+    // 使用Role模型的isManagementRole字段动态判断生产角色
+    const Role = require('../models/Role');
+    const allRoles = await Role.find({ isActive: true });
+    const roleMap = new Map(allRoles.map(r => [r.code, r]));
+    const productionMembers = members.filter(m => {
+      const memberRole = roleMap.get(m.role);
+      return memberRole && !memberRole.isManagementRole && memberRole.canBeProjectMember;
+    });
     
     if (productionMembers.length > 0) {
       const allAccepted = productionMembers.every(m => 

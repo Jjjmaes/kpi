@@ -226,7 +226,7 @@ const projectSchema = new mongoose.Schema({
     url: String,
     uploadedAt: Date
   }],
-  // 产能记录（翻译/审校提交的工作量）
+  // 产能记录（支持所有生产角色提交的工作量）
   capacityRecords: [{
     userId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -234,7 +234,10 @@ const projectSchema = new mongoose.Schema({
     },
     role: {
       type: String,
-      enum: ['translator', 'reviewer']
+      required: true,
+      trim: true
+      // 移除enum限制，允许动态角色
+      // 验证逻辑在业务层处理（检查角色是否允许记录产能）
     },
     wordCount: Number, // 实际完成字数
     hours: Number, // 实际工作小时（口译/转录项目）
