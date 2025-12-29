@@ -95,12 +95,27 @@ async function backupDatabase() {
               return;
             }
 
-            // 删除临时目录
+            // 删除临时目录（使用更可靠的方法，支持 Ubuntu/Linux）
             try {
               const tempDirPath = path.join(BACKUP_DIR, `temp_${timestamp}`);
-              await fs.rm(tempDirPath, { recursive: true, force: true });
+              // 等待一小段时间，确保 tar 命令完全释放文件句柄（在 Linux 上可能需要）
+              await new Promise(resolve => setTimeout(resolve, 100));
+              
+              // 先尝试使用 fs.rm（Node.js 14.14.0+，在 Linux 和 Windows 上都可用）
+              try {
+                await fs.rm(tempDirPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+                console.log(`✅ 临时目录已删除: temp_${timestamp}`);
+              } catch (rmError) {
+                // 如果 fs.rm 失败，尝试使用递归删除目录内容
+                console.warn('fs.rm 删除失败，尝试递归删除:', rmError.message);
+                await deleteDirectoryRecursive(tempDirPath);
+                console.log(`✅ 临时目录已删除（递归方式）: temp_${timestamp}`);
+              }
             } catch (rmError) {
-              console.warn('删除临时目录失败:', rmError.message);
+              console.error('❌ 删除临时目录失败:', rmError.message);
+              console.error('   临时目录路径:', path.join(BACKUP_DIR, `temp_${timestamp}`));
+              // 即使删除失败，也继续完成备份流程
+              // 临时目录会在下次清理任务中被删除
             }
 
             // 获取文件大小
@@ -127,6 +142,59 @@ async function backupDatabase() {
       success: false,
       error: error.message
     };
+  }
+}
+
+/**
+ * 递归删除目录（兼容性更好的方法，支持 Windows 和 Linux）
+ */
+async function deleteDirectoryRecursive(dirPath) {
+  try {
+    // 先尝试使用 fs.rm（Node.js 14.14.0+，在 Linux 和 Windows 上都可用）
+    try {
+      await fs.rm(dirPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      return;
+    } catch (rmError) {
+      // 如果 fs.rm 失败，使用递归删除方法
+      console.warn(`fs.rm 删除失败，使用递归删除: ${rmError.message}`);
+    }
+
+    // 递归删除方法（兼容旧版本 Node.js）
+    const files = await fs.readdir(dirPath);
+    for (const file of files) {
+      const filePath = path.join(dirPath, file);
+      try {
+        const stats = await fs.stat(filePath);
+        if (stats.isDirectory()) {
+          await deleteDirectoryRecursive(filePath);
+        } else {
+          // 在 Linux 上，可能需要先修改文件权限
+          try {
+            await fs.chmod(filePath, 0o666);
+          } catch (chmodError) {
+            // 忽略权限修改失败
+          }
+          await fs.unlink(filePath);
+        }
+      } catch (fileError) {
+        console.warn(`删除文件/目录失败: ${filePath}`, fileError.message);
+        // 继续删除其他文件
+      }
+    }
+    
+    // 删除空目录
+    try {
+      await fs.rmdir(dirPath);
+    } catch (rmdirError) {
+      // 如果 rmdir 失败，最后尝试一次 fs.rm
+      try {
+        await fs.rm(dirPath, { recursive: true, force: true });
+      } catch (finalError) {
+        throw new Error(`删除目录失败: ${rmdirError.message}`);
+      }
+    }
+  } catch (error) {
+    throw new Error(`删除目录失败: ${error.message}`);
   }
 }
 
@@ -168,6 +236,31 @@ async function deleteOldBackups() {
     const errors = [];
 
     for (const file of files) {
+      // 同时清理临时目录（无论是否过期）
+      if (file.startsWith('temp_') || file.startsWith('restore_temp_')) {
+        const filepath = path.join(BACKUP_DIR, file);
+        try {
+          const stats = await fs.stat(filepath);
+          if (stats.isDirectory()) {
+            await deleteDirectoryRecursive(filepath);
+            deleted.push({
+              filename: file,
+              deletedAt: new Date(),
+              age: 0,
+              reason: '临时目录清理'
+            });
+            console.log(`✅ 清理临时目录: ${file}`);
+          }
+        } catch (error) {
+          errors.push({
+            filename: file,
+            error: error.message
+          });
+          console.error(`❌ 清理临时目录失败: ${file}`, error);
+        }
+        continue;
+      }
+      
       const filepath = path.join(BACKUP_DIR, file);
       
       try {
@@ -176,7 +269,7 @@ async function deleteOldBackups() {
         
         if (fileAge > retentionTime) {
           if (stats.isDirectory()) {
-            await fs.rm(filepath, { recursive: true, force: true });
+            await deleteDirectoryRecursive(filepath);
           } else {
             await fs.unlink(filepath);
           }
@@ -221,6 +314,11 @@ async function listBackups() {
     const backups = [];
 
     for (const file of files) {
+      // 过滤掉临时目录（以 temp_ 开头的目录）
+      if (file.startsWith('temp_') || file.startsWith('restore_temp_')) {
+        continue;
+      }
+      
       const filepath = path.join(BACKUP_DIR, file);
       
       try {
