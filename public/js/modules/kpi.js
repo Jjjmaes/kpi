@@ -419,7 +419,22 @@ export async function exportKPI() {
         const res = await apiFetch(url);
         if (!res.ok) {
             const errorData = await res.json();
-            showToast(errorData.message || '导出失败', 'error');
+            // 如果是未确认记录的错误，显示更详细的提示
+            if (errorData.code === 'PENDING_CONFIRMATIONS') {
+                const pendingCount = errorData.data?.pendingCount || 0;
+                const sampleUsers = errorData.data?.sampleUsers || [];
+                showToast(
+                    `导出失败：还有 ${pendingCount} 条记录未确认。请督促员工在"我的KPI确认"页面完成确认后再导出。`,
+                    'error'
+                );
+                // 可选：显示一个更详细的警告对话框
+                if (confirm(`还有 ${pendingCount} 条KPI记录未确认，涉及员工：${sampleUsers.join('、')}${pendingCount > 10 ? '等' : ''}。\n\n是否仍要继续导出？（建议先完成确认）`)) {
+                    // 如果用户确认继续，可以添加一个查询参数跳过校验（需要后端支持）
+                    // 这里暂时不实现跳过功能，强制要求先确认
+                }
+            } else {
+                showToast(errorData.message || '导出失败', 'error');
+            }
             return;
         }
         const blob = await res.blob();
@@ -469,7 +484,8 @@ export async function submitEvaluation(e, recordId) {
         comment: formData.get('comment') || ''
     };
     try {
-        const res = await apiFetch(`/kpi/evaluate/${recordId}`, {
+        // 后端路由为 POST /api/kpi/monthly-role/:id/evaluate
+        const res = await apiFetch(`/kpi/monthly-role/${recordId}/evaluate`, {
             method: 'POST',
             body: JSON.stringify(payload)
         });
@@ -486,8 +502,156 @@ export async function submitEvaluation(e, recordId) {
     }
 }
 
-// 挂载
-// KPI module placeholder
+// ==================== 我的KPI确认 ====================
+
+// 渲染单条确认状态
+function renderConfirmStatus(status) {
+    if (status === 'confirmed') {
+        return '<span class="badge badge-success">已确认</span>';
+    }
+    if (status === 'disputed') {
+        return '<span class="badge badge-danger">有异议</span>';
+    }
+    return '<span class="badge badge-warning">待确认</span>';
+}
+
+// 加载"我的确认"列表（使用KPI查询页面的月份选择器，如果没有选择则默认上月）
+export async function loadMyKpiConfirmations() {
+    // 优先使用KPI查询页面的月份选择器
+    let month = document.getElementById('kpiMonth')?.value;
+    
+    // 如果没有选择月份，默认查询上一个月
+    if (!month) {
+        const now = new Date();
+        const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        month = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    try {
+        const [fullRes, partRes] = await Promise.all([
+            apiFetch(`/kpi/my-confirmations?month=${month}&employmentType=full_time`),
+            apiFetch(`/kpi/my-confirmations?month=${month}&employmentType=part_time`)
+        ]);
+        const fullData = await fullRes.json();
+        const partData = await partRes.json();
+
+        if (!fullData.success || !partData.success) {
+            showToast('加载确认列表失败', 'error');
+            return;
+        }
+
+        const fullRecords = fullData.data.records || [];
+        const partRecords = partData.data.records || [];
+
+        const container = document.getElementById('kpiResults');
+        if (!container) return;
+
+        const renderTable = (records, title, isPartTime) => {
+            if (!records.length) {
+                return `
+                    <div class="card">
+                        <h4>${title}</h4>
+                        <p class="card-desc">本月暂无记录。</p>
+                    </div>
+                `;
+            }
+            return `
+                <div class="card">
+                    <h4>${title}</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>项目</th>
+                                <th>角色</th>
+                                <th>${isPartTime ? '兼职费用（元）' : 'KPI（分）'}</th>
+                                <th>状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${records.map(r => {
+                                const projectName = r.projectId?.projectName || '未知项目';
+                                const roleText = getRoleText(r.role);
+                                const value = r.kpiValue || 0;
+                                const unitPrefix = isPartTime ? '¥' : '';
+                                const unitSuffix = isPartTime ? '元' : '分';
+                                const statusHtml = renderConfirmStatus(r.userConfirmStatus);
+                                const canOperate = !r.userConfirmStatus || r.userConfirmStatus === 'pending' || r.userConfirmStatus === 'disputed';
+                                return `
+                                    <tr>
+                                        <td>${projectName}</td>
+                                        <td>${roleText}</td>
+                                        <td>${unitPrefix}${value.toLocaleString()} ${unitSuffix}</td>
+                                        <td>${statusHtml}</td>
+                                        <td>
+                                            ${canOperate ? `
+                                                <button class="btn-small" data-click="confirmKpiRecord('${r._id}')">确认无误</button>
+                                                <button class="btn-small btn-danger" data-click="disputeKpiRecord('${r._id}')">有异议</button>
+                                            ` : '<span style="font-size:12px;color:#666;">已确认</span>'}
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        };
+
+        container.innerHTML = `
+            <h3>我的KPI确认 - ${month}</h3>
+            <p class="card-desc">请在结算前确认上月的专职KPI与兼职费用。确认后将作为结算依据，有问题请使用“有异议”并填写说明。</p>
+            ${renderTable(fullRecords, '专职KPI（分）', false)}
+            ${renderTable(partRecords, '兼职费用（元）', true)}
+        `;
+    } catch (error) {
+        console.error('加载我的KPI确认失败:', error);
+        showToast('加载我的KPI确认失败: ' + error.message, 'error');
+    }
+}
+
+// 提交确认/异议
+async function submitKpiConfirmation(recordId, action) {
+    try {
+        let comment = '';
+        if (action === 'dispute') {
+            comment = prompt('请简单说明有异议的原因：') || '';
+            if (!comment.trim()) {
+                showToast('请填写异议原因', 'error');
+                return;
+            }
+        }
+
+        const res = await apiFetch(`/kpi/confirm/${recordId}`, {
+            method: 'POST',
+            body: JSON.stringify({
+                action,
+                comment: comment || undefined
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(data.message || '操作成功', 'success');
+            // 重新加载确认列表
+            await loadMyKpiConfirmations();
+        } else {
+            showToast(data.message || '操作失败', 'error');
+        }
+    } catch (error) {
+        console.error('提交确认失败:', error);
+        showToast('提交失败: ' + error.message, 'error');
+    }
+}
+
+export function confirmKpiRecord(recordId) {
+    submitKpiConfirmation(recordId, 'confirm');
+}
+
+export function disputeKpiRecord(recordId) {
+    submitKpiConfirmation(recordId, 'dispute');
+}
+
+// 挂载占位（其余函数已由 main.js 中 ACTIONS 调用）
 
 
 

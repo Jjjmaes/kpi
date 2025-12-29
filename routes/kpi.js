@@ -20,6 +20,7 @@ const { calculateKPIByRole } = require('../utils/kpiCalculator');
 const { calculateAdminStaff, calculateFinance } = require('../utils/kpiCalculator');
 const { generateMonthlyKPIRecords, generateProjectKPI, calculateProjectRealtime, calculateProjectsRealtimeBatch } = require('../services/kpiService');
 const { exportMonthlyKPISheet, exportUserKPIDetail } = require('../services/excelService');
+const { AppError } = require('../middleware/errorHandler');
 
 // 所有KPI路由需要认证
 router.use(authenticate);
@@ -1300,6 +1301,31 @@ router.post('/review/batch', authorize('admin', 'finance'), async (req, res) => 
 router.get('/export/month/:month', authorize('admin', 'finance'), async (req, res) => {
   try {
     const { month } = req.params;
+    
+    // 结算前校验：检查是否有未确认的记录
+    const pendingRecords = await KpiRecord.find({ 
+      month, 
+      userConfirmStatus: 'pending' 
+    }).populate('userId', 'name').limit(10);
+    
+    if (pendingRecords.length > 0) {
+      const userNames = [...new Set(pendingRecords.map(r => r.userId?.name || '未知'))];
+      const pendingCount = await KpiRecord.countDocuments({ 
+        month, 
+        userConfirmStatus: 'pending' 
+      });
+      
+      return res.status(400).json({
+        success: false,
+        message: `结算前校验失败：还有 ${pendingCount} 条KPI记录未确认（包括专职KPI和兼职费用）。请督促以下员工确认后再导出：${userNames.join('、')}${pendingCount > 10 ? '等' : ''}`,
+        code: 'PENDING_CONFIRMATIONS',
+        data: {
+          pendingCount,
+          sampleUsers: userNames
+        }
+      });
+    }
+    
     const buffer = await exportMonthlyKPISheet(month);
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -1441,6 +1467,293 @@ router.post('/monthly-role/:id/evaluate', authorize('admin'), async (req, res) =
     res.status(500).json({ 
       success: false, 
       message: error.message 
+    });
+  }
+});
+
+/**
+ * 获取当前用户的KPI确认列表（专职/兼职均可）
+ * GET /api/kpi/my-confirmations?month=YYYY-MM&employmentType=full_time|part_time
+ */
+router.get('/my-confirmations', async (req, res) => {
+  try {
+    const { month: queryMonth, employmentType } = req.query;
+    const now = new Date();
+    // 默认取上一个自然月
+    const target = queryMonth 
+      ? new Date(`${queryMonth}-01`) 
+      : new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const month = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}`;
+
+    // 1. 查询已生成的KPI记录
+    const kpiFilter = {
+      userId: req.user._id,
+      month
+    };
+    if (employmentType === 'full_time' || employmentType === 'part_time') {
+      kpiFilter.employmentType = employmentType;
+    }
+
+    const kpiRecords = await KpiRecord.find(kpiFilter)
+      .populate('projectId', 'projectName projectAmount')
+      .sort({ projectId: 1, role: 1 });
+
+    // 2. 如果是查询兼职费用，还需要从ProjectMember中查询未生成KPI记录的兼职费用
+    let projectMemberRecords = [];
+    if (!employmentType || employmentType === 'part_time') {
+      // 计算该月份的开始和结束时间
+      const monthStart = new Date(target.getFullYear(), target.getMonth(), 1);
+      const monthEnd = new Date(target.getFullYear(), target.getMonth() + 1, 0, 23, 59, 59, 999);
+
+      // 查询该用户在该月份有兼职费用的项目成员
+      const members = await ProjectMember.find({
+        userId: req.user._id,
+        employmentType: 'part_time',
+        partTimeFee: { $gt: 0 }
+      })
+        .populate('projectId', 'projectName projectAmount completedAt createdAt')
+        .populate('userId', 'name');
+
+      // 过滤出属于该月份的项目（根据项目完成时间或创建时间）
+      const monthMembers = members.filter(member => {
+        if (!member.projectId) return false;
+        const project = member.projectId;
+        // 优先使用完成时间，如果没有完成时间则使用创建时间
+        const projectDate = project.completedAt || project.createdAt;
+        if (!projectDate) return false;
+        
+        // 处理Date对象或字符串
+        const date = projectDate instanceof Date ? projectDate : new Date(projectDate);
+        if (isNaN(date.getTime())) return false;
+        
+        const projectMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        return projectMonth === month;
+      });
+
+      // 排除已经在KpiRecord中存在的记录（基于projectId + role）
+      const existingKeys = new Set(
+        kpiRecords.map(r => `${r.projectId._id || r.projectId}_${r.role}`)
+      );
+
+      projectMemberRecords = monthMembers
+        .filter(m => {
+          const key = `${m.projectId._id || m.projectId}_${m.role}`;
+          return !existingKeys.has(key);
+        })
+        .map(m => {
+          // 转换为类似KpiRecord的格式
+          return {
+            _id: m._id, // 使用ProjectMember的ID，后续确认时需要特殊处理
+            userId: m.userId,
+            projectId: m.projectId,
+            role: m.role,
+            employmentType: 'part_time',
+            month: month,
+            kpiValue: m.partTimeFee || 0,
+            userConfirmStatus: 'pending', // 未生成KPI记录的默认为pending
+            userConfirmedAt: null,
+            userConfirmComment: null,
+            calculationDetails: {
+              formula: `兼职${m.role}费用：${m.partTimeFee || 0}元（未生成KPI记录）`
+            },
+            isFromProjectMember: true // 标记这是从ProjectMember查询来的
+          };
+        });
+    }
+
+    // 3. 合并结果
+    const allRecords = [...kpiRecords, ...projectMemberRecords].sort((a, b) => {
+      const projectA = a.projectId?.projectName || '';
+      const projectB = b.projectId?.projectName || '';
+      if (projectA !== projectB) {
+        return projectA.localeCompare(projectB);
+      }
+      return (a.role || '').localeCompare(b.role || '');
+    });
+
+    res.json({
+      success: true,
+      data: {
+        month,
+        employmentType: employmentType || 'all',
+        records: allRecords
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
+ * 员工确认单条KPI记录（专职/兼职）
+ * POST /api/kpi/confirm/:id
+ * body: { action: 'confirm' | 'dispute', comment?: string }
+ */
+router.post('/confirm/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action, comment } = req.body || {};
+
+    if (!action || !['confirm', 'dispute'].includes(action)) {
+      throw new AppError('无效的操作类型', 400, 'INVALID_CONFIRM_ACTION');
+    }
+
+    // 1. 先尝试查找KpiRecord
+    let record = await KpiRecord.findById(id);
+    let isFromProjectMember = false;
+
+    // 2. 如果找不到KpiRecord，尝试查找ProjectMember（说明记录还未生成KPI）
+    if (!record) {
+      const member = await ProjectMember.findById(id)
+        .populate('projectId')
+        .populate('userId');
+      
+      if (!member) {
+        throw new AppError('记录不存在', 404, 'RECORD_NOT_FOUND');
+      }
+
+      // 只能确认自己的记录
+      if (member.userId._id.toString() !== req.user._id.toString()) {
+        throw new AppError('只能确认自己的记录', 403, 'FORBIDDEN_CONFIRM');
+      }
+
+      // 必须是兼职且有兼职费用
+      if (member.employmentType !== 'part_time' || !member.partTimeFee || member.partTimeFee <= 0) {
+        throw new AppError('该记录不是有效的兼职费用记录', 400, 'INVALID_PART_TIME_RECORD');
+      }
+
+      // 确定月份（根据项目完成时间或创建时间）
+      const project = member.projectId;
+      const projectDate = project.completedAt || project.createdAt;
+      if (!projectDate) {
+        throw new AppError('项目缺少时间信息，无法确定月份', 400, 'MISSING_PROJECT_DATE');
+      }
+      const month = `${projectDate.getFullYear()}-${String(projectDate.getMonth() + 1).padStart(2, '0')}`;
+
+      // 检查是否已存在KpiRecord（可能并发创建）
+      const existingRecord = await KpiRecord.findOne({
+        userId: member.userId._id,
+        projectId: member.projectId._id,
+        month,
+        role: member.role
+      });
+
+      if (existingRecord) {
+        // 如果已存在，使用现有记录
+        record = existingRecord;
+      } else {
+        // 创建新的KpiRecord
+        record = await KpiRecord.create({
+          userId: member.userId._id,
+          projectId: member.projectId._id,
+          role: member.role,
+          employmentType: 'part_time',
+          month,
+          kpiValue: member.partTimeFee,
+          userConfirmStatus: 'pending',
+          calculationDetails: {
+            formula: `兼职${member.role}费用：${member.partTimeFee}元`
+          }
+        });
+        isFromProjectMember = true;
+      }
+    } else {
+      // 已存在的KpiRecord，验证权限
+      if (record.userId.toString() !== req.user._id.toString()) {
+        throw new AppError('只能确认自己的KPI记录', 403, 'FORBIDDEN_CONFIRM');
+      }
+    }
+
+    // 3. 已确认的记录不允许再次修改（如有需要可后续扩展为允许覆盖）
+    if (record.userConfirmStatus === 'confirmed') {
+      throw new AppError('该记录已确认，无需重复操作', 400, 'ALREADY_CONFIRMED');
+    }
+
+    // 4. 更新确认状态
+    record.userConfirmStatus = action === 'confirm' ? 'confirmed' : 'disputed';
+    record.userConfirmedAt = new Date();
+    record.userConfirmComment = comment || undefined;
+
+    await record.save();
+
+    res.json({
+      success: true,
+      message: action === 'confirm' 
+        ? (isFromProjectMember ? '兼职费用已确认，KPI记录已生成' : 'KPI记录已确认')
+        : '已提交异议',
+      data: {
+        id: record._id,
+        userConfirmStatus: record.userConfirmStatus,
+        userConfirmedAt: record.userConfirmedAt,
+        userConfirmComment: record.userConfirmComment
+      }
+    });
+  } catch (error) {
+    const status = error.statusCode || 500;
+    res.status(status).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
+ * 管理员/财务查看指定月份的确认进度汇总
+ * GET /api/kpi/confirmations/summary?month=YYYY-MM
+ */
+router.get('/confirmations/summary', authorize('admin', 'finance'), async (req, res) => {
+  try {
+    const { month: queryMonth } = req.query;
+    const now = new Date();
+    const target = queryMonth 
+      ? new Date(`${queryMonth}-01`) 
+      : new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const month = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}`;
+
+    const records = await KpiRecord.find({ month })
+      .populate('userId', 'name username roles employmentType')
+      .sort({ userId: 1 });
+
+    const summaryMap = new Map();
+
+    for (const r of records) {
+      const userId = r.userId?._id?.toString() || r.userId.toString();
+      if (!summaryMap.has(userId)) {
+        summaryMap.set(userId, {
+          userId,
+          userName: r.userId?.name || '',
+          roles: r.userId?.roles || [],
+          full_time: { total: 0, confirmed: 0, disputed: 0, pending: 0 },
+          part_time: { total: 0, confirmed: 0, disputed: 0, pending: 0 }
+        });
+      }
+      const item = summaryMap.get(userId);
+      const empType = r.employmentType === 'part_time' ? 'part_time' : 'full_time';
+      const bucket = item[empType];
+      bucket.total += 1;
+      if (r.userConfirmStatus === 'confirmed') {
+        bucket.confirmed += 1;
+      } else if (r.userConfirmStatus === 'disputed') {
+        bucket.disputed += 1;
+      } else {
+        bucket.pending += 1;
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        month,
+        users: Array.from(summaryMap.values())
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
     });
   }
 });

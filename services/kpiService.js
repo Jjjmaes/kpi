@@ -333,6 +333,8 @@ async function generateMonthlyKPIRecords(month, force = false) {
               role: member.role,
               month,
               kpiValue: kpiResult.kpiValue,
+              employmentType: member.employmentType || 'full_time', // 保存employmentType用于前端判断
+              userConfirmStatus: 'pending', // 默认待确认，员工需要在"我的KPI确认"页面确认
               calculationDetails: {
                 projectAmount: project.projectAmount,
                 ratio: effectiveRatio,
@@ -781,6 +783,7 @@ async function generateProjectKPI(projectId) {
         employmentType: member.employmentType || 'full_time', // 保存employmentType用于前端判断
         month,
         kpiValue: kpiResult.kpiValue,
+        userConfirmStatus: 'pending', // 默认待确认，员工需要在"我的KPI确认"页面确认
         calculationDetails: {
           projectAmount: project.projectAmount,
           ratio: effectiveRatio,

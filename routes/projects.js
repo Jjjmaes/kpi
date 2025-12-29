@@ -642,17 +642,17 @@ router.post('/:id/set-complaint', authorize('pm', 'admin', 'sales', 'part_time_s
   });
 }));
 
-// 标记项目交付（仅管理员、销售、兼职销售）
+// 标记项目交付（仅当前角色为 管理员 / 销售 / 兼职销售 时可交付）
 router.post('/:id/finish', authorize('admin', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
-  // 额外权限校验：含PM身份的销售不允许交付，管理员始终允许
-  const isAdmin = req.user.roles.includes('admin');
-  const isSales = req.user.roles.includes('sales');
-  const isPartTimeSales = req.user.roles.includes('part_time_sales');
-  const isPM = req.user.roles.includes('pm');
-  const canDeliver = isAdmin || ((isSales || isPartTimeSales) && !isPM);
-  
+  // 使用当前角色（X-Role）判断，而不是用户所有角色，避免一人多角色情况下被错误拒绝
+  const currentRole = req.currentRole || ((req.user.roles || [])[0] || null);
+  const isAdmin = currentRole === 'admin';
+  const isSales = currentRole === 'sales';
+  const isPartTimeSales = currentRole === 'part_time_sales';
+  const canDeliver = isAdmin || isSales || isPartTimeSales;
+
   if (!canDeliver) {
-    throw new AppError('仅管理员或纯销售可交付项目', 403, 'PERMISSION_DENIED');
+    throw new AppError('仅管理员、销售或兼职销售可交付项目（请切换到对应角色）', 403, 'PERMISSION_DENIED');
   }
 
   // 使用服务层完成项目

@@ -34,6 +34,21 @@ const kpiRecordSchema = new mongoose.Schema({
     required: true,
     index: true
   },
+  // 员工确认状态（用于结算前确认）
+  userConfirmStatus: {
+    type: String,
+    enum: ['pending', 'confirmed', 'disputed'],
+    default: 'pending',
+    index: true
+  },
+  userConfirmedAt: {
+    type: Date
+  },
+  userConfirmComment: {
+    type: String,
+    maxlength: 500,
+    trim: true
+  },
   // KPI数值
   kpiValue: {
     type: Number,
