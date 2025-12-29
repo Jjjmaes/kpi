@@ -328,7 +328,7 @@ export async function showCreateProjectModal() {
         <form id="createProjectForm" data-submit="createProject(event)">
             <div class="form-group">
                 <label>项目编号（留空自动生成）</label>
-                <input type="text" name="projectNumber" placeholder="如：PRJ2024010001">
+                <input type="text" name="projectNumber" placeholder="留空将自动生成项目编号">
             </div>
             <div class="form-group">
                 <label>项目名称 *</label>

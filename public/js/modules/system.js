@@ -63,6 +63,15 @@ export async function loadConfig() {
                     <input type="text" name="companyEmail" value="${config.companyEmail || ''}" placeholder="请输入联系邮箱">
                 </div>
 
+                <h3 style="margin: 16px 0 10px;">系统设置</h3>
+                <div class="form-group">
+                    <label>项目编号前缀</label>
+                    <input type="text" name="projectNumberPrefix" value="${config.projectNumberPrefix || 'PRJ'}" placeholder="如：PRJ" maxlength="10" pattern="[A-Za-z0-9]+" title="只能包含字母和数字，长度1-10个字符">
+                    <small style="color: #666; font-size: 12px; display: block; margin-top: 4px;">
+                        项目编号格式：前缀 + 年份(4位) + 月份(2位) + 序号(4位)，例如：PRJ2024010001
+                    </small>
+                </div>
+
                 <h3 style="margin: 16px 0 10px;">KPI 系数</h3>
                 <div class="form-group">
                     <label>翻译（MTPE）系数</label>

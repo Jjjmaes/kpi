@@ -92,6 +92,13 @@ const kpiConfigSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  // 项目编号前缀
+  projectNumberPrefix: {
+    type: String,
+    default: 'PRJ',
+    trim: true,
+    maxlength: 10
+  },
   // 版本号和变更记录
   version: {
     type: Number,

@@ -20,7 +20,11 @@ class ProjectService {
     const year = new Date().getFullYear();
     const month = String(new Date().getMonth() + 1).padStart(2, '0');
     
-    const prefix = `PRJ${year}${month}`;
+    // 从配置中获取项目编号前缀，默认为 'PRJ'
+    const config = await KpiConfig.getActiveConfig();
+    const prefixCode = (config.projectNumberPrefix || 'PRJ').trim().toUpperCase();
+    
+    const prefix = `${prefixCode}${year}${month}`;
     const lastProject = await Project.findOne({
       projectNumber: { $regex: `^${prefix}` }
     }).sort({ projectNumber: -1 });

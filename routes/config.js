@@ -64,6 +64,7 @@ router.post('/update', async (req, res) => {
       companyContact,
       companyPhone,
       companyEmail,
+      projectNumberPrefix, // 新增：项目编号前缀
       roleRatios, // 新增：动态角色系数配置
       reason
     } = req.body;
@@ -85,7 +86,8 @@ router.post('/update', async (req, res) => {
       companyAddress: currentConfig.companyAddress,
       companyContact: currentConfig.companyContact,
       companyPhone: currentConfig.companyPhone,
-      companyEmail: currentConfig.companyEmail
+      companyEmail: currentConfig.companyEmail,
+      projectNumberPrefix: currentConfig.projectNumberPrefix
     };
 
     // 更新配置
@@ -102,6 +104,19 @@ router.post('/update', async (req, res) => {
     if (companyContact !== undefined) currentConfig.companyContact = companyContact;
     if (companyPhone !== undefined) currentConfig.companyPhone = companyPhone;
     if (companyEmail !== undefined) currentConfig.companyEmail = companyEmail;
+    // 更新项目编号前缀
+    if (projectNumberPrefix !== undefined && typeof projectNumberPrefix === 'string') {
+      // 验证前缀：只允许字母和数字，最大长度10
+      const cleanedPrefix = projectNumberPrefix.trim().toUpperCase();
+      if (cleanedPrefix.length > 0 && cleanedPrefix.length <= 10 && /^[A-Z0-9]+$/.test(cleanedPrefix)) {
+        currentConfig.projectNumberPrefix = cleanedPrefix;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: '项目编号前缀格式错误：只能包含字母和数字，长度1-10个字符'
+        });
+      }
+    }
     // 更新动态角色系数配置
     if (roleRatios !== undefined && typeof roleRatios === 'object') {
       currentConfig.roleRatios = roleRatios;
@@ -129,6 +144,7 @@ router.post('/update', async (req, res) => {
         companyContact: currentConfig.companyContact,
         companyPhone: currentConfig.companyPhone,
         companyEmail: currentConfig.companyEmail,
+        projectNumberPrefix: currentConfig.projectNumberPrefix,
         roleRatios: currentConfig.roleRatios
       },
       reason: reason || '未提供原因'
