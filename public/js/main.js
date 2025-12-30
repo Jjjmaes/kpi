@@ -14,7 +14,7 @@ import { loadKPI, exportKPI, generateMonthlyKPI, showEvaluateModal, submitEvalua
 import { loadReceivables, renderReceivables, exportReceivables, loadInvoiceProjects, renderInvoiceProjects, addInvoice, addInvoiceForProject, loadPaymentRecordsProjects, renderPaymentRecordsProjects, addPaymentRecord, addPaymentRecordForProject, loadPaymentRecords, clearPaymentRecordFilter, showFinanceSection, loadFinanceSummary, exportFinanceSummary, loadPendingKpi, reviewKpiRecord, rejectKpiRecord, batchReviewKpiRecords, selectAllPendingKpi, deselectAllPendingKpi, toggleSelectAllPendingKpi, loadReconciliation, exportReconciliation, togglePaymentRecords, toggleInvoiceRecords, clearPaymentRecordsFilters, removePaymentRecord, jumpReceivablePage, prevReceivablePage, nextReceivablePage, jumpPaymentRecordsProjectsPage, prevPaymentRecordsProjectsPage, nextPaymentRecordsProjectsPage, jumpInvoiceProjectsPage, prevInvoiceProjectsPage, nextInvoiceProjectsPage, backToFinanceNav, showProjectSelector, filterProjectSelector, selectProject, loadInvoiceRequests, renderInvoiceRequests, loadMyInvoiceRequests, renderMyInvoiceRequests, viewInvoiceRequest, approveInvoiceRequest, rejectInvoiceRequest, deleteInvoiceRequest, showCreateInvoiceRequestModal, jumpInvoiceRequestPage, prevInvoiceRequestPage, nextInvoiceRequestPage, jumpMyInvoiceRequestPage, prevMyInvoiceRequestPage, nextMyInvoiceRequestPage, handlePaymentMethodChange } from './modules/finance.js';
 import { loadUsers, loadUsersForSelect, showCreateUserModal, editUser, deleteUser, resetUserPassword, copyPasswordToClipboard, createUser, updateUser, loadProfile, updateProfileInfo, updateProfilePassword } from './modules/user.js';
 import { loadLanguages, showCreateLanguageModal, showEditLanguageModal, createLanguage, updateLanguage } from './modules/language.js';
-import { loadBackups, createBackup, cleanupOldBackups, restoreBackup, deleteBackupFile } from './modules/backup.js';
+import { loadBackups, createBackup, cleanupOldBackups, restoreBackup, deleteBackupFile, uploadBackupFile, clearBackupUpload, triggerBackupFileSelect, downloadBackupFile } from './modules/backup.js';
 import { loadConfig, loadConfigHistory, loadPermissionsConfig, savePermissionsConfig, loadOrgInfo, viewConfigChange } from './modules/system.js';
 import { loadRoles, showCreateRoleModal, viewRole, editRole, deleteRole, submitEditRole } from './modules/role.js';
 import { startNotificationPolling, stopNotificationPolling, toggleNotificationPanel, markAllNotificationsRead, initNotificationAudio } from './modules/notification.js';
@@ -439,7 +439,13 @@ const SECTION_ROUTES = {
             // await loadPermissionsConfig();
         }
     } },
-    backup: { onEnter: async () => { if (hasPermission('system.config')) await loadBackups(); } },
+    backup: { onEnter: async () => { 
+        if (hasPermission('system.config')) {
+            await loadBackups();
+            const { initBackupUpload } = await import('./modules/backup.js');
+            initBackupUpload();
+        }
+    } },
     profile: { onEnter: async () => { if (state.currentUser) await loadProfile(); } },
     express: { onEnter: async () => {
         // 更新界面显示（根据角色）
@@ -746,6 +752,11 @@ const ACTIONS = Object.freeze({
     cleanupOldBackups: () => cleanupOldBackups(),
     restoreBackup: (filename) => restoreBackup(filename),
     deleteBackupFile: (filename) => deleteBackupFile(filename),
+    uploadBackupFile: () => uploadBackupFile(),
+    clearBackupUpload: () => clearBackupUpload(),
+    triggerBackupFileSelect: () => triggerBackupFileSelect(),
+    downloadBackupFile: (filename) => downloadBackupFile(filename),
+    uploadBackupFile: () => uploadBackupFile(),
 
     // Evaluation (项目评价)
     showEvaluationModalForSales: (projectId, salesId, salesName) => showEvaluationModal(projectId, 'pm_to_sales', salesId, 'sales', salesName),

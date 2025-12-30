@@ -78,11 +78,16 @@ async function backupDatabase() {
               try {
                 await fs.rename(path.join(BACKUP_DIR, `temp_${timestamp}`), dirBackupPath);
                 const stats = await fs.stat(dirBackupPath);
+                const dirSize = await getDirectorySize(dirBackupPath);
+                
+                // 目录备份不发送邮件（因为无法作为附件发送）
+                console.log('⚠️ 目录备份格式，跳过邮件发送');
+                
                 resolve({
                   success: true,
                   filename: `backup_${timestamp}`,
                   filepath: dirBackupPath,
-                  size: await getDirectorySize(dirBackupPath),
+                  size: dirSize,
                   format: 'directory',
                   createdAt: now
                 });
@@ -120,6 +125,25 @@ async function backupDatabase() {
 
             // 获取文件大小
             const stats = await fs.stat(filepath);
+            
+            // 发送备份文件到管理员邮箱（异步，不阻塞备份流程）
+            try {
+              const emailService = require('./emailService');
+              emailService.sendBackupEmail(filepath, filename, stats.size)
+                .then(result => {
+                  if (result.success) {
+                    console.log(`✅ 备份文件已发送到 ${result.recipients} 个管理员邮箱`);
+                  } else {
+                    console.warn(`⚠️ 备份文件邮件发送失败: ${result.reason || result.error}`);
+                  }
+                })
+                .catch(err => {
+                  console.error('❌ 发送备份邮件异常:', err);
+                });
+            } catch (emailError) {
+              console.warn('⚠️ 发送备份邮件失败:', emailError.message);
+            }
+            
             resolve({
               success: true,
               filename: filename,

@@ -51,6 +51,7 @@ function renderBackups(backups) {
                         <td>${new Date(backup.createdAt).toLocaleString('zh-CN')}</td>
                         <td>${backup.age} 天</td>
                         <td>
+                            <button class="btn-small" data-click="downloadBackupFile('${backup.filename}')" style="margin-right: 5px;">下载</button>
                             <button class="btn-small btn-success" data-click="restoreBackup('${backup.filename}')" style="margin-right: 5px;">恢复</button>
                             <button class="btn-small btn-danger" data-click="deleteBackupFile('${backup.filename}')">删除</button>
                         </td>
@@ -127,6 +128,17 @@ export async function deleteBackupFile(filename) {
     }
 }
 
+// 下载备份文件
+export function downloadBackupFile(filename) {
+    if (!filename) {
+        showToast('无效的备份文件名', 'error');
+        return;
+    }
+    // 直接打开下载链接
+    const url = `/api/backup/download/${encodeURIComponent(filename)}`;
+    window.open(url, '_blank');
+}
+
 // 清理旧备份
 export async function cleanupOldBackups() {
     if (!confirm('确定要清理超过5天的旧备份吗？')) return;
@@ -146,18 +158,199 @@ export async function cleanupOldBackups() {
     }
 }
 
-// 挂载到 window 供 HTML 调用
+// 格式化文件大小
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+}
 
+// 触发文件选择
+export function triggerBackupFileSelect() {
+    const input = document.getElementById('backupUploadInput');
+    if (input) input.click();
+}
 
+// 初始化上传区域
+export function initBackupUpload() {
+    const input = document.getElementById('backupUploadInput');
+    const uploadArea = document.getElementById('backupUploadArea');
+    const fileNameDiv = document.getElementById('backupUploadFileName');
+    const fileNameText = document.getElementById('backupUploadFileNameText');
+    const uploadBtn = document.getElementById('backupUploadBtn');
+    const progressDiv = document.getElementById('backupUploadProgress');
+    const progressBar = document.getElementById('backupUploadProgressBar');
+    const progressText = document.getElementById('backupUploadProgressText');
 
+    if (!input || !uploadArea) return;
 
+    // 文件选择变化
+    input.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            if (!file.name.toLowerCase().endsWith('.tar.gz') && !file.name.toLowerCase().endsWith('.gz')) {
+                showToast('只支持 .tar.gz 格式的备份文件', 'error');
+                input.value = '';
+                return;
+            }
+            fileNameText.textContent = `${file.name} (${formatFileSize(file.size)})`;
+            fileNameDiv.style.display = 'block';
+            uploadBtn.style.display = 'inline-block';
+        }
+    });
 
+    // 点击上传区域选择文件
+    uploadArea.addEventListener('click', (e) => {
+        // 如果点击的是按钮或文件名区域，不触发文件选择
+        if (e.target.closest('button') || e.target.closest('#backupUploadFileName')) {
+            return;
+        }
+        input.click();
+    });
 
+    // 拖拽上传支持
+    uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        uploadArea.style.borderColor = '#667eea';
+        uploadArea.style.backgroundColor = '#f8faff';
+    });
 
+    uploadArea.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        uploadArea.style.borderColor = '#cbd5e1';
+        uploadArea.style.backgroundColor = 'white';
+    });
 
+    uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        uploadArea.style.borderColor = '#cbd5e1';
+        uploadArea.style.backgroundColor = 'white';
 
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            const file = files[0];
+            if (!file.name.toLowerCase().endsWith('.tar.gz') && !file.name.toLowerCase().endsWith('.gz')) {
+                showToast('只支持 .tar.gz 格式的备份文件', 'error');
+                return;
+            }
+            // 创建 DataTransfer 对象来设置文件
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(file);
+            input.files = dataTransfer.files;
+            
+            // 触发 change 事件
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    });
 
+    // 隐藏进度条
+    if (progressDiv) progressDiv.style.display = 'none';
+}
 
+// 清空上传选择
+export function clearBackupUpload() {
+    const input = document.getElementById('backupUploadInput');
+    const fileNameDiv = document.getElementById('backupUploadFileName');
+    const uploadBtn = document.getElementById('backupUploadBtn');
+    const progressDiv = document.getElementById('backupUploadProgress');
+    
+    if (input) input.value = '';
+    if (fileNameDiv) fileNameDiv.style.display = 'none';
+    if (uploadBtn) uploadBtn.style.display = 'none';
+    if (progressDiv) progressDiv.style.display = 'none';
+}
 
+// 上传备份文件
+export async function uploadBackupFile() {
+    const input = document.getElementById('backupUploadInput');
+    if (!input || !input.files || input.files.length === 0) {
+        showToast('请选择要上传的备份文件（.tar.gz）', 'warning');
+        return;
+    }
 
+    const file = input.files[0];
+    if (!file.name.toLowerCase().endsWith('.tar.gz') && !file.name.toLowerCase().endsWith('.gz')) {
+        showToast('只支持 .tar.gz 格式的备份文件', 'error');
+        return;
+    }
 
+    if (!confirm(`⚠️ 确认上传备份文件 "${file.name}" 吗？\n上传后可以从该文件恢复数据库。`)) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const progressDiv = document.getElementById('backupUploadProgress');
+    const progressBar = document.getElementById('backupUploadProgressBar');
+    const progressText = document.getElementById('backupUploadProgressText');
+    const uploadBtn = document.getElementById('backupUploadBtn');
+
+    // 显示进度条
+    if (progressDiv) progressDiv.style.display = 'block';
+    if (uploadBtn) uploadBtn.disabled = true;
+    if (progressBar) progressBar.style.width = '0%';
+    if (progressText) progressText.textContent = '0%';
+
+    showAlert('backupAlert', '正在上传备份文件，请稍候...', 'info');
+
+    try {
+        const xhr = new XMLHttpRequest();
+        
+        // 上传进度
+        xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+                const percentComplete = Math.round((e.loaded / e.total) * 100);
+                if (progressBar) progressBar.style.width = percentComplete + '%';
+                if (progressText) progressText.textContent = percentComplete + '%';
+            }
+        });
+
+        // 完成处理
+        xhr.addEventListener('load', async () => {
+            if (uploadBtn) uploadBtn.disabled = false;
+            if (progressDiv) progressDiv.style.display = 'none';
+            
+            if (xhr.status === 200) {
+                try {
+                    const data = JSON.parse(xhr.responseText);
+                    if (data.success) {
+                        showAlert('backupAlert', `✅ 备份文件上传成功：${data.data?.filename || ''}`, 'success');
+                        await loadBackups();
+                        clearBackupUpload();
+                    } else {
+                        showAlert('backupAlert', '上传失败: ' + (data.message || '未知错误'), 'error');
+                    }
+                } catch (parseError) {
+                    showAlert('backupAlert', '解析响应失败: ' + parseError.message, 'error');
+                }
+            } else {
+                try {
+                    const errorData = JSON.parse(xhr.responseText);
+                    showAlert('backupAlert', '上传失败: ' + (errorData.message || `HTTP ${xhr.status}`), 'error');
+                } catch {
+                    showAlert('backupAlert', `上传失败: HTTP ${xhr.status}`, 'error');
+                }
+            }
+        });
+
+        // 错误处理
+        xhr.addEventListener('error', () => {
+            if (uploadBtn) uploadBtn.disabled = false;
+            if (progressDiv) progressDiv.style.display = 'none';
+            showAlert('backupAlert', '上传失败: 网络错误', 'error');
+        });
+
+        // 发送请求
+        xhr.open('POST', '/api/backup/upload');
+        xhr.send(formData);
+    } catch (error) {
+        console.error('上传备份文件失败:', error);
+        if (uploadBtn) uploadBtn.disabled = false;
+        if (progressDiv) progressDiv.style.display = 'none';
+        showAlert('backupAlert', '上传备份文件失败: ' + error.message, 'error');
+    }
+}

@@ -193,6 +193,136 @@ ${projectUrl || 'http://localhost:3000'}/#projects
   }
 
   /**
+   * 发送备份文件邮件给管理员
+   * @param {String} backupFilePath - 备份文件路径
+   * @param {String} backupFilename - 备份文件名
+   * @param {Number} backupSize - 备份文件大小（字节）
+   * @returns {Promise<Object>} 发送结果
+   */
+  async sendBackupEmail(backupFilePath, backupFilename, backupSize) {
+    if (!this.isEnabled()) {
+      console.warn('[EmailService] 邮件服务未启用，跳过备份邮件');
+      return { success: false, reason: 'EMAIL_SERVICE_DISABLED' };
+    }
+
+    // 查询所有管理员用户
+    const User = require('../models/User');
+    const admins = await User.find({ 
+      roles: 'admin', 
+      isActive: true 
+    }).select('name email username');
+
+    if (!admins || admins.length === 0) {
+      console.warn('[EmailService] 未找到管理员用户，跳过备份邮件');
+      return { success: false, reason: 'NO_ADMIN_FOUND' };
+    }
+
+    const adminEmails = admins.map(a => a.email).filter(Boolean);
+    if (adminEmails.length === 0) {
+      console.warn('[EmailService] 管理员用户无有效邮箱，跳过备份邮件');
+      return { success: false, reason: 'NO_ADMIN_EMAIL' };
+    }
+
+    // 读取备份文件
+    const fs = require('fs').promises;
+    let backupBuffer;
+    try {
+      backupBuffer = await fs.readFile(backupFilePath);
+    } catch (error) {
+      console.error('[EmailService] 读取备份文件失败:', error);
+      return { success: false, reason: 'FILE_READ_ERROR', error: error.message };
+    }
+
+    // 格式化文件大小
+    const formatFileSize = (bytes) => {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+    };
+
+    const backupDate = new Date().toLocaleString('zh-CN');
+    const subject = `【数据备份】${backupFilename}`;
+    const projectUrl = process.env.APP_URL || 'http://localhost:3000';
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>数据备份通知</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+  <div style="max-width:640px;margin:0 auto;padding:20px;">
+    <h2>数据备份完成</h2>
+    <p>系统已完成数据备份，备份文件已随邮件发送。</p>
+    
+    <div style="background-color:#f9fafb;border-left:4px solid #2563eb;padding:16px;margin:16px 0;border-radius:4px;">
+      <p style="margin:4px 0;"><strong>备份文件名：</strong>${backupFilename}</p>
+      <p style="margin:4px 0;"><strong>文件大小：</strong>${formatFileSize(backupSize)}</p>
+      <p style="margin:4px 0;"><strong>备份时间：</strong>${backupDate}</p>
+    </div>
+    
+    <p style="color:#6b7280;font-size:14px;">请妥善保管备份文件，建议定期下载并保存到安全位置。</p>
+    <p><a href="${projectUrl}/#backup" style="color:#2563eb;">在系统中查看备份列表</a></p>
+  </div>
+</body>
+</html>
+    `.trim();
+
+    const textContent = `
+数据备份完成
+
+系统已完成数据备份，备份文件已随邮件发送。
+
+备份文件名：${backupFilename}
+文件大小：${formatFileSize(backupSize)}
+备份时间：${backupDate}
+
+请妥善保管备份文件，建议定期下载并保存到安全位置。
+
+${projectUrl || 'http://localhost:3000'}/#backup
+    `.trim();
+
+    const emailOptions = {
+      from: `${this.fromName} <${this.fromEmail}>`,
+      to: adminEmails,
+      subject,
+      html: htmlContent,
+      text: textContent,
+      attachments: [{
+        filename: backupFilename,
+        content: backupBuffer
+      }],
+      headers: {
+        'List-Unsubscribe': `<${process.env.APP_URL || 'http://localhost:3000'}/#settings>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        'X-Mailer': '语家TMS系统',
+        'X-Priority': '1',
+        'Reply-To': this.fromEmail
+      },
+      tags: [
+        { name: 'category', value: 'backup' },
+        { name: 'system', value: 'kpi' }
+      ]
+    };
+
+    const result = await this.resend.emails.send(emailOptions);
+    if (result?.data?.id) {
+      console.log('[EmailService] 备份邮件发送成功:', { 
+        to: adminEmails, 
+        filename: backupFilename, 
+        messageId: result.data.id 
+      });
+      return { success: true, messageId: result.data.id, recipients: adminEmails.length };
+    }
+    if (result?.error) {
+      console.error('[EmailService] 备份邮件发送失败（API）:', result.error);
+      return { success: false, reason: 'API_ERROR', error: JSON.stringify(result.error) };
+    }
+    console.error('[EmailService] 备份邮件发送失败（无 messageId）');
+    return { success: false, reason: 'NO_MESSAGE_ID' };
+  }
+
+  /**
    * 初始化邮件服务
    */
   init() {

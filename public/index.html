@@ -686,20 +686,60 @@
             <div id="backup" class="section">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h2>数据备份与恢复</h2>
-                    <div style="display: flex; gap: 10px;">
-                        <button data-click="createBackup()" class="btn-success">创建备份</button>
-                        <button data-click="cleanupOldBackups()" class="btn-small">清理旧备份</button>
-                        <button data-click="loadBackups()" class="btn-small">刷新列表</button>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 20px;">
+                    <button data-click="createBackup()" class="btn-success">📦 创建备份</button>
+                    <button data-click="cleanupOldBackups()" class="btn-small">🗑️ 清理旧备份</button>
+                    <button data-click="loadBackups()" class="btn-small">🔄 刷新列表</button>
+                </div>
+                
+                <!-- 上传备份文件卡片 -->
+                <div class="card" style="margin-bottom: 20px; border: 2px dashed #cbd5e1; background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);">
+                    <div class="card-title" style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 20px;">📤</span>
+                        <span>上传备份文件恢复数据库</span>
                     </div>
+                    <div style="padding: 20px;">
+                        <div id="backupUploadArea" style="text-align: center; padding: 30px; background: white; border-radius: 8px; border: 2px dashed #cbd5e1; transition: all 0.3s; cursor: pointer;"
+                             onmouseover="this.style.borderColor='#667eea'; this.style.backgroundColor='#f8faff';" 
+                             onmouseout="this.style.borderColor='#cbd5e1'; this.style.backgroundColor='white';">
+                            <input type="file" id="backupUploadInput" accept=".tar.gz,.gz" style="display: none;" />
+                            <div style="font-size: 48px; margin-bottom: 12px;">📁</div>
+                            <div style="font-size: 16px; font-weight: 600; color: #334155; margin-bottom: 8px;">
+                                点击选择文件或拖拽文件到此处
+                            </div>
+                            <div style="font-size: 13px; color: #64748b; margin-bottom: 16px;">
+                                支持 .tar.gz 格式，最大 500MB
+                            </div>
+                            <div id="backupUploadFileName" style="display: none; margin-top: 12px; padding: 8px 12px; background: #f1f5f9; border-radius: 6px; font-size: 14px; color: #475569;">
+                                <span id="backupUploadFileNameText"></span>
+                                <button data-click="clearBackupUpload()" style="margin-left: 8px; padding: 2px 8px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">✕</button>
+                            </div>
+                            <button id="backupUploadBtn" data-click="uploadBackupFile()" 
+                                    class="btn-success" 
+                                    style="margin-top: 16px; display: none; padding: 10px 24px; font-size: 14px;">
+                                🚀 开始上传
+                            </button>
+                        </div>
+                        <div id="backupUploadProgress" style="display: none; margin-top: 16px;">
+                            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                                <div style="flex: 1; height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden;">
+                                    <div id="backupUploadProgressBar" style="height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); width: 0%; transition: width 0.3s;"></div>
+                                </div>
+                                <span id="backupUploadProgressText" style="font-size: 13px; color: #64748b; min-width: 60px;">0%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 </div>
                 <div id="backupAlert" style="margin-bottom: 20px;"></div>
                 <div style="background: #f8f9fa; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
                     <h4 style="margin-bottom: 10px;">📋 备份说明</h4>
                     <ul style="margin: 0; padding-left: 20px; color: #666;">
-                        <li>系统每天00:00自动备份数据库</li>
+                        <li>系统每天00:00自动备份数据库，并可手动创建备份</li>
                         <li>自动删除超过5天的旧备份</li>
-                        <li>备份文件保存在服务器的 <code>backups</code> 目录</li>
-                        <li><strong style="color: #d32f2f;">恢复操作会覆盖当前数据库，请谨慎操作！</strong></li>
+                        <li>备份文件保存在服务器的 <code>backups</code> 目录，并会发送到管理员邮箱（附件形式）</li>
+                        <li>可从本地上传 <code>.tar.gz</code> 备份文件并恢复数据库</li>
+                        <li><strong style="color: #d32f2f;">恢复操作会覆盖当前数据库，请谨慎操作！建议先创建当日备份。</strong></li>
                     </ul>
                 </div>
                 <div id="backupsList">
