@@ -2929,6 +2929,16 @@ export async function approveInvoiceRequest(requestId) {
                             <input type="date" id="approveIssueDate" required style="width:100%;padding:8px;" value="${new Date().toISOString().split('T')[0]}">
                         </div>
                         <div class="form-group">
+                            <label>发票附件（可选，PDF/图片）：</label>
+                            <input type="file" id="approveInvoiceAttachment" accept=".pdf,image/*" style="width:100%;padding:4px 0;">
+                            <small style="color:#666;font-size:12px;">用于发送给申请人邮箱，文件大小建议不超过 10MB。</small>
+                        </div>
+                        <div class="form-group">
+                            <label>额外通知邮箱（可选）：</label>
+                            <input type="email" id="approveNotifyEmail" placeholder="例如：finance@yourcompany.com" style="width:100%;padding:8px;">
+                            <small style="color:#666;font-size:12px;">除申请人邮箱外，额外接收发票的邮箱（客户财务等）。</small>
+                        </div>
+                        <div class="form-group">
                             <label>申请金额：</label>
                             <input type="text" value="¥${(request.amount || 0).toLocaleString()}" readonly style="background:#f5f5f5;">
                         </div>
@@ -2985,10 +2995,41 @@ async function submitApproveInvoiceRequest(requestId) {
         const invoiceNumber = document.getElementById('approveInvoiceNumber')?.value;
         const issueDate = document.getElementById('approveIssueDate')?.value;
         const note = document.getElementById('approveInvoiceNote')?.value || '';
+        const notifyEmail = document.getElementById('approveNotifyEmail')?.value?.trim() || '';
+        const attachmentInput = document.getElementById('approveInvoiceAttachment');
+        let attachment = null;
         
         if (!invoiceNumber || !issueDate) {
             showToast('请填写发票号和开票日期', 'error');
             return;
+        }
+
+        if (notifyEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(notifyEmail)) {
+            showToast('额外通知邮箱格式不正确', 'error');
+            return;
+        }
+
+        // 处理附件为 Base64（用于通过 JSON 传给后端再发邮件）
+        if (attachmentInput && attachmentInput.files && attachmentInput.files[0]) {
+            const file = attachmentInput.files[0];
+            if (file.size > 10 * 1024 * 1024) { // 10MB 限制
+                showToast('发票附件不能超过 10MB', 'error');
+                return;
+            }
+            attachment = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64 = reader.result.split(',')[1];
+                    resolve({
+                        filename: file.name,
+                        size: file.size,
+                        contentType: file.type || 'application/octet-stream',
+                        base64
+                    });
+                };
+                reader.onerror = () => reject(new Error('读取附件失败'));
+                reader.readAsDataURL(file);
+            });
         }
         
         const res = await apiFetch(`/invoice-requests/${requestId}/approve`, {
@@ -2997,7 +3038,9 @@ async function submitApproveInvoiceRequest(requestId) {
                 projectId,
                 invoiceNumber,
                 issueDate,
-                note
+                note,
+                notifyEmail,
+                attachment
             })
         });
         const data = await res.json();

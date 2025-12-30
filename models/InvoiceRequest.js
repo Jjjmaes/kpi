@@ -88,6 +88,19 @@ const invoiceRequestSchema = new mongoose.Schema({
   approvedAt: {
     type: Date
   },
+  // 发票附件信息（审批通过时可上传一份PDF/图片）
+  invoiceAttachment: {
+    filename: { type: String, trim: true },
+    contentType: { type: String, trim: true },
+    size: { type: Number }, // 字节数
+    // 基于安全和简化，这里只存一份 Base64，用于通过邮件发送，不长期保存大量文件
+    base64: { type: String }
+  },
+  // 申请人指定的收件邮箱（可选，审批通过时一起发送）
+  notifyEmail: {
+    type: String,
+    trim: true
+  },
   // 关联的发票ID（审批通过后创建发票时关联）
   linkedInvoiceId: {
     type: mongoose.Schema.Types.ObjectId,

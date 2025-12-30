@@ -521,6 +521,199 @@ ${new Date().getFullYear()} 语家 OA 系统
   }
 
   /**
+   * 生成发票开具完成邮件 HTML 内容
+   * @param {Object} request - 发票申请对象
+   * @param {Object} invoice - 发票对象
+   * @param {Object} recipient - 收件人用户（createdBy）
+   */
+  generateInvoiceIssuedEmailHTML(request, invoice, recipient) {
+    const projectSummary = (request.projects || [])
+      .map(p => `${p.projectNumber || '-'} ${p.projectName || '-'}`)
+      .join('、') || '相关项目';
+
+    return `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>发票开具通知</title>
+</head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background-color:#f5f5f5;">
+  <table role="presentation" style="width:100%;border-collapse:collapse;background-color:#f5f5f5;">
+    <tr>
+      <td style="padding:24px;">
+        <table role="presentation" style="width:100%;max-width:600px;margin:0 auto;background-color:#ffffff;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.08);">
+          <tr>
+            <td style="padding:20px 24px;background:linear-gradient(135deg,#0ea5e9 0%,#6366f1 100%);border-radius:8px 8px 0 0;color:#fff;">
+              <h1 style="margin:0;font-size:20px;font-weight:600;">发票开具通知</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px;">
+              <p style="margin:0 0 16px 0;font-size:15px;color:#111827;">${recipient?.name || recipient?.username || '您好'}：</p>
+              <p style="margin:0 0 16px 0;font-size:14px;color:#374151;">
+                您提交的发票申请已由财务开具，相关信息如下：
+              </p>
+              <div style="margin:16px 0;padding:16px;background-color:#f9fafb;border-radius:6px;border:1px solid #e5e7eb;">
+                <p style="margin:0 0 8px 0;font-size:14px;color:#6b7280;">申请信息：</p>
+                <ul style="margin:0 0 8px 20px;padding:0;font-size:14px;color:#374151;">
+                  <li>项目：${projectSummary}</li>
+                  <li>申请金额：¥${(request.amount || 0).toLocaleString()}</li>
+                  <li>发票类型：${request.invoiceType === 'vat' ? '增值税发票' : request.invoiceType === 'normal' ? '普通发票' : '其他'}</li>
+                  <li>发票抬头：${request.invoiceInfo?.title || '-'}</li>
+                </ul>
+                <p style="margin:8px 0 4px 0;font-size:14px;color:#6b7280;">开票信息：</p>
+                <ul style="margin:0 0 0 20px;padding:0;font-size:14px;color:#374151;">
+                  <li>发票号：${invoice.invoiceNumber || '-'}</li>
+                  <li>开票金额：¥${(invoice.amount || 0).toLocaleString()}</li>
+                  <li>开票日期：${invoice.issueDate ? new Date(invoice.issueDate).toLocaleDateString('zh-CN') : '-'}</li>
+                </ul>
+              </div>
+              <p style="margin:16px 0 0 0;font-size:13px;color:#6b7280;">
+                如本邮件附带有发票 PDF 或照片，请注意查收并确认。如有疑问，请联系财务人员或管理员。
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 24px;background-color:#f9fafb;border-radius:0 0 8px 8px;text-align:center;">
+              <p style="margin:0;font-size:12px;color:#9ca3af;">此邮件由系统自动发送，请勿直接回复。</p>
+              <p style="margin:4px 0 0 0;font-size:12px;color:#9ca3af;">© ${new Date().getFullYear()} 语家TMS系统</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+    `.trim();
+  }
+
+  /**
+   * 生成发票开具完成邮件纯文本内容
+   */
+  generateInvoiceIssuedEmailText(request, invoice, recipient) {
+    const projectSummary = (request.projects || [])
+      .map(p => `${p.projectNumber || '-'} ${p.projectName || '-'}`)
+      .join('、') || '相关项目';
+
+    return `
+发票开具通知
+
+您好 ${recipient?.name || recipient?.username || ''}，
+
+您提交的发票申请已由财务开具，相关信息如下：
+
+项目：${projectSummary}
+申请金额：¥${(request.amount || 0).toLocaleString()}
+发票类型：${request.invoiceType === 'vat' ? '增值税发票' : request.invoiceType === 'normal' ? '普通发票' : '其他'}
+发票抬头：${request.invoiceInfo?.title || '-'}
+
+开票信息：
+发票号：${invoice.invoiceNumber || '-'}
+开票金额：¥${(invoice.amount || 0).toLocaleString()}
+开票日期：${invoice.issueDate ? new Date(invoice.issueDate).toLocaleDateString('zh-CN') : '-'}
+
+如本邮件附带有发票 PDF 或照片，请注意查收并确认。如有疑问，请联系财务人员或管理员。
+
+${new Date().getFullYear()} 语家TMS系统
+    `.trim();
+  }
+
+  /**
+   * 发送发票开具完成邮件给申请人和可选通知邮箱
+   * @param {Object} request - 已审批的发票申请（需填充 projects、createdBy）
+   * @param {Object} invoice - 关联的发票
+   * @param {Array} attachments - 附件数组 [{ filename, content: Buffer | base64, contentType }]
+   * @returns {Promise<Object>}
+   */
+  async sendInvoiceIssuedEmail(request, invoice, attachments = null) {
+    if (!this.isEnabled()) {
+      console.warn('[EmailService] 邮件服务未启用，跳过发送发票通知');
+      return { success: false, reason: 'EMAIL_SERVICE_DISABLED' };
+    }
+
+    const recipient = request.createdBy;
+    const extraEmail = request.notifyEmail;
+
+    if (!recipient?.email && !extraEmail) {
+      console.warn('[EmailService] 发票开具通知：没有有效的收件邮箱，跳过发送');
+      return { success: false, reason: 'NO_EMAIL' };
+    }
+
+    try {
+      const htmlContent = this.generateInvoiceIssuedEmailHTML(request, invoice, recipient);
+      const textContent = this.generateInvoiceIssuedEmailText(request, invoice, recipient);
+
+      const toList = [];
+      if (recipient?.email) toList.push(recipient.email);
+      if (extraEmail) toList.push(extraEmail);
+
+      const emailOptions = {
+        from: `${this.fromName} <${this.fromEmail}>`,
+        to: toList,
+        subject: `【发票开具通知】${invoice.invoiceNumber || ''} - ¥${(invoice.amount || 0).toLocaleString()}`,
+        html: htmlContent,
+        text: textContent,
+        headers: {
+          'List-Unsubscribe': `<${process.env.APP_URL || 'http://localhost:3000'}/#settings>`,
+          'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+          'X-Mailer': '语家TMS系统',
+          'X-Priority': '1',
+          'Reply-To': this.fromEmail
+        },
+        tags: [
+          { name: 'category', value: 'invoice_issued' },
+          { name: 'system', value: 'kpi' }
+        ]
+      };
+
+      if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+        emailOptions.attachments = attachments.map(att => ({
+          filename: att.filename,
+          content: Buffer.isBuffer(att.content) ? att.content : Buffer.from(att.content, 'base64'),
+          contentType: att.contentType
+        }));
+      }
+
+      const result = await this.resend.emails.send(emailOptions);
+
+      if (result?.data?.id) {
+        console.log('[EmailService] 发票开具通知邮件发送成功:', {
+          to: toList,
+          invoiceNumber: invoice.invoiceNumber,
+          messageId: result.data.id
+        });
+        return { success: true, messageId: result.data.id };
+      }
+
+      if (result?.error) {
+        console.error('[EmailService] 发票开具通知邮件发送失败（API返回错误）:', {
+          to: toList,
+          invoiceNumber: invoice.invoiceNumber,
+          error: result.error
+        });
+        return { success: false, reason: 'API_ERROR', error: JSON.stringify(result.error) };
+      }
+
+      console.error('[EmailService] 发票开具通知邮件发送失败（未返回 messageId）:', {
+        to: toList,
+        invoiceNumber: invoice.invoiceNumber
+      });
+      return { success: false, reason: 'NO_MESSAGE_ID' };
+    } catch (error) {
+      console.error('[EmailService] 发票开具通知邮件发送失败（异常）:', {
+        requestId: request._id,
+        invoiceId: invoice._id,
+        errorMessage: error.message,
+        errorStack: error.stack
+      });
+      return { success: false, reason: 'SEND_FAILED', error: error.message };
+    }
+  }
+
+  /**
    * 发送报销申请邮件给审批人
    * @param {Object} user - 审批人用户对象（包含 name, email）
    * @param {Object} expenseRequest - 报销申请对象

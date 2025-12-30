@@ -7,6 +7,7 @@ const InvoiceRequest = require('../models/InvoiceRequest');
 const Project = require('../models/Project');
 const Invoice = require('../models/Invoice');
 const Customer = require('../models/Customer');
+const emailService = require('../services/emailService');
 
 // 所有路由需要认证
 router.use(authenticate);
@@ -286,7 +287,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
  * POST /api/invoice-requests/:id/approve
  */
 router.post('/:id/approve', allowFinance, asyncHandler(async (req, res) => {
-  const { projectId, invoiceNumber, issueDate, note: invoiceNote } = req.body;
+  const { projectId, invoiceNumber, issueDate, note: invoiceNote, notifyEmail, attachment } = req.body;
 
   const request = await InvoiceRequest.findById(req.params.id)
     .populate('projects');
@@ -358,16 +359,47 @@ router.post('/:id/approve', allowFinance, asyncHandler(async (req, res) => {
     request.approvedBy = req.user._id;
     request.approvedAt = new Date();
     request.linkedInvoiceId = invoice._id;
+
+    // 如果前端传了附件信息，暂存在申请记录上（主要用于邮件发送）
+    if (attachment && attachment.filename && attachment.base64) {
+      request.invoiceAttachment = {
+        filename: attachment.filename,
+        contentType: attachment.contentType || 'application/octet-stream',
+        size: attachment.size || undefined,
+        base64: attachment.base64
+      };
+    }
+
+    if (notifyEmail && typeof notifyEmail === 'string') {
+      request.notifyEmail = notifyEmail.trim();
+    }
+
     await request.save();
 
     // 返回申请和发票信息
     await request.populate([
       { path: 'projects', select: 'projectNumber projectName projectAmount clientName' },
       { path: 'customerId', select: 'name shortName' },
-      { path: 'createdBy', select: 'username name' },
+      { path: 'createdBy', select: 'username name email' },
       { path: 'approvedBy', select: 'username name' },
       { path: 'linkedInvoiceId' }
     ]);
+
+    // 发送发票开具通知邮件（异步，不阻塞接口返回）
+    try {
+      const attachmentsForEmail = request.invoiceAttachment?.base64 ? [{
+        filename: request.invoiceAttachment.filename || `invoice-${invoice.invoiceNumber}.pdf`,
+        content: request.invoiceAttachment.base64,
+        contentType: request.invoiceAttachment.contentType || 'application/octet-stream'
+      }] : null;
+
+      emailService.sendInvoiceIssuedEmail(request, invoice, attachmentsForEmail)
+        .catch(err => {
+          console.error('[InvoiceRequests] 发送发票开具通知邮件失败:', err.message);
+        });
+    } catch (err) {
+      console.error('[InvoiceRequests] 发票通知邮件发送异常:', err.message);
+    }
 
     res.json({
       success: true,

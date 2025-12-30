@@ -410,6 +410,11 @@ const SECTION_ROUTES = {
             // 财务/管理员：预填充筛选（客户/项目/销售下拉等），并默认显示应收对账
             state.salesFinanceView = false;
             try {
+                // 确保客户和用户列表已加载，用于筛选下拉框
+                await loadCustomers();
+                const { loadUsers } = await import('./modules/user.js');
+                await loadUsers();
+
                 const { fillFinanceFilters } = await import('./modules/project.js');
                 await fillFinanceFilters();
             } catch (e) {
