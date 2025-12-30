@@ -226,7 +226,20 @@ ${assigner ? `分配人：${assigner.name || assigner.username || '-'}` : ''}
         to: user.email,
         subject: `【项目分配通知】${project.projectName || '新项目'} - ${roleName}`,
         html: htmlContent,
-        text: textContent
+        text: textContent,
+        // 添加邮件头信息，提升送达率
+        headers: {
+          'List-Unsubscribe': `<${process.env.APP_URL || 'http://localhost:3000'}/#settings>`,
+          'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+          'X-Mailer': '语家TMS系统',
+          'X-Priority': '1', // 正常优先级
+          'Reply-To': this.fromEmail // 设置回复地址
+        },
+        // 设置标签，便于 Resend 追踪
+        tags: [
+          { name: 'category', value: 'project_assignment' },
+          { name: 'system', value: 'kpi' }
+        ]
       };
 
       // 如果有附件，添加到邮件中
@@ -535,7 +548,19 @@ ${new Date().getFullYear()} 语家 OA 系统
         to: user.email,
         subject: `【报销申请通知】${expenseRequest.requestNumber} - ${expenseRequest.totalAmount}元`,
         html: htmlContent,
-        text: textContent
+        text: textContent,
+        // 添加邮件头信息，提升送达率
+        headers: {
+          'List-Unsubscribe': `<${process.env.APP_URL || 'http://localhost:3000'}/#settings>`,
+          'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+          'X-Mailer': '语家TMS系统',
+          'X-Priority': '1',
+          'Reply-To': this.fromEmail
+        },
+        tags: [
+          { name: 'category', value: 'expense_request' },
+          { name: 'system', value: 'kpi' }
+        ]
       };
 
       // 如果有附件，添加到邮件中
