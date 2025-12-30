@@ -629,7 +629,7 @@ export async function showCreateProjectModal() {
                     const size = (file.size / 1024).toFixed(2);
                     return `<div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: #f0f0f0; border-radius: 4px; margin-bottom: 4px;">
                         <span>${file.name} (${size} KB)</span>
-                        <button type="button" onclick="removeProjectAttachment(${index})" style="background: #ef4444; color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 11px;">移除</button>
+                        <button type="button" data-click="removeProjectAttachment(${index})" style="background: #ef4444; color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 11px;">移除</button>
                     </div>`;
                 }).join('');
                 attachmentsList.innerHTML = listHtml;
@@ -639,7 +639,7 @@ export async function showCreateProjectModal() {
 }
 
 // 移除项目附件
-window.removeProjectAttachment = function(index) {
+export function removeProjectAttachment(index) {
     const attachmentsInput = document.getElementById('projectAttachments');
     if (!attachmentsInput) return;
     

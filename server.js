@@ -77,8 +77,9 @@ app.use(cors({
     optionsSuccessStatus: 200
 }));
 
-app.use(express.json({ limit: '10mb' })); // 限制请求体大小
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// 放宽请求体限制以支持附件上传（前端限制总大小 20MB，Base64 会膨胀）
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // 静态文件服务
 // 【修改】使用绝对路径，防止 CWD 变化导致找不到文件
