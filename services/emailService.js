@@ -239,14 +239,34 @@ ${assigner ? `分配人：${assigner.name || assigner.username || '-'}` : ''}
 
       const result = await this.resend.emails.send(emailOptions);
 
-      console.log('[EmailService] 邮件发送成功:', {
+      // Resend SDK 可能返回 { data } 或 { error }，这里做显式判定
+      if (result?.data?.id) {
+        console.log('[EmailService] 邮件发送成功:', {
+          to: user.email,
+          project: project.projectName,
+          role: roleName,
+          messageId: result.data.id
+        });
+        return { success: true, messageId: result.data.id };
+      }
+
+      // 如果返回 error 或没有 messageId，视为失败并记录详情
+      if (result?.error) {
+        console.error('[EmailService] 邮件发送失败（API返回错误）:', {
+          to: user.email,
+          project: project.projectName,
+          role,
+          error: result.error
+        });
+        return { success: false, reason: 'API_ERROR', error: JSON.stringify(result.error) };
+      }
+
+      console.error('[EmailService] 邮件发送失败（未返回 messageId）:', {
         to: user.email,
         project: project.projectName,
-        role: roleName,
-        messageId: result.data?.id
+        role
       });
-
-      return { success: true, messageId: result.data?.id };
+      return { success: false, reason: 'NO_MESSAGE_ID' };
     } catch (error) {
       console.error('[EmailService] 邮件发送失败:', {
         to: user.email,
@@ -521,13 +541,29 @@ ${new Date().getFullYear()} 语家 OA 系统
 
       const result = await this.resend.emails.send(emailOptions);
 
-      console.log('[EmailService] 报销申请邮件发送成功:', {
-        to: user.email,
-        requestNumber: expenseRequest.requestNumber,
-        messageId: result.data?.id
-      });
+      if (result?.data?.id) {
+        console.log('[EmailService] 报销申请邮件发送成功:', {
+          to: user.email,
+          requestNumber: expenseRequest.requestNumber,
+          messageId: result.data.id
+        });
+        return { success: true, messageId: result.data.id };
+      }
 
-      return { success: true, messageId: result.data?.id };
+      if (result?.error) {
+        console.error('[EmailService] 报销申请邮件发送失败（API返回错误）:', {
+          to: user.email,
+          requestNumber: expenseRequest.requestNumber,
+          error: result.error
+        });
+        return { success: false, reason: 'API_ERROR', error: JSON.stringify(result.error) };
+      }
+
+      console.error('[EmailService] 报销申请邮件发送失败（未返回 messageId）:', {
+        to: user.email,
+        requestNumber: expenseRequest.requestNumber
+      });
+      return { success: false, reason: 'NO_MESSAGE_ID' };
     } catch (error) {
       console.error('[EmailService] 报销申请邮件发送失败:', {
         to: user.email,

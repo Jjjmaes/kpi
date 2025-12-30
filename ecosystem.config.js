@@ -44,13 +44,6 @@ function loadEnvFile() {
 // 加载 .env 文件中的环境变量
 const envVars = loadEnvFile();
 
-// 调试：输出关键环境变量（不输出敏感信息）
-console.log('[PM2 Config] 加载的环境变量:');
-console.log('  PORT:', envVars.PORT);
-console.log('  HOST:', envVars.HOST);
-console.log('  MONGODB_URI:', envVars.MONGODB_URI ? '已配置' : '未配置');
-console.log('  JWT_SECRET:', envVars.JWT_SECRET ? '已配置' : '未配置');
-
 module.exports = {
   apps: [{
     name: 'kpi',
