@@ -413,7 +413,17 @@ export async function uploadBackupFile() {
         });
 
         // 发送请求
-        xhr.open('POST', '/api/backup/upload');
+        const url = `${API_BASE}/backup/upload`;
+        xhr.open('POST', url);
+        
+        // 添加认证 headers
+        if (state.token) {
+            xhr.setRequestHeader('Authorization', `Bearer ${state.token}`);
+        }
+        if (state.currentRole) {
+            xhr.setRequestHeader('X-Role', state.currentRole);
+        }
+        
         xhr.send(formData);
     } catch (error) {
         console.error('上传备份文件失败:', error);
