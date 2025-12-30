@@ -8,16 +8,32 @@ function loadEnvFile() {
   
   if (fs.existsSync(envPath)) {
     const envContent = fs.readFileSync(envPath, 'utf8');
-    envContent.split('\n').forEach(line => {
+    // 按行分割，支持 Windows (\r\n) 和 Unix (\n) 换行符
+    const lines = envContent.split(/\r?\n/);
+    
+    lines.forEach(line => {
       line = line.trim();
       // 跳过注释和空行
       if (line && !line.startsWith('#')) {
-        const [key, ...valueParts] = line.split('=');
-        if (key && valueParts.length > 0) {
-          const value = valueParts.join('=').trim();
-          // 移除引号（如果有）
-          env[key.trim()] = value.replace(/^["']|["']$/g, '');
-        }
+        // 处理一行中有多个 KEY=VALUE 的情况（错误格式，但尝试修复）
+        // 先尝试按空格分割，如果分割后有多个包含等号的片段，则分别解析
+        const parts = line.split(/\s+/);
+        
+        parts.forEach(part => {
+          part = part.trim();
+          if (part && part.includes('=')) {
+            // 只取第一个等号作为分隔符（值中可能包含等号）
+            const equalIndex = part.indexOf('=');
+            if (equalIndex > 0) {
+              const key = part.substring(0, equalIndex).trim();
+              const value = part.substring(equalIndex + 1).trim();
+              // 移除引号（如果有）
+              if (key && value) {
+                env[key] = value.replace(/^["']|["']$/g, '');
+              }
+            }
+          }
+        });
       }
     });
   }
@@ -27,6 +43,13 @@ function loadEnvFile() {
 
 // 加载 .env 文件中的环境变量
 const envVars = loadEnvFile();
+
+// 调试：输出关键环境变量（不输出敏感信息）
+console.log('[PM2 Config] 加载的环境变量:');
+console.log('  PORT:', envVars.PORT);
+console.log('  HOST:', envVars.HOST);
+console.log('  MONGODB_URI:', envVars.MONGODB_URI ? '已配置' : '未配置');
+console.log('  JWT_SECRET:', envVars.JWT_SECRET ? '已配置' : '未配置');
 
 module.exports = {
   apps: [{
