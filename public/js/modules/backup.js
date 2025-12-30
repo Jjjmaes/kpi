@@ -1,5 +1,7 @@
 import { apiFetch } from '../core/api.js';
 import { showToast, showAlert } from '../core/utils.js';
+import { API_BASE } from '../core/config.js';
+import { state } from '../core/state.js';
 
 // 加载备份列表
 export async function loadBackups() {
@@ -129,14 +131,80 @@ export async function deleteBackupFile(filename) {
 }
 
 // 下载备份文件
-export function downloadBackupFile(filename) {
+export async function downloadBackupFile(filename) {
     if (!filename) {
         showToast('无效的备份文件名', 'error');
         return;
     }
-    // 直接打开下载链接
-    const url = `/api/backup/download/${encodeURIComponent(filename)}`;
-    window.open(url, '_blank');
+    
+    try {
+        showAlert('backupAlert', '正在下载备份文件...', 'info');
+        
+        // 直接使用 fetch 并手动添加认证 token，避免 apiFetch 设置 Content-Type
+        const url = `${API_BASE}/backup/download/${encodeURIComponent(filename)}`;
+        const headers = {};
+        
+        if (state.token) {
+            headers['Authorization'] = `Bearer ${state.token}`;
+        }
+        if (state.currentRole) {
+            headers['X-Role'] = state.currentRole;
+        }
+        
+        const res = await fetch(url, {
+            method: 'GET',
+            headers
+        });
+        
+        if (!res.ok) {
+            // 尝试解析错误响应
+            let errorMessage = `下载失败: ${res.status}`;
+            try {
+                const errorData = await res.json();
+                errorMessage = errorData.message || errorMessage;
+            } catch (e) {
+                // 如果不是 JSON，使用状态文本
+                errorMessage = res.statusText || errorMessage;
+            }
+            throw new Error(errorMessage);
+        }
+        
+        // 将响应转换为 blob
+        const blob = await res.blob();
+        
+        // 从响应头获取文件名，如果没有则使用原始文件名
+        const contentDisposition = res.headers.get('Content-Disposition');
+        let downloadFilename = filename;
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+            if (filenameMatch && filenameMatch[1]) {
+                downloadFilename = filenameMatch[1].replace(/['"]/g, '');
+                // 处理 URL 编码的文件名
+                try {
+                    downloadFilename = decodeURIComponent(downloadFilename);
+                } catch (e) {
+                    // 如果解码失败，使用原始值
+                }
+            }
+        }
+        
+        // 创建临时 URL 并触发下载
+        const urlObj = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = urlObj;
+        a.download = downloadFilename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        
+        // 清理临时 URL
+        window.URL.revokeObjectURL(urlObj);
+        
+        showAlert('backupAlert', '备份文件下载成功', 'success');
+    } catch (error) {
+        console.error('下载备份失败:', error);
+        showAlert('backupAlert', '下载备份失败: ' + error.message, 'error');
+    }
 }
 
 // 清理旧备份
