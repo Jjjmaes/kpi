@@ -464,7 +464,7 @@ class ProjectService {
    * 添加项目成员
    */
   async addProjectMember(projectId, memberData, user) {
-    const { userId, role, translatorType, wordRatio, layoutCost, partTimeFee } = memberData;
+    const { userId, role, translatorType, wordRatio, layoutCost, partTimeFee, attachments } = memberData;
 
     if (!userId || !role) {
       throw new AppError('用户ID和角色不能为空', 400, 'INVALID_INPUT');
@@ -682,9 +682,18 @@ class ProjectService {
       console.error('[ProjectService] 创建通知失败:', notifError);
     }
 
-    // 发送邮件通知（异步，不阻塞主流程）
+    // 发送邮件通知（异步，不阻塞主流程），支持多个附件
     try {
-      await emailService.sendProjectAssignmentEmail(memberUser, project, role, user);
+      let emailAttachments = null;
+      if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+        emailAttachments = attachments.map(att => ({
+          filename: att.filename,
+          content: Buffer.isBuffer(att.content)
+            ? att.content
+            : Buffer.from(att.content, 'base64')
+        }));
+      }
+      await emailService.sendProjectAssignmentEmail(memberUser, project, role, user, emailAttachments);
     } catch (emailError) {
       console.error('[ProjectService] 发送邮件通知失败:', emailError);
       // 邮件发送失败不影响成员分配
@@ -889,7 +898,7 @@ class ProjectService {
   /**
    * 更新项目状态
    */
-  async updateProjectStatus(projectId, status, user) {
+  async updateProjectStatus(projectId, status, user, extra = {}) {
     const project = await Project.findById(projectId);
     if (!project) {
       throw new AppError('项目不存在', 404, 'PROJECT_NOT_FOUND');
@@ -940,10 +949,21 @@ class ProjectService {
 
     project.status = status;
     await project.save();
-
+    
     // 发送状态变更通知
     await this.sendStatusChangeNotification(project, status, user);
 
+    // 如果是翻译/审校/排版完成且有交付附件，则给项目经理发送交付邮件
+    const { deliveryNote, deliveryAttachments } = extra || {};
+    if (deliveryAttachments && Array.isArray(deliveryAttachments) && deliveryAttachments.length > 0 &&
+        ['translation_done', 'review_done', 'layout_done'].includes(status)) {
+      try {
+        await this.sendDeliveryEmail(project, status, user, deliveryNote, deliveryAttachments);
+      } catch (err) {
+        console.error('[ProjectService] 发送阶段性交付邮件失败:', err);
+      }
+    }
+    
     return project;
   }
 
@@ -986,6 +1006,31 @@ class ProjectService {
       console.error('[ProjectService] 创建通知失败:', notifError);
       // 通知创建失败不影响状态更新
     }
+  }
+
+  /**
+   * 阶段性交付：给项目经理发送交付邮件（翻译/审校/排版完成）
+   */
+  async sendDeliveryEmail(project, status, sender, deliveryNote, deliveryAttachments) {
+    // 查找 PM 成员
+    const pmMembers = await ProjectMember.find({ projectId: project._id, role: 'pm' })
+      .populate('userId', 'name email username');
+    const recipients = pmMembers
+      .map(m => m.userId)
+      .filter(u => u && u.email);
+    if (!recipients || recipients.length === 0) {
+      console.warn('[ProjectService] 阶段性交付：未找到PM邮箱，跳过发送');
+      return;
+    }
+
+    // Base64 转 Buffer
+    const attachments = deliveryAttachments.map(att => ({
+      filename: att.filename,
+      content: Buffer.from(att.content, 'base64')
+    }));
+
+    const emailService = require('./emailService');
+    await emailService.sendProjectDeliveryEmail(recipients, project, status, sender, deliveryNote, attachments);
   }
 
   /**
@@ -1036,7 +1081,7 @@ class ProjectService {
   /**
    * 完成项目
    */
-  async finishProject(projectId, user) {
+  async finishProject(projectId, user, extra = {}) {
     const project = await Project.findById(projectId);
     if (!project) {
       throw new AppError('项目不存在', 404, 'PROJECT_NOT_FOUND');
@@ -1098,7 +1143,22 @@ class ProjectService {
     }
 
     await project.save();
-
+    
+    // 如果有最终交付附件，发送给项目创建人（销售）
+    const { finalNote, finalAttachments } = extra || {};
+    if (finalAttachments && Array.isArray(finalAttachments) && finalAttachments.length > 0) {
+      try {
+        const attachments = finalAttachments.map(att => ({
+          filename: att.filename,
+          content: Buffer.from(att.content, 'base64')
+        }));
+        const emailService = require('./emailService');
+        await emailService.sendProjectFinalDeliveryEmail(project, user, finalNote, attachments);
+      } catch (err) {
+        console.error('[ProjectService] 发送最终交付邮件失败:', err);
+      }
+    }
+    
     // 发送完成通知
     try {
       const members = await ProjectMember.find({ projectId: project._id })
@@ -1136,6 +1196,46 @@ class ProjectService {
     }
 
     return { project, kpiResult };
+  }
+
+  /**
+   * PM 内部交付：项目经理将交付包发送给销售（项目创建人），不改变项目状态
+   */
+  async pmInternalDelivery(projectId, user, extra = {}) {
+    const project = await Project.findById(projectId);
+    if (!project) {
+      throw new AppError('项目不存在', 404, 'PROJECT_NOT_FOUND');
+    }
+
+    // 检查用户是否是该项目的 PM 成员，或具备 pm 角色
+    const isPmRole = (user.roles || []).includes('pm');
+    const pmMember = await ProjectMember.findOne({
+      projectId: project._id,
+      userId: user._id,
+      role: 'pm'
+    });
+    if (!isPmRole && !pmMember) {
+      throw new AppError('仅项目经理可以执行内部交付', 403, 'PERMISSION_DENIED');
+    }
+
+    const { note, attachments } = extra;
+    if (!attachments || !Array.isArray(attachments) || attachments.length === 0) {
+      throw new AppError('请至少选择一个附件再提交给销售', 400, 'NO_ATTACHMENTS');
+    }
+
+    try {
+      const bufAttachments = attachments.map(att => ({
+        filename: att.filename,
+        content: Buffer.from(att.content, 'base64')
+      }));
+      const emailService = require('./emailService');
+      await emailService.sendProjectFinalDeliveryEmail(project, user, note, bufAttachments);
+    } catch (err) {
+      console.error('[ProjectService] PM 内部交付邮件发送失败:', err);
+      throw new AppError('发送邮件失败，请稍后重试', 500, 'EMAIL_SEND_FAILED');
+    }
+
+    return { projectId: project._id };
   }
 }
 

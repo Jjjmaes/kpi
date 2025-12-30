@@ -14,6 +14,185 @@ class EmailService {
   }
 
   /**
+   * 发送阶段性交付邮件（翻译/审校/排版完成 -> PM）
+   */
+  async sendProjectDeliveryEmail(recipients, project, status, sender, deliveryNote, attachments = null) {
+    if (!this.isEnabled()) {
+      console.warn('[EmailService] 邮件服务未启用，跳过阶段性交付邮件');
+      return { success: false, reason: 'EMAIL_SERVICE_DISABLED' };
+    }
+
+    const statusText = {
+      translation_done: '翻译完成',
+      review_done: '审校完成',
+      layout_done: '排版完成'
+    }[status] || '阶段性交付';
+
+    const subject = `【阶段性交付】${project.projectNumber || ''} ${project.projectName || ''} - ${statusText}`;
+    const toList = recipients.map(r => r.email).filter(Boolean);
+    if (toList.length === 0) {
+      console.warn('[EmailService] 阶段性交付：无有效收件人');
+      return { success: false, reason: 'NO_RECIPIENT' };
+    }
+
+    const projectUrl = process.env.APP_URL || 'http://localhost:3000';
+    const htmlContent = `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>${statusText}</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+  <div style="max-width:640px;margin:0 auto;padding:20px;">
+    <h2>${statusText} - ${project.projectName || ''}</h2>
+    <p>项目编号：${project.projectNumber || '-'}</p>
+    <p>交付人：${sender?.name || sender?.username || '-'}</p>
+    ${deliveryNote ? `<p>交付说明：${deliveryNote}</p>` : ''}
+    <p>请登录系统查看项目详情并下载附件。</p>
+    <p><a href="${projectUrl}/#projects" style="color:#2563eb;">进入项目列表</a></p>
+  </div>
+</body>
+</html>
+    `.trim();
+
+    const textContent = `
+${statusText} - ${project.projectName || ''}
+
+项目编号：${project.projectNumber || '-'}
+交付人：${sender?.name || sender?.username || '-'}
+${deliveryNote ? `交付说明：${deliveryNote}\n` : ''}
+
+请登录系统查看项目详情并下载附件。
+
+${projectUrl || 'http://localhost:3000'}/#projects
+    `.trim();
+
+    const emailOptions = {
+      from: `${this.fromName} <${this.fromEmail}>`,
+      to: toList,
+      subject,
+      html: htmlContent,
+      text: textContent,
+      headers: {
+        'List-Unsubscribe': `<${process.env.APP_URL || 'http://localhost:3000'}/#settings>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        'X-Mailer': '语家TMS系统',
+        'X-Priority': '1',
+        'Reply-To': this.fromEmail
+      },
+      tags: [
+        { name: 'category', value: 'project_delivery_stage' },
+        { name: 'system', value: 'kpi' }
+      ]
+    };
+
+    if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+      emailOptions.attachments = attachments.map(att => ({
+        filename: att.filename,
+        content: Buffer.isBuffer(att.content) ? att.content : Buffer.from(att.content, 'base64')
+      }));
+    }
+
+    const result = await this.resend.emails.send(emailOptions);
+    if (result?.data?.id) {
+      console.log('[EmailService] 阶段性交付邮件发送成功:', { to: toList, project: project.projectName, status, messageId: result.data.id });
+      return { success: true, messageId: result.data.id };
+    }
+    if (result?.error) {
+      console.error('[EmailService] 阶段性交付邮件发送失败（API）:', result.error);
+      return { success: false, reason: 'API_ERROR', error: JSON.stringify(result.error) };
+    }
+    console.error('[EmailService] 阶段性交付邮件发送失败（无 messageId）');
+    return { success: false, reason: 'NO_MESSAGE_ID' };
+  }
+
+  /**
+   * 发送最终交付邮件（项目经理 -> 销售）
+   */
+  async sendProjectFinalDeliveryEmail(project, sender, finalNote, attachments = null) {
+    if (!this.isEnabled()) {
+      console.warn('[EmailService] 邮件服务未启用，跳过最终交付邮件');
+      return { success: false, reason: 'EMAIL_SERVICE_DISABLED' };
+    }
+
+    // 查询项目创建人（销售）
+    const User = require('../models/User');
+    const creator = await User.findById(project.createdBy).select('name email username');
+    if (!creator || !creator.email) {
+      console.warn('[EmailService] 最终交付：项目创建人无邮箱，跳过发送');
+      return { success: false, reason: 'NO_SALES_EMAIL' };
+    }
+
+    const subject = `【最终交付】${project.projectNumber || ''} ${project.projectName || ''}`;
+    const projectUrl = process.env.APP_URL || 'http://localhost:3000';
+
+    const htmlContent = `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>项目最终交付</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+  <div style="max-width:640px;margin:0 auto;padding:20px;">
+    <h2>项目最终交付 - ${project.projectName || ''}</h2>
+    <p>项目编号：${project.projectNumber || '-'}</p>
+    <p>交付人：${sender?.name || sender?.username || '-'}</p>
+    ${finalNote ? `<p>交付说明：${finalNote}</p>` : ''}
+    <p>本邮件附带了本次最终交付的文件，请注意查收。</p>
+    <p><a href="${projectUrl}/#projects" style="color:#2563eb;">在系统中查看项目详情</a></p>
+  </div>
+</body>
+</html>
+    `.trim();
+
+    const textContent = `
+项目最终交付 - ${project.projectName || ''}
+
+项目编号：${project.projectNumber || '-'}
+交付人：${sender?.name || sender?.username || '-'}
+${finalNote ? `交付说明：${finalNote}\n` : ''}
+
+本邮件附带了本次最终交付的文件，请注意查收。
+
+${projectUrl || 'http://localhost:3000'}/#projects
+    `.trim();
+
+    const emailOptions = {
+      from: `${this.fromName} <${this.fromEmail}>`,
+      to: creator.email,
+      subject,
+      html: htmlContent,
+      text: textContent,
+      headers: {
+        'List-Unsubscribe': `<${process.env.APP_URL || 'http://localhost:3000'}/#settings>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        'X-Mailer': '语家TMS系统',
+        'X-Priority': '1',
+        'Reply-To': this.fromEmail
+      },
+      tags: [
+        { name: 'category', value: 'project_delivery_final' },
+        { name: 'system', value: 'kpi' }
+      ]
+    };
+
+    if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+      emailOptions.attachments = attachments.map(att => ({
+        filename: att.filename,
+        content: Buffer.isBuffer(att.content) ? att.content : Buffer.from(att.content, 'base64')
+      }));
+    }
+
+    const result = await this.resend.emails.send(emailOptions);
+    if (result?.data?.id) {
+      console.log('[EmailService] 最终交付邮件发送成功:', { to: creator.email, project: project.projectName, messageId: result.data.id });
+      return { success: true, messageId: result.data.id };
+    }
+    if (result?.error) {
+      console.error('[EmailService] 最终交付邮件发送失败（API）:', result.error);
+      return { success: false, reason: 'API_ERROR', error: JSON.stringify(result.error) };
+    }
+    console.error('[EmailService] 最终交付邮件发送失败（无 messageId）');
+    return { success: false, reason: 'NO_MESSAGE_ID' };
+  }
+
+  /**
    * 初始化邮件服务
    */
   init() {

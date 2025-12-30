@@ -614,7 +614,7 @@ export async function showCreateProjectModal() {
         // 初始化内联添加成员表单
         initInlineCreateMemberForm();
         
-        // 初始化附件上传功能
+        // 初始化创建项目时的附件上传功能
         const attachmentsInput = document.getElementById('projectAttachments');
         const attachmentsList = document.getElementById('projectAttachmentsList');
         if (attachmentsInput && attachmentsList) {
@@ -652,6 +652,24 @@ export function removeProjectAttachment(index) {
     });
     attachmentsInput.files = dt.files;
     
+    // 触发 change 事件更新列表
+    attachmentsInput.dispatchEvent(new Event('change'));
+}
+
+// 移除“添加成员”弹窗中的附件
+export function removeAddMemberAttachment(index) {
+    const attachmentsInput = document.getElementById('addMemberAttachments');
+    if (!attachmentsInput) return;
+
+    const dt = new DataTransfer();
+    const files = Array.from(attachmentsInput.files);
+    files.forEach((file, i) => {
+        if (i !== index) {
+            dt.items.add(file);
+        }
+    });
+    attachmentsInput.files = dt.files;
+
     // 触发 change 事件更新列表
     attachmentsInput.dispatchEvent(new Event('change'));
 }
@@ -1415,6 +1433,7 @@ export async function viewProject(projectId) {
         const canStart = isAdmin || isSales || isPartTimeSales;
         const canSchedule = isAdmin || isPM;
         const canQualityOps = isAdmin || isPM || isSales || isPartTimeSales;
+        // 对外交付（面向客户）：仅管理员 / 销售 / 兼职销售
         const canDeliver = (isAdmin || isSales || isPartTimeSales) && !isPM;
         const canEditDeleteExport = (isAdmin || isSales || isPartTimeSales) && !isPM;
         const canExportContract = isAdmin || isSales || isPartTimeSales || isPM;
@@ -1702,15 +1721,18 @@ export async function viewProject(projectId) {
                 </div>
                 ` : ''}
 
-                ${(canStart || canSchedule || canQualityOps || isTranslatorMember || isReviewerMember || isLayoutMember) && project.status !== 'completed' && project.status !== 'cancelled' ? `
+                ${(canStart || canSchedule || canQualityOps || isTranslatorMember || isReviewerMember || isLayoutMember || isPM) && project.status !== 'completed' && project.status !== 'cancelled' ? `
                     <div class="detail-section">
                         <h4>项目管理</h4>
                         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                             ${canStart ? `<button class="btn-small btn-success" ${startReached ? 'disabled' : ''} data-click="startProject('${projectId}')">开始项目</button>` : ''}
                             ${canSetScheduled && project.status === 'scheduled' ? `<button class="btn-small" data-click="updateProjectStatus('${projectId}','in_progress','确认人员已安排完毕，项目开始执行？')">开始执行</button>` : ''}
-                            ${canSetTranslationDone ? `<button class="btn-small" ${translationReached ? 'disabled' : ''} data-click="updateProjectStatus('${projectId}','translation_done','确认标记翻译完成？')">翻译完成</button>` : ''}
-                            ${canSetReviewDone ? `<button class="btn-small" ${reviewReached ? 'disabled' : ''} data-click="updateProjectStatus('${projectId}','review_done','确认标记审校完成？')">审校完成</button>` : ''}
-                            ${canSetLayoutDone ? `<button class="btn-small" ${layoutReached ? 'disabled' : ''} data-click="updateProjectStatus('${projectId}','layout_done','确认标记排版完成？')">排版完成</button>` : ''}
+                            ${canSetTranslationDone ? `<button class="btn-small" ${translationReached ? 'disabled' : ''} data-click="showDeliveryModal('${projectId}','translation_done')">翻译完成</button>` : ''}
+                            ${canSetReviewDone ? `<button class="btn-small" ${reviewReached ? 'disabled' : ''} data-click="showDeliveryModal('${projectId}','review_done')">审校完成</button>` : ''}
+                            ${canSetLayoutDone ? `<button class="btn-small" ${layoutReached ? 'disabled' : ''} data-click="showDeliveryModal('${projectId}','layout_done')">排版完成</button>` : ''}
+                            ${isPM && (project.status === 'in_progress' || project.status === 'translation_done' || project.status === 'review_done' || project.status === 'layout_done') ? `
+                                <button class="btn-small" data-click="showPmDeliveryModal('${projectId}')">提交给销售</button>
+                            ` : ''}
                             ${(project.status === 'in_progress' || project.status === 'scheduled' || project.status === 'translation_done' || project.status === 'review_done' || project.status === 'layout_done') && canQualityOps ? `
                                 <button class="btn-small" data-click="setRevision('${projectId}', ${project.revisionCount})">标记返修</button>
                                 <button class="btn-small" data-click="setDelay('${projectId}')">标记延期</button>
@@ -1800,6 +1822,135 @@ export async function updateProjectStatus(projectId, status, confirmMessage) {
         });
         const result = await response.json();
         if (result.success) {
+            loadProjects();
+            if (document.getElementById('modalOverlay')?.classList.contains('active')) {
+                viewProject(projectId);
+            }
+            showToast('项目状态已更新', 'success');
+        } else {
+            showToast(result.message || '状态更新失败', 'error');
+        }
+    } catch (error) {
+        showToast('操作失败: ' + error.message, 'error');
+    }
+}
+
+// 显示阶段性交付弹窗（翻译完成 / 审校完成 / 排版完成）
+export async function showDeliveryModal(projectId, status) {
+    const statusTextMap = {
+        translation_done: '翻译完成交付',
+        review_done: '审校完成交付',
+        layout_done: '排版完成交付'
+    };
+    const title = statusTextMap[status] || '阶段性交付';
+    const content = `
+        <form id="deliveryForm" data-submit="submitDelivery(event, '${projectId}', '${status}')">
+            <div class="form-group">
+                <label>交付说明（可选）</label>
+                <textarea id="deliveryNote" style="width:100%;min-height:80px;padding:8px;" placeholder="可以简单说明本次交付的内容、版本号等"></textarea>
+            </div>
+            <div class="form-group">
+                <label>交付附件（可选，可多选）</label>
+                <input type="file" id="deliveryAttachments" multiple>
+                <small style="color:#666;font-size:12px;">仅用于发送给项目经理，建议总大小不超过 20MB。</small>
+                <div id="deliveryAttachmentsList" style="margin-top:6px;"></div>
+            </div>
+            <div class="action-buttons">
+                <button type="submit">确认交付</button>
+                <button type="button" data-click="closeModal()">取消</button>
+            </div>
+        </form>
+    `;
+    showModal({ title, body: content });
+
+    setTimeout(() => {
+        const attachmentsInput = document.getElementById('deliveryAttachments');
+        const attachmentsList = document.getElementById('deliveryAttachmentsList');
+        if (attachmentsInput && attachmentsList) {
+            attachmentsInput.addEventListener('change', function () {
+                const files = Array.from(this.files);
+                if (files.length === 0) {
+                    attachmentsList.innerHTML = '';
+                    return;
+                }
+                const listHtml = files.map((file, index) => {
+                    const size = (file.size / 1024).toFixed(2);
+                    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:#f0f0f0;border-radius:4px;margin-bottom:4px;">
+                        <span>${file.name} (${size} KB)</span>
+                        <button type="button" data-click="removeDeliveryAttachment(${index})" style="background:#ef4444;color:white;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:11px;">移除</button>
+                    </div>`;
+                }).join('');
+                attachmentsList.innerHTML = listHtml;
+            });
+        }
+    }, 50);
+}
+
+// 从阶段性交付弹窗中移除某个附件
+export function removeDeliveryAttachment(index) {
+    const attachmentsInput = document.getElementById('deliveryAttachments');
+    if (!attachmentsInput) return;
+    const dt = new DataTransfer();
+    const files = Array.from(attachmentsInput.files);
+    files.forEach((file, i) => {
+        if (i !== index) dt.items.add(file);
+    });
+    attachmentsInput.files = dt.files;
+    attachmentsInput.dispatchEvent(new Event('change'));
+}
+
+// 提交阶段性交付：更新状态 +（如有附件）给项目经理发交付邮件
+export async function submitDelivery(e, projectId, status) {
+    e.preventDefault();
+    const noteEl = document.getElementById('deliveryNote');
+    const note = noteEl?.value?.trim() || '';
+
+    const attachmentsInput = document.getElementById('deliveryAttachments');
+    let deliveryAttachments = null;
+
+    if (attachmentsInput && attachmentsInput.files && attachmentsInput.files.length > 0) {
+        const files = Array.from(attachmentsInput.files);
+        const maxTotalSize = 20 * 1024 * 1024; // 20MB
+        let totalSize = 0;
+        for (const file of files) {
+            totalSize += file.size;
+            if (totalSize > maxTotalSize) {
+                showToast('附件总大小不能超过 20MB', 'error');
+                return;
+            }
+        }
+        try {
+            const promises = files.map(file => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64 = reader.result.split(',')[1];
+                    resolve({ filename: file.name, content: base64 });
+                };
+                reader.onerror = () => reject(new Error('读取附件失败'));
+                reader.readAsDataURL(file);
+            }));
+            deliveryAttachments = await Promise.all(promises);
+        } catch (err) {
+            console.error('[Projects] 读取交付附件失败:', err);
+            showToast('读取附件失败，请重试', 'error');
+            return;
+        }
+    }
+
+    try {
+        const body = { status };
+        if (note) body.deliveryNote = note;
+        if (deliveryAttachments && deliveryAttachments.length > 0) {
+            body.deliveryAttachments = deliveryAttachments;
+        }
+
+        const response = await apiFetch(`/projects/${projectId}/status`, {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+        const result = await response.json();
+        if (result.success) {
+            closeModal();
             loadProjects();
             if (document.getElementById('modalOverlay')?.classList.contains('active')) {
                 viewProject(projectId);
@@ -2868,6 +3019,12 @@ export async function showAddMemberModal(projectId) {
                 <small style="color: #666; font-size: 12px;">用于兼职角色的实际支付金额（除兼职销售外，所有兼职角色都需要输入费用）</small>
                 <div id="addMemberPartTimeFeeValidation" style="margin-top: 5px;"></div>
             </div>
+            <div class="form-group">
+                <label>邮件附件（可选，可多选）</label>
+                <input type="file" id="addMemberAttachments" multiple>
+                <small style="color: #666; font-size: 12px;">仅用于给该成员发送邮件，建议总大小不超过 10MB。</small>
+                <div id="addMemberAttachmentsList" style="margin-top: 6px;"></div>
+            </div>
             <div class="action-buttons">
                 <button type="submit">添加</button>
                 <button type="button" data-click="closeModal()">取消</button>
@@ -2876,11 +3033,30 @@ export async function showAddMemberModal(projectId) {
     `;
     showModal({ title: '添加项目成员', body: content });
     
-    // 如果已经选择了角色，立即过滤用户列表
+    // 如果已经选择了角色，立即过滤用户列表，并初始化附件列表
     setTimeout(() => {
         const roleSelect = document.getElementById('memberRole');
         if (roleSelect && roleSelect.value) {
             filterUsersByRole();
+        }
+        const attachmentsInput = document.getElementById('addMemberAttachments');
+        const attachmentsList = document.getElementById('addMemberAttachmentsList');
+        if (attachmentsInput && attachmentsList) {
+            attachmentsInput.addEventListener('change', function () {
+                const files = Array.from(this.files);
+                if (files.length === 0) {
+                    attachmentsList.innerHTML = '';
+                    return;
+                }
+                const listHtml = files.map((file, index) => {
+                    const size = (file.size / 1024).toFixed(2);
+                    return `<div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: #f0f0f0; border-radius: 4px; margin-bottom: 4px;">
+                        <span>${file.name} (${size} KB)</span>
+                        <button type="button" data-click="removeAddMemberAttachment(${index})" style="background: #ef4444; color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 11px;">移除</button>
+                    </div>`;
+                }).join('');
+                attachmentsList.innerHTML = listHtml;
+            });
         }
     }, 100);
 }
@@ -3187,6 +3363,47 @@ export async function addMember(e, projectId) {
         const layoutCost = formData.get('layoutCost') ? parseFloat(formData.get('layoutCost')) : 0;
         if (layoutCost > 0 && !validateAddMemberLayoutCost()) return;
         payload.layoutCost = layoutCost;
+    }
+
+    // 处理多附件：与创建项目时逻辑类似
+    const attachmentsInput = document.getElementById('addMemberAttachments');
+    if (attachmentsInput && attachmentsInput.files && attachmentsInput.files.length > 0) {
+        const files = Array.from(attachmentsInput.files);
+        const maxTotalSize = 10 * 1024 * 1024; // 10MB
+        let totalSize = 0;
+
+        for (const file of files) {
+            totalSize += file.size;
+            if (totalSize > maxTotalSize) {
+                showToast('附件总大小不能超过 10MB', 'error');
+                return;
+            }
+        }
+
+        try {
+            const attachmentPromises = files.map(file => {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const base64 = reader.result.split(',')[1];
+                        resolve({
+                            filename: file.name,
+                            content: base64
+                        });
+                    };
+                    reader.onerror = () => reject(new Error('读取附件失败'));
+                    reader.readAsDataURL(file);
+                });
+            });
+            const attachments = await Promise.all(attachmentPromises);
+            if (attachments && attachments.length > 0) {
+                payload.attachments = attachments;
+            }
+        } catch (err) {
+            console.error('[Projects] 读取成员附件失败:', err);
+            showToast('读取附件失败，请重试', 'error');
+            return;
+        }
     }
 
     try {
@@ -3560,16 +3777,233 @@ export async function setComplaint(projectId) {
 }
 
 export async function finishProject(projectId) {
+    // 显示最终交付弹窗（PM 将文件交给销售）
+    const content = `
+        <form id="finalDeliveryForm" data-submit="submitFinalDelivery(event, '${projectId}')">
+            <div class="form-group">
+                <label>最终交付说明（可选）</label>
+                <textarea id="finalDeliveryNote" style="width:100%;min-height:80px;padding:8px;" placeholder="可填写给销售查看的交付说明、版本、注意事项等"></textarea>
+            </div>
+            <div class="form-group">
+                <label>最终交付附件（可选，可多选）</label>
+                <input type="file" id="finalDeliveryAttachments" multiple>
+                <small style="color:#666;font-size:12px;">将通过邮件发送给项目创建人（销售），建议总大小不超过 20MB。</small>
+                <div id="finalDeliveryAttachmentsList" style="margin-top:6px;"></div>
+            </div>
+            <div class="action-buttons">
+                <button type="submit">确认项目完成并发送</button>
+                <button type="button" data-click="closeModal()">取消</button>
+            </div>
+        </form>
+    `;
+    showModal({ title: '项目最终交付', body: content });
+
+    setTimeout(() => {
+        const attachmentsInput = document.getElementById('finalDeliveryAttachments');
+        const attachmentsList = document.getElementById('finalDeliveryAttachmentsList');
+        if (attachmentsInput && attachmentsList) {
+            attachmentsInput.addEventListener('change', function () {
+                const files = Array.from(this.files);
+                if (files.length === 0) {
+                    attachmentsList.innerHTML = '';
+                    return;
+                }
+                const listHtml = files.map((file, index) => {
+                    const size = (file.size / 1024).toFixed(2);
+                    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:#f0f0f0;border-radius:4px;margin-bottom:4px;">
+                        <span>${file.name} (${size} KB)</span>
+                        <button type="button" data-click="removeFinalDeliveryAttachment(${index})" style="background:#ef4444;color:white;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:11px;">移除</button>
+                    </div>`;
+                }).join('');
+                attachmentsList.innerHTML = listHtml;
+            });
+        }
+    }, 50);
+}
+
+export function removeFinalDeliveryAttachment(index) {
+    const attachmentsInput = document.getElementById('finalDeliveryAttachments');
+    if (!attachmentsInput) return;
+    const dt = new DataTransfer();
+    const files = Array.from(attachmentsInput.files);
+    files.forEach((file, i) => {
+        if (i !== index) dt.items.add(file);
+    });
+    attachmentsInput.files = dt.files;
+    attachmentsInput.dispatchEvent(new Event('change'));
+}
+
+export async function submitFinalDelivery(e, projectId) {
+    e.preventDefault();
     if (!confirm('确定要交付此项目吗？交付后将无法修改。')) return;
+
+    const noteEl = document.getElementById('finalDeliveryNote');
+    const finalNote = noteEl?.value?.trim() || '';
+
+    const attachmentsInput = document.getElementById('finalDeliveryAttachments');
+    let finalAttachments = null;
+
+    if (attachmentsInput && attachmentsInput.files && attachmentsInput.files.length > 0) {
+        const files = Array.from(attachmentsInput.files);
+        const maxTotalSize = 20 * 1024 * 1024; // 20MB
+        let totalSize = 0;
+        for (const file of files) {
+            totalSize += file.size;
+            if (totalSize > maxTotalSize) {
+                showToast('附件总大小不能超过 20MB', 'error');
+                return;
+            }
+        }
+        try {
+            const promises = files.map(file => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64 = reader.result.split(',')[1];
+                    resolve({ filename: file.name, content: base64 });
+                };
+                reader.onerror = () => reject(new Error('读取附件失败'));
+                reader.readAsDataURL(file);
+            }));
+            finalAttachments = await Promise.all(promises);
+        } catch (err) {
+            console.error('[Projects] 读取最终交付附件失败:', err);
+            showToast('读取附件失败，请重试', 'error');
+            return;
+        }
+    }
+
     try {
-        const response = await apiFetch(`/projects/${projectId}/finish`, { method: 'POST' });
+        const body = {};
+        if (finalNote) body.finalNote = finalNote;
+        if (finalAttachments && finalAttachments.length > 0) body.finalAttachments = finalAttachments;
+
+        const response = await apiFetch(`/projects/${projectId}/finish`, {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
         const result = await response.json();
         if (result.success) {
             closeModal();
             loadProjects();
             showToast('项目已完成', 'success');
         } else {
-            showToast(result.message, 'error');
+            showToast(result.message || '项目完成失败', 'error');
+        }
+    } catch (error) {
+        showToast('操作失败: ' + error.message, 'error');
+    }
+}
+
+// PM 内部交付：项目经理把整理好的翻译件提交给销售（项目创建人），不改变项目状态
+export function showPmDeliveryModal(projectId) {
+    const content = `
+        <form id="pmDeliveryForm" data-submit="submitPmDelivery(event, '${projectId}')">
+            <div class="form-group">
+                <label>提交说明（可选）</label>
+                <textarea id="pmDeliveryNote" style="width:100%;min-height:80px;padding:8px;" placeholder="例如：已合并所有生产文件，版本号、注意事项等"></textarea>
+            </div>
+            <div class="form-group">
+                <label>提交附件（可选，可多选）</label>
+                <input type="file" id="pmDeliveryAttachments" multiple>
+                <small style="color:#666;font-size:12px;">将通过邮件发送给项目创建人（销售），不改变项目状态，建议总大小不超过 20MB。</small>
+                <div id="pmDeliveryAttachmentsList" style="margin-top:6px;"></div>
+            </div>
+            <div class="action-buttons">
+                <button type="submit">发送给销售</button>
+                <button type="button" data-click="closeModal()">取消</button>
+            </div>
+        </form>
+    `;
+    showModal({ title: '提交给销售（内部交付）', body: content });
+
+    setTimeout(() => {
+        const attachmentsInput = document.getElementById('pmDeliveryAttachments');
+        const attachmentsList = document.getElementById('pmDeliveryAttachmentsList');
+        if (attachmentsInput && attachmentsList) {
+            attachmentsInput.addEventListener('change', function () {
+                const files = Array.from(this.files);
+                if (files.length === 0) {
+                    attachmentsList.innerHTML = '';
+                    return;
+                }
+                const listHtml = files.map((file, index) => {
+                    const size = (file.size / 1024).toFixed(2);
+                    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:#f0f0f0;border-radius:4px;margin-bottom:4px;">
+                        <span>${file.name} (${size} KB)</span>
+                        <button type="button" data-click="removePmDeliveryAttachment(${index})" style="background:#ef4444;color:white;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:11px;">移除</button>
+                    </div>`;
+                }).join('');
+                attachmentsList.innerHTML = listHtml;
+            });
+        }
+    }, 50);
+}
+
+export function removePmDeliveryAttachment(index) {
+    const attachmentsInput = document.getElementById('pmDeliveryAttachments');
+    if (!attachmentsInput) return;
+    const dt = new DataTransfer();
+    const files = Array.from(attachmentsInput.files);
+    files.forEach((file, i) => {
+        if (i !== index) dt.items.add(file);
+    });
+    attachmentsInput.files = dt.files;
+    attachmentsInput.dispatchEvent(new Event('change'));
+}
+
+export async function submitPmDelivery(e, projectId) {
+    e.preventDefault();
+
+    const noteEl = document.getElementById('pmDeliveryNote');
+    const note = noteEl?.value?.trim() || '';
+
+    const attachmentsInput = document.getElementById('pmDeliveryAttachments');
+    let attachments = null;
+
+    if (attachmentsInput && attachmentsInput.files && attachmentsInput.files.length > 0) {
+        const files = Array.from(attachmentsInput.files);
+        const maxTotalSize = 20 * 1024 * 1024; // 20MB
+        let totalSize = 0;
+        for (const file of files) {
+            totalSize += file.size;
+            if (totalSize > maxTotalSize) {
+                showToast('附件总大小不能超过 20MB', 'error');
+                return;
+            }
+        }
+        try {
+            const promises = files.map(file => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64 = reader.result.split(',')[1];
+                    resolve({ filename: file.name, content: base64 });
+                };
+                reader.onerror = () => reject(new Error('读取附件失败'));
+                reader.readAsDataURL(file);
+            }));
+            attachments = await Promise.all(promises);
+        } catch (err) {
+            console.error('[Projects] 读取PM内部交付附件失败:', err);
+            showToast('读取附件失败，请重试', 'error');
+            return;
+        }
+    }
+
+    try {
+        const body = {};
+        if (note) body.note = note;
+        if (attachments && attachments.length > 0) body.attachments = attachments;
+
+        const response = await apiFetch(`/projects/${projectId}/pm-delivery`, {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+        const result = await response.json();
+        if (result.success) {
+            closeModal();
+            showToast('已发送给销售', 'success');
+        } else {
+            showToast(result.message || '发送失败', 'error');
         }
     } catch (error) {
         showToast('操作失败: ' + error.message, 'error');

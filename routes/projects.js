@@ -542,7 +542,7 @@ router.post('/:id/members/:memberId/reject',
 
 // 添加项目成员
 router.post('/:id/add-member', asyncHandler(async (req, res) => {
-  const { userId, role, translatorType, wordRatio, layoutCost, partTimeFee } = req.body;
+  const { userId, role, translatorType, wordRatio, layoutCost, partTimeFee, attachments } = req.body;
   const projectId = req.params.id;
 
   // 使用公共函数检查项目访问权限
@@ -558,7 +558,7 @@ router.post('/:id/add-member', asyncHandler(async (req, res) => {
   try {
     const member = await projectService.addProjectMember(
       projectId,
-      { userId, role, translatorType, wordRatio, layoutCost, partTimeFee },
+      { userId, role, translatorType, wordRatio, layoutCost, partTimeFee, attachments },
       req.user
     );
 
@@ -592,10 +592,15 @@ router.post('/:id/start', authorize('admin', 'sales', 'part_time_sales'), asyncH
 
 // 更新项目状态（中间节点）
 router.post('/:id/status', authorize('admin', 'pm', 'translator', 'reviewer', 'layout'), asyncHandler(async (req, res) => {
-  const { status } = req.body;
+  const { status, deliveryNote, deliveryAttachments } = req.body;
 
-  // 使用服务层更新项目状态
-  const project = await projectService.updateProjectStatus(req.params.id, status, req.user);
+  // 使用服务层更新项目状态（支持阶段性交付附件）
+  const project = await projectService.updateProjectStatus(
+    req.params.id,
+    status,
+    req.user,
+    { deliveryNote, deliveryAttachments }
+  );
 
   res.json({
     success: true,
@@ -655,8 +660,13 @@ router.post('/:id/finish', authorize('admin', 'sales', 'part_time_sales'), async
     throw new AppError('仅管理员、销售或兼职销售可交付项目（请切换到对应角色）', 403, 'PERMISSION_DENIED');
   }
 
-  // 使用服务层完成项目
-  const { project, kpiResult } = await projectService.finishProject(req.params.id, req.user);
+  // 使用服务层完成项目（支持最终交付附件）
+  const { finalNote, finalAttachments } = req.body || {};
+  const { project, kpiResult } = await projectService.finishProject(
+    req.params.id,
+    req.user,
+    { finalNote, finalAttachments }
+  );
 
   // 根据KPI生成结果返回不同的消息
   if (kpiResult && kpiResult.count > 0) {
@@ -674,6 +684,26 @@ router.post('/:id/finish', authorize('admin', 'sales', 'part_time_sales'), async
       ...(kpiResult === null ? { warning: 'KPI计算失败，请稍后手动生成' } : {})
     });
   }
+}));
+
+// PM 内部交付：项目经理将翻译件/交付包发送给销售（项目创建人），不改变项目状态
+router.post('/:id/pm-delivery', authorize('pm'), asyncHandler(async (req, res) => {
+  const { note, attachments } = req.body || {};
+
+  // 权限校验：必须是该项目的 PM 成员或具备 pm 角色
+  const projectId = req.params.id;
+  await checkProjectAccess(projectId, req.user, req.user.roles);
+
+  const result = await projectService.pmInternalDelivery(projectId, req.user, {
+    note,
+    attachments
+  });
+
+  res.json({
+    success: true,
+    message: '已将交付资料发送给销售',
+    data: result
+  });
 }));
 
 // 删除项目成员
