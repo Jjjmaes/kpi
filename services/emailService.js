@@ -252,13 +252,17 @@ ${assigner ? `分配人：${assigner.name || assigner.username || '-'}` : ''}
 
       // 如果返回 error 或没有 messageId，视为失败并记录详情
       if (result?.error) {
-        console.error('[EmailService] 邮件发送失败（API返回错误）:', {
+        const errorDetails = {
           to: user.email,
           project: project.projectName,
           role,
-          error: result.error
-        });
-        return { success: false, reason: 'API_ERROR', error: JSON.stringify(result.error) };
+          errorMessage: result.error.message || '未知错误',
+          errorCode: result.error.statusCode || result.error.code || 'N/A',
+          errorDetails: result.error
+        };
+        console.error('[EmailService] 邮件发送失败（API返回错误）:', errorDetails);
+        console.error('[EmailService] 完整错误对象:', JSON.stringify(result.error, null, 2));
+        return { success: false, reason: 'API_ERROR', error: result.error.message || JSON.stringify(result.error) };
       }
 
       console.error('[EmailService] 邮件发送失败（未返回 messageId）:', {
@@ -268,12 +272,15 @@ ${assigner ? `分配人：${assigner.name || assigner.username || '-'}` : ''}
       });
       return { success: false, reason: 'NO_MESSAGE_ID' };
     } catch (error) {
-      console.error('[EmailService] 邮件发送失败:', {
+      console.error('[EmailService] 邮件发送失败（异常）:', {
         to: user.email,
         project: project.projectName,
         role,
-        error: error.message
+        errorMessage: error.message,
+        errorStack: error.stack,
+        errorName: error.name
       });
+      console.error('[EmailService] 完整异常对象:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
       return { success: false, reason: 'SEND_FAILED', error: error.message };
     }
   }
