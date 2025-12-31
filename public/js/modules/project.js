@@ -99,6 +99,477 @@ export function removeTargetLanguageRow(rowId) {
     if (row) row.remove();
 }
 
+// 报价明细管理
+let quotationDetailRowIndex = 0;
+
+export function addQuotationDetailRow() {
+    const container = document.getElementById('quotationDetailsContainer');
+    if (!container) return;
+    
+    const rowId = `quotation-detail-${quotationDetailRowIndex++}`;
+    const form = document.getElementById('createProjectForm') || document.getElementById('editProjectForm');
+    if (!form) return;
+    
+    const sourceLanguage = form.querySelector('[name="sourceLanguage"]')?.value || '';
+    const sourceLanguageSelect = form.querySelector('[name="sourceLanguage"]');
+    const sourceLanguageOptions = sourceLanguageSelect 
+        ? Array.from(sourceLanguageSelect.options).map(opt => `<option value="${opt.value}" ${opt.value === sourceLanguage ? 'selected' : ''}>${opt.text}</option>`).join('')
+        : '<option value="">请选择</option>';
+    
+    const targetLanguageSelects = form.querySelectorAll('.target-language-select');
+    const targetLanguageOptions = targetLanguageSelects.length > 0
+        ? Array.from(targetLanguageSelects[0].options).map(opt => `<option value="${opt.value}">${opt.text}</option>`).join('')
+        : '<option value="">请选择</option>';
+    
+    const unitPrice = form.querySelector('[name="unitPrice"]')?.value || '';
+    
+    const row = document.createElement('div');
+    row.id = rowId;
+    row.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr auto; gap: 8px; align-items: center; padding: 10px; background: #f9f9f9; border-radius: 4px; border: 1px solid #ddd;';
+    row.innerHTML = `
+        <input type="text" class="detail-filename" placeholder="文件名" style="padding: 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px;" data-change="updateQuotationDetailAmount('${rowId}')">
+        <select class="detail-source-language" style="padding: 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px;" data-change="updateQuotationDetailAmount('${rowId}')">
+            ${sourceLanguageOptions}
+        </select>
+        <select class="detail-target-language" style="padding: 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px;" data-change="updateQuotationDetailAmount('${rowId}')">
+            ${targetLanguageOptions}
+        </select>
+        <input type="number" class="detail-word-count" placeholder="字数" min="0" step="1" style="padding: 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px;" data-change="updateQuotationDetailAmount('${rowId}')">
+        <input type="number" class="detail-unit-price" placeholder="单价" min="0" step="0.01" value="${unitPrice}" style="padding: 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px;" data-change="updateQuotationDetailAmount('${rowId}')">
+        <input type="number" class="detail-amount" placeholder="金额" min="0" step="0.01" readonly style="padding: 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; background: #f0f0f0;">
+        <button type="button" class="btn-small" data-click="removeQuotationDetailRow('${rowId}')" style="background: #ef4444; color: white;">删除</button>
+    `;
+    
+    container.appendChild(row);
+    updateQuotationDetailsSummary();
+}
+
+export function removeQuotationDetailRow(rowId) {
+    const row = document.getElementById(rowId);
+    if (row) {
+        row.remove();
+        updateQuotationDetailsSummary();
+    }
+}
+
+export function updateQuotationDetailAmount(rowId) {
+    const row = document.getElementById(rowId);
+    if (!row) return;
+    
+    const wordCountInput = row.querySelector('.detail-word-count');
+    const unitPriceInput = row.querySelector('.detail-unit-price');
+    const amountInput = row.querySelector('.detail-amount');
+    
+    if (!wordCountInput || !unitPriceInput || !amountInput) return;
+    
+    const wordCount = parseFloat(wordCountInput.value) || 0;
+    const unitPrice = parseFloat(unitPriceInput.value) || 0;
+    const amount = (wordCount / 1000) * unitPrice;
+    
+    amountInput.value = amount.toFixed(2);
+    updateQuotationDetailsSummary();
+}
+
+export function updateQuotationDetailsSummary() {
+    const container = document.getElementById('quotationDetailsContainer');
+    if (!container) return;
+    
+    const rows = container.querySelectorAll('[id^="quotation-detail-"]');
+    let totalWordCount = 0;
+    let totalAmount = 0;
+    
+    rows.forEach(row => {
+        const wordCountInput = row.querySelector('.detail-word-count');
+        const amountInput = row.querySelector('.detail-amount');
+        
+        if (wordCountInput) {
+            totalWordCount += parseFloat(wordCountInput.value) || 0;
+        }
+        if (amountInput) {
+            totalAmount += parseFloat(amountInput.value) || 0;
+        }
+    });
+    
+    const summaryDiv = document.getElementById('quotationDetailsSummary');
+    if (summaryDiv) {
+        const wordCountSpan = summaryDiv.querySelector('#detailsTotalWordCount');
+        const amountSpan = summaryDiv.querySelector('#detailsTotalAmount');
+        
+        if (wordCountSpan) {
+            wordCountSpan.textContent = totalWordCount.toLocaleString('zh-CN');
+        }
+        if (amountSpan) {
+            amountSpan.textContent = totalAmount.toFixed(2);
+        }
+    }
+    
+    // 如果有明细，自动同步总字数、总金额和平均单价，并禁用手动输入，同时隐藏源语种和目标语种字段
+    if (rows.length > 0) {
+        const wordCountInput = document.getElementById('wordCount');
+        const projectAmountInput = document.getElementById('projectAmount');
+        const unitPriceInput = document.getElementById('unitPrice');
+        const sourceLanguageGroup = document.getElementById('sourceLanguageGroup');
+        const targetLanguagesGroup = document.getElementById('targetLanguagesGroup');
+        const wordCountHint = document.getElementById('wordCountHint');
+        const unitPriceHint = document.getElementById('unitPriceHint');
+        let unitPriceLabel = null;
+        if (unitPriceInput) {
+            // 尝试通过 for 属性查找
+            unitPriceLabel = document.querySelector('label[for="unitPrice"]');
+            // 如果没找到，尝试查找父级 form-group 中的 label
+            if (!unitPriceLabel) {
+                const formGroup = unitPriceInput.closest('.form-group');
+                if (formGroup) {
+                    unitPriceLabel = formGroup.querySelector('label');
+                }
+            }
+        }
+        
+        // 隐藏源语种和目标语种字段（因为明细中已经有语种信息）
+        if (sourceLanguageGroup) {
+            sourceLanguageGroup.style.display = 'none';
+        }
+        if (targetLanguagesGroup) {
+            targetLanguagesGroup.style.display = 'none';
+        }
+        
+        if (wordCountInput) {
+            wordCountInput.value = totalWordCount;
+            wordCountInput.readOnly = true;
+            wordCountInput.style.background = '#f0f0f0';
+        }
+        if (wordCountHint) {
+            wordCountHint.textContent = '字数从报价明细自动计算，请修改明细以更新字数';
+            wordCountHint.style.color = '#667eea';
+        }
+        if (projectAmountInput) {
+            projectAmountInput.value = totalAmount.toFixed(2);
+            projectAmountInput.readOnly = true;
+            projectAmountInput.style.background = '#f0f0f0';
+        }
+        // 计算平均单价：总金额 / (总字数 / 1000)
+        if (unitPriceInput && totalWordCount > 0) {
+            const averageUnitPrice = (totalAmount / (totalWordCount / 1000)).toFixed(2);
+            unitPriceInput.value = averageUnitPrice;
+            unitPriceInput.readOnly = true;
+            unitPriceInput.style.background = '#f0f0f0';
+            // 更新标签提示
+            if (unitPriceLabel) {
+                const originalText = unitPriceLabel.textContent.replace(/（.*?）/, '').trim();
+                unitPriceLabel.textContent = `${originalText}（平均单价，自动计算）`;
+                unitPriceLabel.style.color = '#667eea';
+            }
+            if (unitPriceHint) {
+                unitPriceHint.textContent = '单价从报价明细自动计算为平均单价，请修改明细以更新单价';
+                unitPriceHint.style.color = '#667eea';
+            }
+        }
+    } else {
+        // 如果没有明细，恢复可编辑状态
+        const wordCountInput = document.getElementById('wordCount');
+        const projectAmountInput = document.getElementById('projectAmount');
+        const unitPriceInput = document.getElementById('unitPrice');
+        let unitPriceLabel = null;
+        if (unitPriceInput) {
+            // 尝试通过 for 属性查找
+            unitPriceLabel = document.querySelector('label[for="unitPrice"]');
+            // 如果没找到，尝试查找父级 form-group 中的 label
+            if (!unitPriceLabel) {
+                const formGroup = unitPriceInput.closest('.form-group');
+                if (formGroup) {
+                    unitPriceLabel = formGroup.querySelector('label');
+                }
+            }
+        }
+        
+        // 显示源语种和目标语种字段（因为没有明细，需要手动选择语种）
+        const sourceLanguageGroup = document.getElementById('sourceLanguageGroup');
+        const targetLanguagesGroup = document.getElementById('targetLanguagesGroup');
+        if (sourceLanguageGroup) {
+            sourceLanguageGroup.style.display = '';
+        }
+        if (targetLanguagesGroup) {
+            targetLanguagesGroup.style.display = '';
+        }
+        
+        // 恢复 required 属性
+        const sourceLanguageSelect = document.getElementById('sourceLanguageSelect');
+        const targetLanguageSelects = document.querySelectorAll('.target-language-select');
+        
+        if (sourceLanguageSelect) {
+            sourceLanguageSelect.setAttribute('required', 'required');
+        }
+        
+        // 至少第一个目标语种选择框需要 required
+        if (targetLanguageSelects.length > 0 && targetLanguageSelects[0]) {
+            targetLanguageSelects[0].setAttribute('required', 'required');
+        }
+        
+        if (wordCountInput) {
+            wordCountInput.readOnly = false;
+            wordCountInput.style.background = '';
+        }
+        const wordCountHint = document.getElementById('wordCountHint');
+        if (wordCountHint) {
+            wordCountHint.textContent = '如果填写了报价明细，字数将从明细自动计算';
+            wordCountHint.style.color = '#666';
+        }
+        if (projectAmountInput) {
+            projectAmountInput.readOnly = false;
+            projectAmountInput.style.background = '';
+        }
+        if (unitPriceInput) {
+            unitPriceInput.readOnly = false;
+            unitPriceInput.style.background = '';
+            // 恢复标签
+            if (unitPriceLabel) {
+                unitPriceLabel.textContent = unitPriceLabel.textContent.replace(/（.*?）/, '').trim();
+                if (unitPriceLabel.textContent.includes('平均单价')) {
+                    unitPriceLabel.textContent = '单价（每千字，元）';
+                }
+                unitPriceLabel.style.color = '';
+            }
+            const unitPriceHint = document.getElementById('unitPriceHint');
+            if (unitPriceHint) {
+                unitPriceHint.textContent = '如果填写了报价明细，单价将显示为平均单价（自动计算）';
+                unitPriceHint.style.color = '#666';
+            }
+        }
+    }
+}
+
+// 编辑项目时的报价明细管理
+let editQuotationDetailRowIndex = 0;
+
+export function addEditQuotationDetailRow(detail = null) {
+    const container = document.getElementById('editQuotationDetailsContainer');
+    if (!container) return;
+    
+    const rowId = `edit-quotation-detail-${editQuotationDetailRowIndex++}`;
+    const form = document.getElementById('editProjectForm');
+    if (!form) return;
+    
+    const sourceLanguage = form.querySelector('[name="sourceLanguage"]')?.value || '';
+    const sourceLanguageSelect = form.querySelector('[name="sourceLanguage"]');
+    const sourceLanguageOptions = sourceLanguageSelect 
+        ? Array.from(sourceLanguageSelect.options).map(opt => `<option value="${opt.value}" ${opt.value === (detail?.sourceLanguage || sourceLanguage) ? 'selected' : ''}>${opt.text}</option>`).join('')
+        : '<option value="">请选择</option>';
+    
+    const targetLanguageSelects = form.querySelectorAll('#editTargetLanguagesContainer .target-language-select');
+    const targetLanguageOptions = targetLanguageSelects.length > 0
+        ? Array.from(targetLanguageSelects[0].options).map(opt => `<option value="${opt.value}" ${opt.value === detail?.targetLanguage ? 'selected' : ''}>${opt.text}</option>`).join('')
+        : '<option value="">请选择</option>';
+    
+    const unitPrice = form.querySelector('[name="unitPrice"]')?.value || detail?.unitPrice || '';
+    
+    const row = document.createElement('div');
+    row.id = rowId;
+    row.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr auto; gap: 8px; align-items: center; padding: 10px; background: #f9f9f9; border-radius: 4px; border: 1px solid #ddd;';
+    row.innerHTML = `
+        <input type="text" class="detail-filename" placeholder="文件名" value="${detail?.filename || ''}" style="padding: 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px;" data-change="updateEditQuotationDetailAmount('${rowId}')">
+        <select class="detail-source-language" style="padding: 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px;" data-change="updateEditQuotationDetailAmount('${rowId}')">
+            ${sourceLanguageOptions}
+        </select>
+        <select class="detail-target-language" style="padding: 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px;" data-change="updateEditQuotationDetailAmount('${rowId}')">
+            ${targetLanguageOptions}
+        </select>
+        <input type="number" class="detail-word-count" placeholder="字数" min="0" step="1" value="${detail?.wordCount || ''}" style="padding: 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px;" data-change="updateEditQuotationDetailAmount('${rowId}')">
+        <input type="number" class="detail-unit-price" placeholder="单价" min="0" step="0.01" value="${detail?.unitPrice || unitPrice}" style="padding: 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px;" data-change="updateEditQuotationDetailAmount('${rowId}')">
+        <input type="number" class="detail-amount" placeholder="金额" min="0" step="0.01" value="${detail?.amount || ''}" readonly style="padding: 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; background: #f0f0f0;">
+        <button type="button" class="btn-small" data-click="removeEditQuotationDetailRow('${rowId}')" style="background: #ef4444; color: white;">删除</button>
+    `;
+    
+    container.appendChild(row);
+    if (detail) {
+        updateEditQuotationDetailAmount(rowId);
+    }
+    updateEditQuotationDetailsSummary();
+}
+
+export function removeEditQuotationDetailRow(rowId) {
+    const row = document.getElementById(rowId);
+    if (row) {
+        row.remove();
+        updateEditQuotationDetailsSummary();
+    }
+}
+
+export function updateEditQuotationDetailAmount(rowId) {
+    const row = document.getElementById(rowId);
+    if (!row) return;
+    
+    const wordCountInput = row.querySelector('.detail-word-count');
+    const unitPriceInput = row.querySelector('.detail-unit-price');
+    const amountInput = row.querySelector('.detail-amount');
+    
+    if (!wordCountInput || !unitPriceInput || !amountInput) return;
+    
+    const wordCount = parseFloat(wordCountInput.value) || 0;
+    const unitPrice = parseFloat(unitPriceInput.value) || 0;
+    const amount = (wordCount / 1000) * unitPrice;
+    
+    amountInput.value = amount.toFixed(2);
+    updateEditQuotationDetailsSummary();
+}
+
+export function updateEditQuotationDetailsSummary() {
+    const container = document.getElementById('editQuotationDetailsContainer');
+    if (!container) return;
+    
+    const rows = container.querySelectorAll('[id^="edit-quotation-detail-"]');
+    let totalWordCount = 0;
+    let totalAmount = 0;
+    
+    rows.forEach(row => {
+        const wordCountInput = row.querySelector('.detail-word-count');
+        const amountInput = row.querySelector('.detail-amount');
+        
+        if (wordCountInput) {
+            totalWordCount += parseFloat(wordCountInput.value) || 0;
+        }
+        if (amountInput) {
+            totalAmount += parseFloat(amountInput.value) || 0;
+        }
+    });
+    
+    const summaryDiv = document.getElementById('editQuotationDetailsSummary');
+    if (summaryDiv) {
+        const wordCountSpan = summaryDiv.querySelector('#editDetailsTotalWordCount');
+        const amountSpan = summaryDiv.querySelector('#editDetailsTotalAmount');
+        
+        if (wordCountSpan) {
+            wordCountSpan.textContent = totalWordCount.toLocaleString('zh-CN');
+        }
+        if (amountSpan) {
+            amountSpan.textContent = totalAmount.toFixed(2);
+        }
+    }
+    
+    // 如果有明细，自动同步总字数、总金额和平均单价，同时隐藏源语种和目标语种字段
+    if (rows.length > 0) {
+        const wordCountInput = document.getElementById('editWordCount');
+        const projectAmountInput = document.getElementById('editProjectAmount');
+        const unitPriceInput = document.getElementById('editUnitPrice');
+        const sourceLanguageGroup = document.getElementById('editSourceLanguageGroup');
+        const targetLanguagesGroup = document.getElementById('editTargetLanguagesGroup');
+        const wordCountHint = document.getElementById('editWordCountHint');
+        const unitPriceHint = document.getElementById('editUnitPriceHint');
+        let unitPriceLabel = null;
+        if (unitPriceInput) {
+            // 尝试通过 for 属性查找
+            unitPriceLabel = document.querySelector('label[for="editUnitPrice"]');
+            // 如果没找到，尝试查找父级 form-group 中的 label
+            if (!unitPriceLabel) {
+                const formGroup = unitPriceInput.closest('.form-group');
+                if (formGroup) {
+                    unitPriceLabel = formGroup.querySelector('label');
+                }
+            }
+        }
+        
+        // 隐藏源语种和目标语种字段（因为明细中已经有语种信息）
+        if (sourceLanguageGroup) {
+            sourceLanguageGroup.style.display = 'none';
+        }
+        if (targetLanguagesGroup) {
+            targetLanguagesGroup.style.display = 'none';
+        }
+        
+        if (wordCountInput) {
+            wordCountInput.value = totalWordCount;
+            wordCountInput.readOnly = true;
+            wordCountInput.style.background = '#f0f0f0';
+        }
+        if (wordCountHint) {
+            wordCountHint.textContent = '字数从报价明细自动计算，请修改明细以更新字数';
+            wordCountHint.style.color = '#667eea';
+        }
+        if (projectAmountInput) {
+            projectAmountInput.value = totalAmount.toFixed(2);
+            projectAmountInput.readOnly = true;
+            projectAmountInput.style.background = '#f0f0f0';
+            // 触发相关计算
+            if (typeof calculateEditPartTimeSalesCommission === 'function') {
+                calculateEditPartTimeSalesCommission();
+            }
+            if (typeof validateEditLayoutCost === 'function') {
+                validateEditLayoutCost();
+            }
+        }
+        // 计算平均单价：总金额 / (总字数 / 1000)
+        if (unitPriceInput && totalWordCount > 0) {
+            const averageUnitPrice = (totalAmount / (totalWordCount / 1000)).toFixed(2);
+            unitPriceInput.value = averageUnitPrice;
+            unitPriceInput.readOnly = true;
+            unitPriceInput.style.background = '#f0f0f0';
+            // 更新标签提示
+            if (unitPriceLabel) {
+                const originalText = unitPriceLabel.textContent.replace(/（.*?）/, '').trim();
+                unitPriceLabel.textContent = `${originalText}（平均单价，自动计算）`;
+                unitPriceLabel.style.color = '#667eea';
+            }
+            if (unitPriceHint) {
+                unitPriceHint.textContent = '单价从报价明细自动计算为平均单价，请修改明细以更新单价';
+                unitPriceHint.style.color = '#667eea';
+            }
+        }
+    } else {
+        // 如果没有明细，恢复单价字段可编辑状态，并显示目标语种字段
+        const unitPriceInput = document.getElementById('editUnitPrice');
+        const targetLanguagesGroup = document.getElementById('editTargetLanguagesGroup');
+        const wordCountInput = document.getElementById('editWordCount');
+        const projectAmountInput = document.getElementById('editProjectAmount');
+        const wordCountHint = document.getElementById('editWordCountHint');
+        const unitPriceHint = document.getElementById('editUnitPriceHint');
+        let unitPriceLabel = null;
+        if (unitPriceInput) {
+            // 尝试通过 for 属性查找
+            unitPriceLabel = document.querySelector('label[for="editUnitPrice"]');
+            // 如果没找到，尝试查找父级 form-group 中的 label
+            if (!unitPriceLabel) {
+                const formGroup = unitPriceInput.closest('.form-group');
+                if (formGroup) {
+                    unitPriceLabel = formGroup.querySelector('label');
+                }
+            }
+        }
+        
+        // 显示目标语种字段（因为没有明细，需要手动选择语种）
+        if (targetLanguagesGroup) {
+            targetLanguagesGroup.style.display = '';
+        }
+        
+        if (wordCountInput) {
+            wordCountInput.readOnly = false;
+            wordCountInput.style.background = '';
+        }
+        if (wordCountHint) {
+            wordCountHint.textContent = '如果填写了报价明细，字数将从明细自动计算';
+            wordCountHint.style.color = '#666';
+        }
+        if (projectAmountInput) {
+            projectAmountInput.readOnly = false;
+            projectAmountInput.style.background = '';
+        }
+        if (unitPriceInput) {
+            unitPriceInput.readOnly = false;
+            unitPriceInput.style.background = '';
+            // 恢复标签
+            if (unitPriceLabel) {
+                unitPriceLabel.textContent = unitPriceLabel.textContent.replace(/（.*?）/, '').trim();
+                if (unitPriceLabel.textContent.includes('平均单价')) {
+                    unitPriceLabel.textContent = '单价（每千字）';
+                }
+                unitPriceLabel.style.color = '';
+            }
+            if (unitPriceHint) {
+                unitPriceHint.textContent = '如果填写了报价明细，单价将显示为平均单价（自动计算）';
+                unitPriceHint.style.color = '#666';
+            }
+        }
+    }
+}
+
 export function toggleProjectFields() {
     const biz = document.getElementById('businessType')?.value;
     const projectTypeGroup = document.getElementById('projectTypeGroup');
@@ -325,7 +796,7 @@ export async function showCreateProjectModal() {
     const isSalesRole = currentRole === 'sales';
 
     const content = `
-        <form id="createProjectForm" data-submit="createProject(event)">
+        <form id="createProjectForm" data-submit="createProject(event)" novalidate>
             <div class="form-group">
                 <label>项目编号（留空自动生成）</label>
                 <input type="text" name="projectNumber" placeholder="留空将自动生成项目编号">
@@ -369,14 +840,29 @@ export async function showCreateProjectModal() {
                     <option value="mixed">混合类型</option>
                 </select>
             </div>
-            <div class="form-group">
+            <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <h4 style="margin: 0; font-size: 14px; color: #667eea;">报价明细（可选，精确录入）</h4>
+                    <button type="button" class="btn-small" data-click="addQuotationDetailRow()" style="background: #667eea; color: white;">+ 添加明细</button>
+                </div>
+                <small style="color: #666; font-size: 12px; display: block; margin-bottom: 10px;">如果填写了明细，将使用明细数据生成报价单，总字数和总金额会自动计算；如果不填写明细，请手动录入项目字数和单价</small>
+                <div id="quotationDetailsContainer" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px;">
+                    <!-- 报价明细行将动态添加到这里 -->
+                </div>
+                <div id="quotationDetailsSummary" style="padding: 10px; background: #f5f5f5; border-radius: 4px; font-size: 12px; color: #666;">
+                    <div>明细总字数：<span id="detailsTotalWordCount">0</span> 字</div>
+                    <div>明细总金额：¥<span id="detailsTotalAmount">0.00</span></div>
+                </div>
+            </div>
+            <div class="form-group" id="sourceLanguageGroup">
                 <label>源语种 *</label>
                 <select name="sourceLanguage" id="sourceLanguageSelect" required>
                     <option value="">请选择源语种</option>
                     ${languageOptions}
                 </select>
-                </div>
-            <div class="form-group">
+                <small style="color: #666; font-size: 12px;" id="sourceLanguageHint">如果填写了报价明细，源语种将从明细自动获取，无需选择</small>
+            </div>
+            <div class="form-group" id="targetLanguagesGroup">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <label style="margin-bottom: 0;">目标语言 *</label>
                     <button type="button" class="btn-small" data-click="addTargetLanguageRow()">+ 添加目标语种</button>
@@ -385,6 +871,7 @@ export async function showCreateProjectModal() {
                     <!-- 目标语种行将动态添加到这里 -->
                 </div>
                 <small style="color:#666; font-size: 12px; margin-top: 8px; display: block;">至少需要添加一个目标语种，支持一对多翻译</small>
+                <small style="color: #666; font-size: 12px; display: block;" id="targetLanguagesHint">如果填写了报价明细，目标语种将从明细自动获取，无需选择</small>
                 <div style="margin-top:8px;font-size:12px;color:#667eea;">
                     如需新增语种，请在"语种管理"中添加。
                 </div>
@@ -392,15 +879,17 @@ export async function showCreateProjectModal() {
             <div class="form-group" id="wordCountGroup">
                 <label>字数（笔译项目）</label>
                 <input type="number" name="wordCount" id="wordCount" min="0" step="1" data-change="calculateAmount()">
+                <small style="color: #666; font-size: 12px;" id="wordCountHint">如果填写了报价明细，字数将从明细自动计算</small>
             </div>
             <div class="form-group" id="unitPriceGroup">
                 <label>单价（每千字，元）</label>
-                <input type="number" name="unitPrice" id="unitPrice" min="0" step="0.01" data-change="calculateAmount()">
+                <input type="number" name="unitPrice" id="unitPrice" min="0" step="0.01" data-change="calculateAmount(); updateQuotationDetailsSummary()">
+                <small style="color: #666; font-size: 12px;" id="unitPriceHint">如果填写了报价明细，单价将显示为平均单价（自动计算）</small>
             </div>
             <div class="form-group">
                 <label>项目总金额 *</label>
                 <input type="number" name="projectAmount" id="projectAmount" step="0.01" min="0" required data-change="calculatePartTimeSalesCommission(); validateLayoutCost()">
-                <small style="color: #666; font-size: 12px;">笔译项目：字数×单价/1000；其他项目：手动输入</small>
+                <small style="color: #666; font-size: 12px;">笔译项目：字数×单价/1000；其他项目：手动输入。如果填写了报价明细，建议使用明细总金额</small>
             </div>
             <div class="form-group">
                 <label>交付时间 *</label>
@@ -690,6 +1179,227 @@ window.showProjectEvaluationsList = async function(projectId) {
 export async function createProject(e) {
     e.preventDefault();
     
+    console.log('[createProject] 开始处理表单提交');
+    
+    // 在表单提交前，如果有明细，移除源语种和目标语种的 required 属性，并填充值
+    const quotationDetailsContainer = document.getElementById('quotationDetailsContainer');
+    const hasQuotationDetails = quotationDetailsContainer && quotationDetailsContainer.querySelectorAll('[id^="quotation-detail-"]').length > 0;
+    
+    console.log('[createProject] 是否有明细:', hasQuotationDetails);
+    console.log('[createProject] 明细容器:', quotationDetailsContainer);
+    
+    // 在函数作用域内定义这些变量，以便在多个 if 块中使用
+    let sourceLanguagesSet = new Set();
+    let targetLanguagesSet = new Set();
+    
+    if (hasQuotationDetails) {
+        console.log('[createProject] 开始处理明细情况');
+        const sourceLanguageSelect = document.getElementById('sourceLanguageSelect');
+        const targetLanguageSelects = document.querySelectorAll('.target-language-select');
+        
+        // 从明细中提取源语种和目标语种
+        sourceLanguagesSet = new Set();
+        targetLanguagesSet = new Set();
+        
+        quotationDetailsContainer.querySelectorAll('[id^="quotation-detail-"]').forEach(row => {
+            const sourceLangSelect = row.querySelector('.detail-source-language');
+            const targetLangSelect = row.querySelector('.detail-target-language');
+            if (sourceLangSelect && sourceLangSelect.value) {
+                sourceLanguagesSet.add(sourceLangSelect.value);
+            }
+            if (targetLangSelect && targetLangSelect.value) {
+                targetLanguagesSet.add(targetLangSelect.value);
+            }
+        });
+        
+        // 填充源语种 - 确保字段有值，并清除验证错误
+        if (sourceLanguageSelect) {
+            console.log('[createProject] 处理源语种字段');
+            console.log('[createProject] 源语种字段当前值:', sourceLanguageSelect.value);
+            console.log('[createProject] 源语种字段是否有 required:', sourceLanguageSelect.hasAttribute('required'));
+            console.log('[createProject] 源语种字段是否有效:', sourceLanguageSelect.validity.valid);
+            console.log('[createProject] 源语种字段验证消息:', sourceLanguageSelect.validationMessage);
+            
+            // 先确保字段可见
+            const sourceLanguageGroup = document.getElementById('sourceLanguageGroup');
+            if (sourceLanguageGroup) {
+                console.log('[createProject] 显示源语种组');
+                sourceLanguageGroup.style.display = '';
+            }
+            
+            if (sourceLanguagesSet.size > 0) {
+                const sourceLangValue = Array.from(sourceLanguagesSet)[0];
+                console.log('[createProject] 设置源语种值:', sourceLangValue);
+                sourceLanguageSelect.value = sourceLangValue;
+            }
+            
+            console.log('[createProject] 移除 required 属性');
+            sourceLanguageSelect.removeAttribute('required');
+            
+            console.log('[createProject] 清除验证错误');
+            sourceLanguageSelect.setCustomValidity('');
+            
+            console.log('[createProject] 触发验证');
+            const isValid = sourceLanguageSelect.checkValidity();
+            console.log('[createProject] 验证后是否有效:', isValid);
+            console.log('[createProject] 验证后验证消息:', sourceLanguageSelect.validationMessage);
+        } else {
+            console.log('[createProject] 源语种字段不存在');
+        }
+        
+        // 填充目标语种 - 确保有足够的选择框并填充所有语种
+        if (targetLanguagesSet.size > 0) {
+            const targetLanguagesArray = Array.from(targetLanguagesSet);
+            const container = document.getElementById('targetLanguagesContainer');
+            
+            // 如果选择框不够，动态添加
+            let currentSelects = Array.from(document.querySelectorAll('.target-language-select'));
+            while (currentSelects.length < targetLanguagesArray.length && container) {
+                addTargetLanguageRow();
+                // 重新获取选择框列表
+                currentSelects = Array.from(document.querySelectorAll('.target-language-select'));
+                if (currentSelects.length >= targetLanguagesArray.length) break;
+            }
+            
+            // 确保目标语种容器可见
+            const targetLanguagesGroup = document.getElementById('targetLanguagesGroup');
+            if (targetLanguagesGroup) {
+                targetLanguagesGroup.style.display = '';
+            }
+            
+            // 重新获取最新的选择框列表并填充值
+            const allTargetSelects = Array.from(document.querySelectorAll('.target-language-select'));
+            targetLanguagesArray.forEach((lang, index) => {
+                if (allTargetSelects[index]) {
+                    allTargetSelects[index].value = lang;
+                    allTargetSelects[index].removeAttribute('required');
+                    // 清除任何验证错误
+                    allTargetSelects[index].setCustomValidity('');
+                    // 触发验证以清除错误
+                    allTargetSelects[index].checkValidity();
+                }
+            });
+            
+            // 移除所有选择框的 required 属性并清除验证错误
+            allTargetSelects.forEach(select => {
+                select.removeAttribute('required');
+                select.setCustomValidity('');
+                select.checkValidity();
+            });
+        } else {
+            targetLanguageSelects.forEach(select => {
+                select.removeAttribute('required');
+            });
+        }
+    }
+    
+    // 在获取 FormData 之前，确保表单验证通过
+    const form = e.target;
+    console.log('[createProject] 开始表单验证检查');
+    
+    // 如果有明细，确保源语种和目标语种字段组可见并清除验证错误
+    if (hasQuotationDetails) {
+        console.log('[createProject] 明细情况：确保字段组可见');
+        
+        // 重新提取源语种和目标语种（确保数据是最新的）
+        sourceLanguagesSet = new Set();
+        targetLanguagesSet = new Set();
+        quotationDetailsContainer.querySelectorAll('[id^="quotation-detail-"]').forEach(row => {
+            const sourceLangSelect = row.querySelector('.detail-source-language');
+            const targetLangSelect = row.querySelector('.detail-target-language');
+            if (sourceLangSelect && sourceLangSelect.value) {
+                sourceLanguagesSet.add(sourceLangSelect.value);
+            }
+            if (targetLangSelect && targetLangSelect.value) {
+                targetLanguagesSet.add(targetLangSelect.value);
+            }
+        });
+        
+        const sourceLanguageGroup = document.getElementById('sourceLanguageGroup');
+        const targetLanguagesGroup = document.getElementById('targetLanguagesGroup');
+        const sourceLanguageSelect = document.getElementById('sourceLanguageSelect');
+        const targetLanguageSelects = document.querySelectorAll('.target-language-select');
+        
+        console.log('[createProject] 源语种组:', sourceLanguageGroup);
+        console.log('[createProject] 目标语种组:', targetLanguagesGroup);
+        console.log('[createProject] 源语种选择框:', sourceLanguageSelect);
+        console.log('[createProject] 目标语种选择框数量:', targetLanguageSelects.length);
+        console.log('[createProject] 提取的源语种:', Array.from(sourceLanguagesSet));
+        console.log('[createProject] 提取的目标语种:', Array.from(targetLanguagesSet));
+        
+        // 临时显示字段组
+        if (sourceLanguageGroup) {
+            console.log('[createProject] 显示源语种组');
+            sourceLanguageGroup.style.display = '';
+        }
+        if (targetLanguagesGroup) {
+            console.log('[createProject] 显示目标语种组');
+            targetLanguagesGroup.style.display = '';
+        }
+        
+        // 确保字段有值并清除验证错误
+        if (sourceLanguageSelect) {
+            console.log('[createProject] 源语种字段当前值:', sourceLanguageSelect.value);
+            console.log('[createProject] 源语种字段是否有 required:', sourceLanguageSelect.hasAttribute('required'));
+            if (!sourceLanguageSelect.value && sourceLanguagesSet.size > 0) {
+                const sourceLangValue = Array.from(sourceLanguagesSet)[0];
+                console.log('[createProject] 设置源语种值:', sourceLangValue);
+                sourceLanguageSelect.value = sourceLangValue;
+            }
+            sourceLanguageSelect.removeAttribute('required');
+            sourceLanguageSelect.setCustomValidity('');
+            const sourceValid = sourceLanguageSelect.checkValidity();
+            console.log('[createProject] 源语种字段验证结果:', sourceValid, sourceLanguageSelect.validationMessage);
+        }
+        
+        targetLanguageSelects.forEach((select, index) => {
+            console.log(`[createProject] 处理目标语种选择框 ${index}:`, select.value, select.hasAttribute('required'));
+            if (targetLanguagesSet.size > 0 && index < targetLanguagesSet.size) {
+                const lang = Array.from(targetLanguagesSet)[index];
+                if (!select.value) {
+                    console.log(`[createProject] 设置目标语种 ${index} 值:`, lang);
+                    select.value = lang;
+                }
+            }
+            select.removeAttribute('required');
+            select.setCustomValidity('');
+            const targetValid = select.checkValidity();
+            console.log(`[createProject] 目标语种 ${index} 验证结果:`, targetValid, select.validationMessage);
+        });
+    }
+    
+    // 检查表单验证
+    console.log('[createProject] 检查表单整体验证');
+    const formValid = form.checkValidity();
+    console.log('[createProject] 表单验证结果:', formValid);
+    
+    if (!formValid) {
+        console.log('[createProject] 表单验证失败，查找无效字段');
+        // 如果表单验证失败，尝试清除所有验证错误
+        const invalidFields = form.querySelectorAll(':invalid');
+        console.log('[createProject] 无效字段数量:', invalidFields.length);
+        invalidFields.forEach((field, index) => {
+            console.log(`[createProject] 无效字段 ${index}:`, field.id, field.name, field.tagName, field.validationMessage);
+            if (field.id === 'sourceLanguageSelect' || field.classList.contains('target-language-select')) {
+                console.log(`[createProject] 清除字段 ${field.id || field.name} 的验证错误`);
+                field.setCustomValidity('');
+                const fieldValid = field.checkValidity();
+                console.log(`[createProject] 字段 ${field.id || field.name} 验证结果:`, fieldValid, field.validationMessage);
+            }
+        });
+        // 再次检查
+        const formValidAfter = form.checkValidity();
+        console.log('[createProject] 清除错误后表单验证结果:', formValidAfter);
+        if (!formValidAfter) {
+            console.log('[createProject] 表单验证仍然失败，显示验证错误');
+            // 如果仍然失败，可能是其他字段的问题，显示验证错误
+            form.reportValidity();
+            return;
+        }
+    }
+    
+    console.log('[createProject] 表单验证通过，继续处理');
+    
     // 清空保存的表单状态
     createProjectFormState = null;
     const formData = new FormData(e.target);
@@ -745,14 +1455,52 @@ export async function createProject(e) {
         notes: formData.get('specialRequirements.notes') || undefined
     };
     
-    const targetLanguageRows = document.querySelectorAll('.target-language-select');
-    const targetLanguages = Array.from(targetLanguageRows)
-        .map(select => select.value)
-        .filter(value => value && value.trim() !== '');
+    // 检查是否有报价明细（使用之前已声明的 hasQuotationDetails 和 quotationDetailsContainer）
+    let sourceLanguage, targetLanguages;
     
-    if (targetLanguages.length === 0) {
-        alert('请至少添加并选择一个目标语种');
-        return;
+    if (hasQuotationDetails) {
+        // 如果有明细，从明细中提取源语种和目标语种
+        const sourceLanguagesSet = new Set();
+        const targetLanguagesSet = new Set();
+        
+        quotationDetailsContainer.querySelectorAll('[id^="quotation-detail-"]').forEach(row => {
+            const sourceLangSelect = row.querySelector('.detail-source-language');
+            const targetLangSelect = row.querySelector('.detail-target-language');
+            if (sourceLangSelect && sourceLangSelect.value) {
+                sourceLanguagesSet.add(sourceLangSelect.value);
+            }
+            if (targetLangSelect && targetLangSelect.value) {
+                targetLanguagesSet.add(targetLangSelect.value);
+            }
+        });
+        
+        if (sourceLanguagesSet.size === 0) {
+            alert('请至少填写一个报价明细的源语种');
+            return;
+        }
+        if (targetLanguagesSet.size === 0) {
+            alert('请至少填写一个报价明细的目标语种');
+            return;
+        }
+        
+        sourceLanguage = Array.from(sourceLanguagesSet)[0]; // 使用第一个源语种
+        targetLanguages = Array.from(targetLanguagesSet);
+    } else {
+        // 如果没有明细，从表单中获取
+        sourceLanguage = formData.get('sourceLanguage');
+        const targetLanguageRows = document.querySelectorAll('.target-language-select');
+        targetLanguages = Array.from(targetLanguageRows)
+            .map(select => select.value)
+            .filter(value => value && value.trim() !== '');
+        
+        if (!sourceLanguage) {
+            alert('请选择源语种');
+            return;
+        }
+        if (targetLanguages.length === 0) {
+            alert('请至少添加并选择一个目标语种');
+            return;
+        }
     }
 
     const currentRole = state.currentRole || (state.currentUser?.roles?.[0] || '');
@@ -892,7 +1640,7 @@ export async function createProject(e) {
         customerId: formData.get('customerId'),
         businessType: formData.get('businessType'),
         projectType: formData.get('projectType') || undefined,
-        sourceLanguage: formData.get('sourceLanguage'),
+        sourceLanguage: sourceLanguage,
         targetLanguages: targetLanguages,
         wordCount: formData.get('wordCount') ? parseFloat(formData.get('wordCount')) : undefined,
         unitPrice: formData.get('unitPrice') ? parseFloat(formData.get('unitPrice')) : undefined,
@@ -907,6 +1655,35 @@ export async function createProject(e) {
         partTimeLayout: partTimeLayout,
         attachments: attachments
     };
+
+    // 收集报价明细
+    const detailsContainer = document.getElementById('quotationDetailsContainer');
+    if (detailsContainer) {
+        const quotationDetails = [];
+        const detailRows = detailsContainer.querySelectorAll('[id^="quotation-detail-"]');
+        detailRows.forEach(row => {
+            const filename = row.querySelector('.detail-filename')?.value?.trim();
+            const sourceLanguage = row.querySelector('.detail-source-language')?.value?.trim();
+            const targetLanguage = row.querySelector('.detail-target-language')?.value?.trim();
+            const wordCount = parseFloat(row.querySelector('.detail-word-count')?.value) || 0;
+            const unitPrice = parseFloat(row.querySelector('.detail-unit-price')?.value) || 0;
+            const amount = parseFloat(row.querySelector('.detail-amount')?.value) || 0;
+            
+            if (filename && sourceLanguage && targetLanguage && wordCount > 0 && unitPrice > 0) {
+                quotationDetails.push({
+                    filename,
+                    sourceLanguage,
+                    targetLanguage,
+                    wordCount,
+                    unitPrice,
+                    amount
+                });
+            }
+        });
+        if (quotationDetails.length > 0) {
+            data.quotationDetails = quotationDetails;
+        }
+    }
 
     try {
         const response = await apiFetch('/projects/create', {
@@ -1096,7 +1873,7 @@ export async function showEditProjectModal() {
         .map(lang => `<option value="${lang.name}" ${p.sourceLanguage === lang.name ? 'selected' : ''}>${lang.name}${lang.code ? ' (' + lang.code + ')' : ''}${lang.nativeName ? ' - ' + lang.nativeName : ''}</option>`)
         .join('');
     const content = `
-        <form id="editProjectForm" data-submit="updateProject(event, '${p._id}')">
+        <form id="editProjectForm" data-submit="updateProject(event, '${p._id}')" novalidate>
             <div class="form-group">
                 <label>项目名称 *</label>
                 <input type="text" name="projectName" value="${p.projectName || ''}" required>
@@ -1120,14 +1897,62 @@ export async function showEditProjectModal() {
                     <option value="mixed" ${p.projectType === 'mixed' ? 'selected' : ''}>混合类型</option>
                 </select>
             </div>
+            ${canViewProjectAmount() ? `
+            <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <h4 style="margin: 0; font-size: 14px; color: #667eea;">报价明细（可选，精确录入）</h4>
+                    <button type="button" class="btn-small" data-click="addEditQuotationDetailRow()" style="background: #667eea; color: white;">+ 添加明细</button>
+                </div>
+                <small style="color: #666; font-size: 12px; display: block; margin-bottom: 10px;">如果填写了明细，将使用明细数据生成报价单，总字数和总金额会自动计算；如果不填写明细，请手动录入项目字数和单价</small>
+                <div id="editQuotationDetailsContainer" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px;">
+                    <!-- 报价明细行将动态添加到这里 -->
+                </div>
+                <div id="editQuotationDetailsSummary" style="padding: 10px; background: #f5f5f5; border-radius: 4px; font-size: 12px; color: #666;">
+                    <div>明细总字数：<span id="editDetailsTotalWordCount">0</span> 字</div>
+                    <div>明细总金额：¥<span id="editDetailsTotalAmount">0.00</span></div>
+                </div>
+            </div>
+            <div class="form-group" id="editSourceLanguageGroup">
+                <label>源语种 *</label>
+                <select name="sourceLanguage" id="editSourceLanguageSelect" required>
+                    <option value="">请选择源语种</option>
+                    ${sourceLanguageOptions}
+                </select>
+                <small style="color: #666; font-size: 12px;" id="editSourceLanguageHint">如果填写了报价明细，源语种将从明细自动获取，无需选择</small>
+            </div>
+            <div class="form-group" id="editTargetLanguagesGroup">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <label style="margin-bottom: 0;">目标语言 *</label>
+                    <button type="button" class="btn-small" data-click="addEditTargetLanguageRow()">+ 添加目标语种</button>
+                </div>
+                <div id="editTargetLanguagesContainer" style="display: flex; flex-direction: column; gap: 8px;"></div>
+                <small style="color:#666; font-size: 12px; margin-top: 8px; display: block;">至少需要添加一个目标语种，支持一对多翻译</small>
+                <small style="color: #666; font-size: 12px; display: block;" id="editTargetLanguagesHint">如果填写了报价明细，目标语种将从明细自动获取，无需选择</small>
+            </div>
             <div class="form-group">
+                <label>字数（笔译）</label>
+                <input type="number" name="wordCount" id="editWordCount" value="${p.wordCount || ''}" min="0" step="1">
+                <small style="color: #666; font-size: 12px;" id="editWordCountHint">如果填写了报价明细，字数将从明细自动计算</small>
+            </div>
+            <div class="form-group">
+                <label>单价（每千字）</label>
+                <input type="number" name="unitPrice" id="editUnitPrice" value="${p.unitPrice || ''}" min="0" step="0.01" data-change="updateEditQuotationDetailsSummary()">
+                <small style="color: #666; font-size: 12px;" id="editUnitPriceHint">如果填写了报价明细，单价将显示为平均单价（自动计算）</small>
+            </div>
+            <div class="form-group">
+                <label>项目金额 *</label>
+                <input type="number" name="projectAmount" id="editProjectAmount" value="${p.projectAmount || ''}" min="0" step="0.01" required onchange="calculateEditPartTimeSalesCommission(); validateEditLayoutCost();">
+                <small style="color: #666; font-size: 12px;" id="editProjectAmountHint">如果填写了报价明细，金额将从明细自动计算</small>
+            </div>
+            ` : `
+            <div class="form-group" id="editSourceLanguageGroup">
                 <label>源语种 *</label>
                 <select name="sourceLanguage" id="editSourceLanguageSelect" required>
                     <option value="">请选择源语种</option>
                     ${sourceLanguageOptions}
                 </select>
             </div>
-            <div class="form-group">
+            <div class="form-group" id="editTargetLanguagesGroup">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <label style="margin-bottom: 0;">目标语言 *</label>
                     <button type="button" class="btn-small" data-click="addEditTargetLanguageRow()">+ 添加目标语种</button>
@@ -1135,20 +1960,7 @@ export async function showEditProjectModal() {
                 <div id="editTargetLanguagesContainer" style="display: flex; flex-direction: column; gap: 8px;"></div>
                 <small style="color:#666; font-size: 12px; margin-top: 8px; display: block;">至少需要添加一个目标语种，支持一对多翻译</small>
             </div>
-            <div class="form-group">
-                <label>字数（笔译）</label>
-                <input type="number" name="wordCount" value="${p.wordCount || ''}" min="0" step="1">
-            </div>
-            ${canViewProjectAmount() ? `
-            <div class="form-group">
-                <label>单价（每千字）</label>
-                <input type="number" name="unitPrice" value="${p.unitPrice || ''}" min="0" step="0.01">
-            </div>
-            <div class="form-group">
-                <label>项目金额 *</label>
-                <input type="number" name="projectAmount" value="${p.projectAmount || ''}" min="0" step="0.01" required onchange="calculateEditPartTimeSalesCommission(); validateEditLayoutCost();">
-            </div>
-            ` : ''}
+            `}
             <div class="form-group">
                 <label>交付时间 *</label>
                 <input type="date" name="deadline" value="${p.deadline ? new Date(p.deadline).toISOString().slice(0,10) : ''}" required>
@@ -1319,18 +2131,281 @@ export async function showEditProjectModal() {
             addEditTargetLanguageRow();
         }
     }
+    
+    // 加载报价明细
+    const detailsContainer = document.getElementById('editQuotationDetailsContainer');
+    const hasDetails = p.quotationDetails && Array.isArray(p.quotationDetails) && p.quotationDetails.length > 0;
+    
+    if (detailsContainer) {
+        if (hasDetails) {
+            detailsContainer.innerHTML = '';
+            editQuotationDetailRowIndex = 0;
+            p.quotationDetails.forEach(detail => {
+                addEditQuotationDetailRow(detail);
+            });
+            // 更新汇总
+            setTimeout(() => {
+                updateEditQuotationDetailsSummary();
+            }, 100);
+        }
+        
+        // 如果有明细，禁用总字数和总金额输入，并自动同步，同时隐藏源语种和目标语种字段
+        if (hasDetails) {
+            const wordCountInput = document.getElementById('editWordCount');
+            const projectAmountInput = document.getElementById('editProjectAmount');
+            const wordCountHint = document.getElementById('editWordCountHint');
+            const projectAmountHint = document.getElementById('editProjectAmountHint');
+            const sourceLanguageGroup = document.getElementById('editSourceLanguageGroup');
+            const targetLanguagesGroup = document.getElementById('editTargetLanguagesGroup');
+            
+            // 隐藏源语种和目标语种字段（因为明细中已经有语种信息）
+            if (sourceLanguageGroup) {
+                sourceLanguageGroup.style.display = 'none';
+            }
+            if (targetLanguagesGroup) {
+                targetLanguagesGroup.style.display = 'none';
+            }
+            
+            // 从明细中提取源语种和目标语种，并移除 required 属性
+            const sourceLanguageSelect = document.getElementById('editSourceLanguageSelect');
+            const targetLanguageSelects = document.querySelectorAll('#editTargetLanguagesContainer .target-language-select');
+            
+            // 从明细中提取唯一的源语种和目标语种
+            const sourceLanguages = new Set();
+            const targetLanguagesSet = new Set();
+            
+            detailsContainer.querySelectorAll('[id^="edit-quotation-detail-"]').forEach(row => {
+                const sourceLangSelect = row.querySelector('.detail-source-language');
+                const targetLangSelect = row.querySelector('.detail-target-language');
+                if (sourceLangSelect && sourceLangSelect.value) {
+                    sourceLanguages.add(sourceLangSelect.value);
+                }
+                if (targetLangSelect && targetLangSelect.value) {
+                    targetLanguagesSet.add(targetLangSelect.value);
+                }
+            });
+            
+            // 如果有唯一的源语种，自动填充
+            if (sourceLanguageSelect && sourceLanguages.size === 1) {
+                sourceLanguageSelect.value = Array.from(sourceLanguages)[0];
+                sourceLanguageSelect.removeAttribute('required');
+            } else if (sourceLanguageSelect) {
+                sourceLanguageSelect.removeAttribute('required');
+            }
+            
+            // 如果有目标语种，自动填充第一个目标语种选择框
+            if (targetLanguageSelects.length > 0 && targetLanguagesSet.size > 0) {
+                const firstTargetLang = Array.from(targetLanguagesSet)[0];
+                if (targetLanguageSelects[0]) {
+                    targetLanguageSelects[0].value = firstTargetLang;
+                    targetLanguageSelects[0].removeAttribute('required');
+                }
+            }
+            
+            // 移除所有目标语种选择框的 required 属性
+            targetLanguageSelects.forEach(select => {
+                select.removeAttribute('required');
+            });
+            
+            if (wordCountInput) {
+                wordCountInput.readOnly = true;
+                wordCountInput.style.background = '#f0f0f0';
+            }
+            if (projectAmountInput) {
+                projectAmountInput.readOnly = true;
+                projectAmountInput.style.background = '#f0f0f0';
+            }
+            if (wordCountHint) {
+                wordCountHint.textContent = '字数从报价明细自动计算，请修改明细以更新字数';
+                wordCountHint.style.color = '#667eea';
+            }
+            if (projectAmountHint) {
+                projectAmountHint.textContent = '金额从报价明细自动计算，请修改明细以更新金额';
+                projectAmountHint.style.color = '#667eea';
+            }
+        } else {
+            // 如果没有明细，显示源语种和目标语种字段
+            const sourceLanguageGroup = document.getElementById('editSourceLanguageGroup');
+            const targetLanguagesGroup = document.getElementById('editTargetLanguagesGroup');
+            if (sourceLanguageGroup) {
+                sourceLanguageGroup.style.display = '';
+            }
+            if (targetLanguagesGroup) {
+                targetLanguagesGroup.style.display = '';
+            }
+            
+            // 恢复 required 属性
+            const sourceLanguageSelect = document.getElementById('editSourceLanguageSelect');
+            const targetLanguageSelects = document.querySelectorAll('#editTargetLanguagesContainer .target-language-select');
+            
+            if (sourceLanguageSelect) {
+                sourceLanguageSelect.setAttribute('required', 'required');
+            }
+            
+            // 至少第一个目标语种选择框需要 required
+            if (targetLanguageSelects.length > 0 && targetLanguageSelects[0]) {
+                targetLanguageSelects[0].setAttribute('required', 'required');
+            }
+        }
+    }
 }
 
 export async function updateProject(e, projectId) {
     e.preventDefault();
+    
+    // 在表单提交前，如果有明细，移除源语种和目标语种的 required 属性，并填充值
+    const quotationDetailsContainer = document.getElementById('editQuotationDetailsContainer');
+    const hasQuotationDetails = quotationDetailsContainer && quotationDetailsContainer.querySelectorAll('[id^="edit-quotation-detail-"]').length > 0;
+    
+    if (hasQuotationDetails) {
+        const sourceLanguageSelect = document.getElementById('editSourceLanguageSelect');
+        const targetLanguageSelects = document.querySelectorAll('#editTargetLanguagesContainer .target-language-select');
+        
+        // 从明细中提取源语种和目标语种
+        const sourceLanguagesSet = new Set();
+        const targetLanguagesSet = new Set();
+        
+        quotationDetailsContainer.querySelectorAll('[id^="edit-quotation-detail-"]').forEach(row => {
+            const sourceLangSelect = row.querySelector('.detail-source-language');
+            const targetLangSelect = row.querySelector('.detail-target-language');
+            if (sourceLangSelect && sourceLangSelect.value) {
+                sourceLanguagesSet.add(sourceLangSelect.value);
+            }
+            if (targetLangSelect && targetLangSelect.value) {
+                targetLanguagesSet.add(targetLangSelect.value);
+            }
+        });
+        
+        // 填充源语种 - 确保字段有值，并创建隐藏字段避免验证
+        if (sourceLanguageSelect) {
+            if (sourceLanguagesSet.size > 0) {
+                const sourceLangValue = Array.from(sourceLanguagesSet)[0];
+                sourceLanguageSelect.value = sourceLangValue;
+                // 创建隐藏字段存储值，避免浏览器验证
+                let hiddenInput = document.getElementById('hiddenSourceLanguage');
+                if (!hiddenInput) {
+                    hiddenInput = document.createElement('input');
+                    hiddenInput.type = 'hidden';
+                    hiddenInput.id = 'hiddenSourceLanguage';
+                    hiddenInput.name = 'sourceLanguage';
+                    sourceLanguageSelect.parentNode.appendChild(hiddenInput);
+                }
+                hiddenInput.value = sourceLangValue;
+            }
+            sourceLanguageSelect.removeAttribute('required');
+            sourceLanguageSelect.style.display = 'none'; // 隐藏原选择框
+        }
+        
+        // 填充目标语种 - 确保有足够的选择框并填充所有语种
+        if (targetLanguagesSet.size > 0) {
+            const targetLanguagesArray = Array.from(targetLanguagesSet);
+            const container = document.getElementById('editTargetLanguagesContainer');
+            
+            // 如果选择框不够，动态添加
+            let currentSelects = Array.from(document.querySelectorAll('#editTargetLanguagesContainer .target-language-select'));
+            while (currentSelects.length < targetLanguagesArray.length && container) {
+                addEditTargetLanguageRow();
+                // 重新获取选择框列表
+                currentSelects = Array.from(document.querySelectorAll('#editTargetLanguagesContainer .target-language-select'));
+                if (currentSelects.length >= targetLanguagesArray.length) break;
+            }
+            
+            // 重新获取最新的选择框列表并填充值，创建隐藏字段
+            const allTargetSelects = Array.from(document.querySelectorAll('#editTargetLanguagesContainer .target-language-select'));
+            targetLanguagesArray.forEach((lang, index) => {
+                if (allTargetSelects[index]) {
+                    allTargetSelects[index].value = lang;
+                    allTargetSelects[index].removeAttribute('required');
+                    allTargetSelects[index].style.display = 'none'; // 隐藏原选择框
+                    // 创建隐藏字段存储值
+                    let hiddenInput = document.getElementById(`hiddenEditTargetLanguage_${index}`);
+                    if (!hiddenInput && container) {
+                        hiddenInput = document.createElement('input');
+                        hiddenInput.type = 'hidden';
+                        hiddenInput.id = `hiddenEditTargetLanguage_${index}`;
+                        hiddenInput.name = 'targetLanguages[]';
+                        container.appendChild(hiddenInput);
+                    }
+                    if (hiddenInput) {
+                        hiddenInput.value = lang;
+                    }
+                }
+            });
+            
+            // 移除所有选择框的 required 属性并隐藏
+            allTargetSelects.forEach(select => {
+                select.removeAttribute('required');
+                select.style.display = 'none';
+            });
+        } else {
+            targetLanguageSelects.forEach(select => {
+                select.removeAttribute('required');
+            });
+        }
+    }
+    
     const formData = new FormData(e.target);
-    const targetLanguageRows = document.querySelectorAll('#editTargetLanguagesContainer .target-language-select');
-    const targetLanguages = Array.from(targetLanguageRows)
-        .map(select => select.value)
-        .filter(value => value && value.trim() !== '');
-    if (targetLanguages.length === 0) {
-        alert('请至少添加并选择一个目标语种');
-        return;
+    
+    // 检查是否有报价明细（用于提取语种信息）
+    
+    let sourceLanguage, targetLanguages;
+    
+    if (hasQuotationDetails) {
+        // 如果有明细，从明细中提取源语种和目标语种
+        const sourceLanguagesSet = new Set();
+        const targetLanguagesSet = new Set();
+        
+        quotationDetailsContainer.querySelectorAll('[id^="edit-quotation-detail-"]').forEach(row => {
+            const sourceLangSelect = row.querySelector('.detail-source-language');
+            const targetLangSelect = row.querySelector('.detail-target-language');
+            if (sourceLangSelect && sourceLangSelect.value) {
+                sourceLanguagesSet.add(sourceLangSelect.value);
+            }
+            if (targetLangSelect && targetLangSelect.value) {
+                targetLanguagesSet.add(targetLangSelect.value);
+            }
+        });
+        
+        if (sourceLanguagesSet.size === 0) {
+            alert('请至少填写一个报价明细的源语种');
+            return;
+        }
+        if (targetLanguagesSet.size === 0) {
+            alert('请至少填写一个报价明细的目标语种');
+            return;
+        }
+        
+        sourceLanguage = Array.from(sourceLanguagesSet)[0]; // 使用第一个源语种
+        targetLanguages = Array.from(targetLanguagesSet);
+    } else {
+        // 如果没有明细，从表单中获取，并恢复显示
+        const sourceLanguageSelect = document.getElementById('editSourceLanguageSelect');
+        if (sourceLanguageSelect) {
+            sourceLanguageSelect.style.display = '';
+            // 移除隐藏字段
+            const hiddenInput = document.getElementById('hiddenEditSourceLanguage');
+            if (hiddenInput) hiddenInput.remove();
+        }
+        // 移除所有隐藏的目标语种字段并恢复显示
+        document.querySelectorAll('[id^="hiddenEditTargetLanguage_"]').forEach(el => el.remove());
+        document.querySelectorAll('#editTargetLanguagesContainer .target-language-select').forEach(select => {
+            select.style.display = '';
+        });
+        
+        sourceLanguage = formData.get('sourceLanguage');
+        const targetLanguageRows = document.querySelectorAll('#editTargetLanguagesContainer .target-language-select');
+        targetLanguages = Array.from(targetLanguageRows)
+            .map(select => select.value)
+            .filter(value => value && value.trim() !== '');
+        
+        if (!sourceLanguage) {
+            alert('请选择源语种');
+            return;
+        }
+        if (targetLanguages.length === 0) {
+            alert('请至少添加并选择一个目标语种');
+            return;
+        }
     }
     const editPartTimeSalesEnabled = formData.get('partTimeSales.isPartTime') === 'on';
     const editPartTimeSales = editPartTimeSalesEnabled ? {
@@ -1362,7 +2437,7 @@ export async function updateProject(e, projectId) {
         projectName: formData.get('projectName'),
         businessType: formData.get('businessType'),
         projectType: formData.get('projectType'),
-        sourceLanguage: formData.get('sourceLanguage'),
+        sourceLanguage: sourceLanguage,
         targetLanguages: targetLanguages,
         wordCount: formData.get('wordCount') ? parseFloat(formData.get('wordCount')) : undefined,
         unitPrice: formData.get('unitPrice') ? parseFloat(formData.get('unitPrice')) : undefined,
@@ -1382,6 +2457,36 @@ export async function updateProject(e, projectId) {
         partTimeSales: editPartTimeSales,
         partTimeLayout: editPartTimeLayout
     };
+
+    // 收集报价明细
+    const editDetailsContainer = document.getElementById('editQuotationDetailsContainer');
+    if (editDetailsContainer) {
+        const quotationDetails = [];
+        const detailRows = editDetailsContainer.querySelectorAll('[id^="edit-quotation-detail-"]');
+        detailRows.forEach(row => {
+            const filename = row.querySelector('.detail-filename')?.value?.trim();
+            const sourceLanguage = row.querySelector('.detail-source-language')?.value?.trim();
+            const targetLanguage = row.querySelector('.detail-target-language')?.value?.trim();
+            const wordCount = parseFloat(row.querySelector('.detail-word-count')?.value) || 0;
+            const unitPrice = parseFloat(row.querySelector('.detail-unit-price')?.value) || 0;
+            const amount = parseFloat(row.querySelector('.detail-amount')?.value) || 0;
+            
+            if (filename && sourceLanguage && targetLanguage && wordCount > 0 && unitPrice > 0) {
+                quotationDetails.push({
+                    filename,
+                    sourceLanguage,
+                    targetLanguage,
+                    wordCount,
+                    unitPrice,
+                    amount
+                });
+            }
+        });
+        if (quotationDetails.length > 0) {
+            payload.quotationDetails = quotationDetails;
+        }
+    }
+
     try {
         const res = await apiFetch(`/projects/${projectId}`, {
             method: 'PUT',
@@ -1740,8 +2845,9 @@ export async function viewProject(projectId) {
                             ` : ''}
                             ${(project.status === 'in_progress' || project.status === 'scheduled' || project.status === 'translation_done' || project.status === 'review_done' || project.status === 'layout_done') && canDeliver ? `<button class="btn-small btn-success" data-click="finishProject('${projectId}')">交付项目</button>` : ''}
                             ${canEditDeleteExport ? `
-                              <button class="btn-small" data-click="exportProjectQuotation('${projectId}')" style="background: #10b981;">📄 导出报价单</button>
-                              ${canExportContract ? `<button class="btn-small" data-click="exportProjectContract('${projectId}')" style="background: #0ea5e9; color: white;">📄 导出合同</button>` : ''}
+                              <button class="btn-small" data-click="exportProjectQuotation('${projectId}')" style="background: #10b981; margin-right: 5px;">📄 报价单(Excel)</button>
+                              <button class="btn-small" data-click="exportProjectQuotationWord('${projectId}')" style="background: #3b82f6; margin-right: 5px;">📋 报价单(Word)</button>
+                              ${canExportContract ? `<button class="btn-small" data-click="exportProjectContract('${projectId}')" style="background: #0ea5e9; color: white; margin-right: 5px;">📄 导出合同</button>` : ''}
                               <button class="btn-small" data-click="showEditProjectModal()">编辑项目</button>
                               <button class="btn-small btn-danger" data-click="deleteProject('${projectId}')">删除项目</button>
                             ` : ''}
@@ -2005,6 +3111,63 @@ export async function exportProjectQuotation(projectId) {
     } catch (error) {
         console.error('导出报价单失败:', error);
         alert('导出失败: ' + error.message);
+    }
+}
+
+// 导出项目报价单（Word 格式，支持明细）
+export async function exportProjectQuotationWord(projectId) {
+    try {
+        const response = await apiFetch(`/projects/${projectId}/quotation/word`, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            }
+        });
+
+        if (!response.ok) {
+            let msg = '导出报价单失败';
+            try {
+                const err = await response.json();
+                msg = err.message || err.error?.message || msg;
+            } catch (e) {
+                msg = response.statusText || msg;
+            }
+            showToast(msg, 'error');
+            return;
+        }
+
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = '报价单.docx';
+        if (contentDisposition) {
+            const utf8Match = contentDisposition.match(/filename\\*=UTF-8''(.+)/);
+            if (utf8Match?.[1]) {
+                try { filename = decodeURIComponent(utf8Match[1]); } catch (e) { filename = utf8Match[1]; }
+            } else {
+                const matches = contentDisposition.match(/filename[^;=\\n]*=((['\"]).*?\\2|[^;\\n]*)/);
+                if (matches?.[1]) {
+                    filename = matches[1].replace(/['"]/g, '');
+                    try { filename = decodeURIComponent(filename); } catch (e) { /* ignore */ }
+                }
+            }
+        }
+
+        const blob = await response.blob();
+        if (!blob || blob.size === 0) {
+            showToast('导出的文件为空，请重试', 'error');
+            return;
+        }
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        showToast('报价单导出成功', 'success');
+    } catch (error) {
+        console.error('导出报价单失败:', error);
+        showToast('导出报价单失败: ' + error.message, 'error');
     }
 }
 

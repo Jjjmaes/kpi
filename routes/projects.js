@@ -8,6 +8,7 @@ const KpiConfig = require('../models/KpiConfig');
 const Customer = require('../models/Customer');
 const User = require('../models/User');
 const { exportProjectQuotation } = require('../services/excelService');
+const { generateProjectQuotation } = require('../services/quotationService');
 const { createNotification, createNotificationsForUsers, NotificationTypes } = require('../services/notificationService');
 const { getUserProjectIds } = require('../utils/projectUtils');
 const { generateProjectContract } = require('../services/contractService');
@@ -47,6 +48,7 @@ const editableFields = [
   'targetLanguages',
   'wordCount',
   'unitPrice',
+  'quotationDetails',
   'projectAmount',
   'deadline',
   'payment.expectedAt',
@@ -797,6 +799,92 @@ router.get('/:id/quotation', authenticate, asyncHandler(async (req, res) => {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   // 使用encodeURIComponent确保中文文件名正确编码
   const filename = encodeURIComponent(`报价单-${project.projectNumber || project.projectName}.xlsx`);
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+  res.send(buffer);
+}));
+
+// 导出项目报价单（Word 格式，支持明细）
+router.get('/:id/quotation/word', authenticate, asyncHandler(async (req, res) => {
+  const project = await Project.findById(req.params.id)
+    .populate('customerId', 'name shortName contactPerson phone email address')
+    .populate('createdBy', 'name username email phone');
+  
+  if (!project) {
+    throw new AppError('项目不存在', 404, 'PROJECT_NOT_FOUND');
+  }
+  
+  // 检查权限：创建者、管理员、销售、兼职销售、财务可以导出
+  const isCreator = project.createdBy._id.toString() === req.user._id.toString();
+  const isAdmin = req.user.roles.includes('admin');
+  const isFinance = req.user.roles.includes('finance');
+  const isSales = req.user.roles.includes('sales');
+  const isPartTimeSales = req.user.roles.includes('part_time_sales');
+  const isPM = req.user.roles.includes('pm');
+  
+  // 角色维度的导出权限：管理员 / 财务 / 销售 / 兼职销售（非创建者时，如果同时是 PM，则不允许）
+  const canViewByRole = (isAdmin || isFinance || isSales || isPartTimeSales) && !isPM;
+  // 创建者始终可以导出，与是否同时是 PM 无关
+  const canView = isCreator || canViewByRole;
+  
+  if (!canView) {
+    throw new AppError('无权导出此项目的报价单', 403, 'PERMISSION_DENIED');
+  }
+  
+  // 生成报价单文档（Word 格式）
+  const buffer = await generateProjectQuotation(project);
+  
+  if (!buffer || !Buffer.isBuffer(buffer)) {
+    throw new AppError('生成的文件数据无效', 500, 'EXPORT_ERROR');
+  }
+  
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  // 使用encodeURIComponent确保中文文件名正确编码
+  const filename = encodeURIComponent(`报价单-${project.projectNumber || project.projectName}.docx`);
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+  res.send(buffer);
+}));
+
+// 导出项目合同
+router.get('/:id/contract', authenticate, asyncHandler(async (req, res) => {
+  const project = await Project.findById(req.params.id)
+    .populate('customerId', 'name shortName contactPerson phone email address')
+    .populate('createdBy', 'name username email');
+  
+  if (!project) {
+    throw new AppError('项目不存在', 404, 'PROJECT_NOT_FOUND');
+  }
+  
+  // 检查权限：创建者、管理员、销售、兼职销售、财务、项目经理可以导出
+  const isCreator = project.createdBy._id.toString() === req.user._id.toString();
+  const isAdmin = req.user.roles.includes('admin');
+  const isFinance = req.user.roles.includes('finance');
+  const isSales = req.user.roles.includes('sales');
+  const isPartTimeSales = req.user.roles.includes('part_time_sales');
+  const isPM = req.user.roles.includes('pm');
+  
+  // 角色维度的导出权限：管理员 / 财务 / 销售 / 兼职销售 / 项目经理
+  const canViewByRole = isAdmin || isFinance || isSales || isPartTimeSales || isPM;
+  // 创建者始终可以导出
+  const canView = isCreator || canViewByRole;
+  
+  if (!canView) {
+    throw new AppError('无权导出此项目的合同', 403, 'PERMISSION_DENIED');
+  }
+  
+  // 获取项目成员列表
+  const members = await ProjectMember.find({ projectId: project._id })
+    .populate('userId', 'name username email phone');
+  
+  // 生成合同文档
+  const buffer = await generateProjectContract(project, members);
+  
+  if (!buffer || !Buffer.isBuffer(buffer)) {
+    throw new AppError('生成的文件数据无效', 500, 'EXPORT_ERROR');
+  }
+  
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  // 使用encodeURIComponent确保中文文件名正确编码
+  const filename = encodeURIComponent(`合同-${project.projectNumber || project.projectName}.docx`);
   res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
   res.send(buffer);
 }));

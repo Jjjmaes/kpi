@@ -61,7 +61,8 @@ class ProjectService {
       needInvoice,
       specialRequirements,
       partTimeSales,
-      partTimeLayout
+      partTimeLayout,
+      quotationDetails
     } = data;
 
     // 去重并验证每个语言项
@@ -260,7 +261,8 @@ class ProjectService {
           receivedAmount: 0,
           isFullyPaid: false,
           paymentStatus: 'unpaid'
-        }
+        },
+        quotationDetails: quotationDetails && Array.isArray(quotationDetails) && quotationDetails.length > 0 ? quotationDetails : undefined
       },
       lockedRatios
     };
@@ -776,7 +778,8 @@ class ProjectService {
       'specialRequirements',
       'projectNumber',
       'partTimeSales',
-      'partTimeLayout'
+      'partTimeLayout',
+      'quotationDetails'
     ];
 
     // 过滤可修改字段

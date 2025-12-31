@@ -220,6 +220,47 @@ const projectSchema = new mongoose.Schema({
     },
     notes: String
   }],
+  // 报价明细（精确记录每个文件×语种的明细）
+  quotationDetails: [{
+    filename: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    sourceLanguage: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    targetLanguage: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    wordCount: {
+      type: Number,
+      required: true,
+      min: 0
+    },
+    unitPrice: {
+      type: Number,
+      required: true,
+      min: 0
+    },
+    amount: {
+      type: Number,
+      required: true,
+      min: 0
+    },
+    fileType: {
+      type: String,
+      trim: true
+    },
+    notes: {
+      type: String,
+      trim: true
+    }
+  }],
   // 项目证明文件（可选，用于财务）
   proofFiles: [{
     filename: String,

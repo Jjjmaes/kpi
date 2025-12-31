@@ -1,294 +1,367 @@
-const {
-  Document,
-  Packer,
-  Paragraph,
-  TextRun,
-  HeadingLevel,
-  AlignmentType,
-  TabStopType,
-  TabStopPosition
-} = require('docx');
+const Docxtemplater = require('docxtemplater');
+const PizZip = require('pizzip');
+const fs = require('fs').promises;
+const path = require('path');
 
 /**
- * 生成项目合同 Word 文档（基于用户提供的模板结构）
+ * 生成项目合同 Word 文档（基于 docxtemplater 模板）
  * @param {Object} project - 项目数据（包含 customerId, contactInfo 等）
  * @param {Array} members - 项目成员列表（已 populate userId）
  * @returns {Promise<Buffer>} docx 文件 Buffer
  */
 async function generateProjectContract(project, members = []) {
-  const vars = buildTemplateVariables(project, members);
-  const doc = new Document({
-    creator: 'KPI System',
-    title: '翻译服务合同',
-    description: '自动生成的翻译服务合同',
-    sections: [
-      {
-        properties: {
-          page: { margin: { top: 720, right: 720, bottom: 720, left: 720 } }
-        },
-        children: buildContractContent(project, members, vars)
-      }
-    ]
+  // 构建模板变量
+  const data = buildTemplateVariables(project, members);
+  
+  // 模板文件路径
+  const templatePath = path.join(__dirname, '..', 'templates', 'contract-template.docx');
+  
+  console.log('[ContractService] 开始生成合同:', {
+    projectId: project._id,
+    projectNumber: project.projectNumber,
+    templatePath,
   });
-
-  return await Packer.toBuffer(doc);
+  
+  try {
+    // 检查模板文件是否存在
+    try {
+      await fs.access(templatePath);
+    } catch (accessError) {
+      console.error('[ContractService] 模板文件不存在:', templatePath);
+      throw new Error(`合同模板文件不存在: ${templatePath}。请先创建模板文件。`);
+    }
+    
+    // 读取模板文件
+    const templateBuffer = await fs.readFile(templatePath);
+    console.log('[ContractService] 模板文件读取成功，大小:', templateBuffer.length, 'bytes');
+    
+    // 使用 PizZip 加载 docx 文件
+    let zip;
+    try {
+      zip = new PizZip(templateBuffer);
+    } catch (zipError) {
+      console.error('[ContractService] PizZip 加载失败:', zipError);
+      throw new Error(`模板文件格式错误，无法读取: ${zipError.message}`);
+    }
+    
+    // 创建 Docxtemplater 实例
+    let doc;
+    try {
+      doc = new Docxtemplater(zip, {
+        paragraphLoop: true,
+        linebreaks: true,
+        delimiters: {
+          start: '{',
+          end: '}',
+        },
+      });
+      
+      // 设置数据
+      doc.setData(data);
+      console.log('[ContractService] 变量设置成功，变量数量:', Object.keys(data).length);
+      
+    } catch (docError) {
+      console.error('[ContractService] Docxtemplater 初始化失败:', docError);
+      console.error('[ContractService] 错误详情:', JSON.stringify(docError, null, 2));
+      
+      // 提取所有错误详情
+      let errorDetails = `模板初始化失败: ${docError.message}`;
+      if (docError.properties && docError.properties.errors) {
+        errorDetails += '\n\n详细错误信息：\n';
+        docError.properties.errors.forEach((err, index) => {
+          errorDetails += `\n错误 ${index + 1}:\n`;
+          errorDetails += `  类型: ${err.name || 'Unknown'}\n`;
+          errorDetails += `  消息: ${err.message || 'N/A'}\n`;
+          if (err.properties) {
+            if (err.properties.explanation) {
+              errorDetails += `  说明: ${err.properties.explanation}\n`;
+            }
+            if (err.properties.context) {
+              errorDetails += `  上下文: ${JSON.stringify(err.properties.context)}\n`;
+            }
+            if (err.properties.tag) {
+              errorDetails += `  标签: ${err.properties.tag}\n`;
+            }
+            if (err.properties.id) {
+              errorDetails += `  错误ID: ${err.properties.id}\n`;
+            }
+            if (err.properties.location) {
+              errorDetails += `  位置: ${JSON.stringify(err.properties.location)}\n`;
+            }
+          }
+        });
+      }
+      
+      throw new Error(errorDetails);
+    }
+    
+    // 渲染文档（替换变量）
+    try {
+      doc.render();
+      console.log('[ContractService] 模板渲染成功');
+    } catch (error) {
+      // 处理模板错误
+      const e = {
+        message: error.message,
+        name: error.name,
+        stack: error.stack,
+        properties: error.properties,
+      };
+      console.error('[ContractService] 模板渲染错误:', JSON.stringify(e, null, 2));
+      
+      // 提取更详细的错误信息
+      let errorMessage = `模板渲染失败: ${e.message}`;
+      if (e.properties) {
+        if (e.properties.explanation) {
+          errorMessage += `\n说明: ${e.properties.explanation}`;
+        }
+        if (e.properties.context) {
+          errorMessage += `\n上下文: ${JSON.stringify(e.properties.context)}`;
+        }
+        if (e.properties.rootCause) {
+          errorMessage += `\n根本原因: ${e.properties.rootCause}`;
+        }
+      }
+      throw new Error(errorMessage);
+    }
+    
+    // 生成文档 Buffer
+    let buffer;
+    try {
+      buffer = doc.getZip().generate({
+        type: 'nodebuffer',
+        compression: 'DEFLATE',
+      });
+      console.log('[ContractService] 文档生成成功，大小:', buffer.length, 'bytes');
+    } catch (bufferError) {
+      console.error('[ContractService] 生成文档 Buffer 失败:', bufferError);
+      throw new Error(`生成文档失败: ${bufferError.message}`);
+    }
+    
+    return buffer;
+  } catch (error) {
+    console.error('[ContractService] 生成合同失败:', {
+      error: error.message,
+      stack: error.stack,
+      templatePath,
+    });
+    throw error;
+  }
 }
 
-function buildContractContent(project, members, vars) {
-  const reqs = project.specialRequirements || {};
-  const checklist = {
-    translation: checkmark(project.businessType === 'translation'),
-    interpretation: checkmark(project.businessType === 'interpretation'),
-    electronic: checkmark(true),
-    email: checkmark(true),
-    fax: checkmark(false),
-    print: checkmark(reqs.printSealExpress)
-  };
-
-  return [
-    heading1('翻译服务合同'),
-    boldLine(`编号：${vars.projectNumber}`),
-    separator(),
-    heading2('一、合同主体'),
-    twoCols('甲方（委托方）：', project.customerId?.name || project.clientName || '—'),
-    twoCols('地址：', vars.customerAddress),
-    twoCols('电话（Tel）：', vars.contactPhone),
-    twoCols('传真（Fax）：', '—'),
-    twoCols('邮编（Postal Code）：', '—'),
-    blankLine(),
-    twoCols('乙方（服务方）：', '上海语家信息科技有限公司'),
-    twoCols('地址：', '上海市浦东新盛荣路88弄1-206'),
-    twoCols('电话（Tel）：', '021-61984608'),
-    twoCols('传真（Fax）：', '—'),
-    twoCols('邮编（Postal Code）：', '200123'),
-    separator(),
-    paragraph('鉴于乙方具备专业翻译服务能力，甲方委托乙方就相关资料提供翻译服务。双方在平等、自愿、诚实信用的基础上，经协商一致，订立本合同，以兹共同遵守。'),
-    separator(),
-    heading2('二、项目说明'),
-    numbered('1.', '文稿名称（Title）：', project.projectName || '—'),
-    numbered('2.', '翻译类型：', `${checklist.interpretation} 口译    ${checklist.translation} 笔译`),
-    numbered('3.', '翻译语种：', `原语种：${project.sourceLanguage || '—'}    目标语种：${vars.targetLanguagesText}`),
-    numbered('4.', '交付时间：', `自合同签署并确认全部翻译资料之日起 ${vars.deliveryDaysText} 内完成交付。`),
-    numbered('5.', '字数及计价规则：', ''),
-    bullet('以原文字数为计价依据；'),
-    bullet('字数统计以 Microsoft Word 工具栏显示的“字数”为准；'),
-    bullet('页眉、页脚、文本框、图片、表格内容另行统计；'),
-    bullet('小件翻译规则：不足 500 字按 500 字计；超过 500 字不足 1000 字按 1000 字计；'),
-    bullet('证件翻译按“份”计价，价格另行约定。'),
-    separator(),
-    heading2('三、服务费用'),
-    paragraph(`笔译单价：${vars.unitPriceText}`),
-    paragraph(`资料总量：${vars.wordCountText}`),
-    paragraph(`翻译总费用：${vars.amountText}`),
-    paragraph('上述费用为双方确认的合同价款，除另有书面约定外，不因译者或流程调整发生变化。'),
-    separator(),
-    heading2('四、付款方式'),
-    paragraph('1. 付款安排：'),
-    bullet(`合同签订后乙方开始翻译，译文交付并验收后 ${vars.payDueDaysText} 内一次性支付尾款`),
-    paragraph('2. 乙方收款信息：'),
-    bullet('开户行：招商银行上海张江支行'),
-    bullet('账号：121924402310912'),
-    bullet('户名：上海语家信息科技有限公司'),
-    paragraph('3. 违约责任：'),
-    bullet('甲方逾期付款的，每日按应付未付金额的千分之五支付违约金；'),
-    bullet('乙方逾期交稿的，每日按未完成部分费用的千分之五支付违约金。'),
-    separator(),
-    heading2('五、中止翻译'),
-    paragraph('如甲方在翻译过程中要求中止项目，应按照乙方已完成的实际翻译字数，按合同单价向乙方支付相应费用。'),
-    separator(),
-    heading2('六、交付与验收'),
-    paragraph(`1. 交付方式（可多选）： ${checklist.electronic} 电子版    ${checklist.email} 电子邮件    ${checklist.fax} 传真    ${checklist.print} 打印稿`),
-    paragraph('2. 乙方应按约定时间及方式交付译稿。'),
-    paragraph('3. 甲方应在收到译稿之日起 3 个工作日内完成验收并反馈；超过 5 个工作日未提出异议的，视为验收合格。'),
-    paragraph('4. 验收合格或视为合格后，甲方应在 3 个工作日内完成尾款支付。'),
-    separator(),
-    heading2('七、质量标准与修改'),
-    paragraph('1. 乙方应遵循翻译行业通行质量标准完成服务，综合误差率 1.5‰ 属合理范围。'),
-    paragraph('2. 质量保证期：自交付之日起 30 日内，以下问题乙方应免费修改：'),
-    bullet('语法或拼写错误'),
-    bullet('名词、术语明显错误'),
-    bullet('排版或格式错误'),
-    paragraph('3. 翻译属于高度专业化智力劳动，语言风格具有一定主观性。乙方应保证译文忠实原文、准确、通顺、流畅。甲方不得仅因个人语言偏好拒稿、拖延付款或扣减费用。'),
-    paragraph('4. 质量异议：甲方须在收稿之日起 3 日内提出；乙方应及时免费修改直至符合约定标准；逾期未提出异议的，视为认可译文质量。'),
-    paragraph('5. 第三方评审：如双方无法就质量达成一致，可共同委托第三方评审：若译文不达标，甲方可退稿或要求重译；若评审合格，乙方不承担任何赔偿责任。'),
-    separator(),
-    heading2('八、知识产权'),
-    paragraph('1. 原文内容的合法性、真实性及版权责任由甲方自行承担。'),
-    paragraph('2. 在甲方支付全部费用后，译文的使用权归甲方所有。'),
-    paragraph('3. 未经甲方书面许可，乙方不得对外发布或使用译文。'),
-    separator(),
-    heading2('九、争议解决'),
-    paragraph('因本合同产生的任何争议，双方应先友好协商；协商不成的，提交上海仲裁委员会按其现行规则仲裁。仲裁裁决为终局，对双方均有约束力。'),
-    separator(),
-    heading2('十、不可抗力'),
-    paragraph('因法律政策变动、政府行为、战争、自然灾害、重大通信故障等不可抗力导致合同无法履行的，双方互不承担违约责任。'),
-    paragraph('受影响方应在 7 日内书面通知对方，并协商后续履约安排。'),
-    separator(),
-    heading2('十一、通知与送达'),
-    paragraph('双方通知可通过书面或电子方式送达至合同首页所列联系方式。'),
-    paragraph('联系方式变更方应在 3 日内书面通知对方，否则自行承担后果。'),
-    separator(),
-    heading2('十二、其他'),
-    bullet('未尽事宜，双方可另行签署补充协议，与本合同具有同等效力。'),
-    bullet('本合同一式两份，双方各执一份，扫描件/传真件有效。'),
-    bullet('中英文版本不一致的，以中文版本为准。'),
-    bullet('本合同自双方签字或盖章之日起生效。'),
-    separator(),
-    heading2('签署页'),
-    twoCols('甲方（盖章）：', ''),
-    twoCols('甲方经办人签字：', ''),
-    twoCols('日期：', ''),
-    blankLine(),
-    twoCols('乙方（盖章）：', ''),
-    twoCols('乙方经办人签字：', ''),
-    twoCols('日期：', '')
-  ];
-}
-
+/**
+ * 构建模板变量对象
+ * @param {Object} project - 项目数据
+ * @param {Array} members - 项目成员列表
+ * @returns {Object} 模板变量对象
+ */
 function buildTemplateVariables(project, members = []) {
   const contact = project.contactInfo || project.customerId || {};
-  const targetLanguagesText = (project.targetLanguages || []).join(', ') || '—';
+  const reqs = project.specialRequirements || {};
+  
+  // 辅助函数：确保值是字符串
+  const ensureString = (value) => {
+    if (value === null || value === undefined) return '—';
+    return String(value);
+  };
+  
+  // 格式化目标语种（过滤掉空值、null、undefined 和无效值）
+  const targetLanguages = (project.targetLanguages || [])
+    .filter(lang => lang && typeof lang === 'string' && lang.trim() !== '')
+    .map(lang => lang.trim())
+    .filter(lang => {
+      // 过滤掉明显不是语种的值（如角色代码、空字符串等）
+      const invalidPatterns = ['pm', 'sales', 'translator', 'reviewer', 'layout', 'admin', 'finance'];
+      const lowerLang = lang.toLowerCase();
+      return !invalidPatterns.includes(lowerLang) && lang.length > 0;
+    });
+  const targetLanguagesText = targetLanguages.length > 0 ? targetLanguages.join('、') : '—';
+  
+  // 格式化金额
   const amountText = project.projectAmount
     ? `人民币 ¥${Number(project.projectAmount).toFixed(2)}${project.isTaxIncluded ? '（含税）' : ''}`
     : '—';
+  
+  // 格式化单价
   const unitPriceText = project.unitPrice ? `¥${Number(project.unitPrice).toFixed(2)} / 千字` : '—';
+  
+  // 格式化字数
   const wordCountText = project.wordCount ? `${project.wordCount} 字` : '—';
+  
+  // 计算交付天数
   const deliveryDaysText = project.deadline ? daysFromNow(project.deadline) : '—';
+  
+  // 计算付款天数
   const payDueDaysText = project.expectedAt
     ? daysFromNow(project.expectedAt)
     : (project.payment && project.payment.expectedAt ? daysFromNow(project.payment.expectedAt) : '—');
+  
+  // 格式化日期
   const deadlineText = project.deadline ? formatDate(project.deadline) : '—';
   const payDueDateText = project.expectedAt
     ? formatDate(project.expectedAt)
     : (project.payment && project.payment.expectedAt ? formatDate(project.payment.expectedAt) : '—');
-  const paymentStatusText = project.payment && project.payment.paymentStatus ? project.payment.paymentStatus : '—';
-  const reqs = project.specialRequirements || {};
-
-  return {
-    projectNumber: project.projectNumber || '—',
-    customerAddress: (project.customerId && project.customerId.address) || '—',
-    contactName: contact.name || project.customerId?.contactPerson || '—',
-    contactPhone: contact.phone || project.customerId?.phone || '—',
-    contactEmail: contact.email || project.customerId?.email || '—',
-    businessTypeText: businessTypeLabel(project.businessType),
-    projectTypeText: projectTypeLabel(project.projectType),
-    targetLanguagesText,
-    wordCountText,
-    unitPriceText,
-    amountText,
-    deadlineText,
-    payDueDateText,
-    deliveryDaysText,
-    payDueDaysText,
+  
+  // 业务类型和项目类型
+  const businessTypeText = businessTypeLabel(project.businessType);
+  const projectTypeText = projectTypeLabel(project.projectType);
+  
+  // 翻译类型复选框（布尔值）
+  const isTranslation = project.businessType === 'translation';
+  const isInterpretation = project.businessType === 'interpretation';
+  
+  // 交付方式复选框（布尔值）
+  const hasElectronic = true; // 默认电子版
+  const hasEmail = true; // 默认电子邮件
+  const hasFax = false;
+  const hasPrint = reqs.printSealExpress || false;
+  
+  // 格式化项目成员列表（用于循环）
+  const formattedMembers = (members || []).map(member => {
+    if (!member) return null;
+    return {
+      role: ensureString(getRoleName(member.role)),
+      name: ensureString(member.userId?.name),
+      username: ensureString(member.userId?.username),
+      email: ensureString(member.userId?.email),
+      phone: ensureString(member.userId?.phone),
+    };
+  }).filter(m => m !== null); // 过滤掉 null 值
+  
+  // 构建返回对象，确保所有值都是字符串或基本类型
+  const variables = {
+    // 基本信息（字符串）
+    projectNumber: ensureString(project.projectNumber),
+    projectName: ensureString(project.projectName),
+    sourceLanguage: ensureString(project.sourceLanguage),
+    targetLanguagesText: ensureString(targetLanguagesText),
+    
+    // 客户信息（字符串）
+    customerName: ensureString(project.customerId?.name || project.clientName),
+    customerAddress: ensureString(project.customerId?.address),
+    contactName: ensureString(contact.name || project.customerId?.contactPerson),
+    contactPhone: ensureString(contact.phone || project.customerId?.phone),
+    contactEmail: ensureString(contact.email || project.customerId?.email),
+    
+    // 乙方信息（项目创建者）
+    creatorEmail: ensureString(project.createdBy?.email),
+    creatorName: ensureString(project.createdBy?.name),
+    
+    // 业务信息（字符串）
+    businessTypeText: ensureString(businessTypeText),
+    projectTypeText: ensureString(projectTypeText),
+    
+    // 翻译类型（布尔值，用于条件判断）
+    isTranslation: Boolean(isTranslation),
+    isInterpretation: Boolean(isInterpretation),
+    
+    // 费用信息（字符串）
+    unitPriceText: ensureString(unitPriceText),
+    wordCountText: ensureString(wordCountText),
+    amountText: ensureString(amountText),
     taxIncludedText: project.isTaxIncluded ? '含税' : '不含税',
-    paymentStatusText,
+    
+    // 时间信息（字符串）
+    deadlineText: ensureString(deadlineText),
+    deliveryDaysText: ensureString(deliveryDaysText),
+    payDueDateText: ensureString(payDueDateText),
+    payDueDaysText: ensureString(payDueDaysText),
+    
+    // 付款信息（字符串）- 转换为中文
+    paymentStatusText: paymentStatusToChinese(project.payment?.paymentStatus),
+    
+    // 交付方式（布尔值，用于条件判断）
+    hasElectronic: Boolean(hasElectronic),
+    hasEmail: Boolean(hasEmail),
+    hasFax: Boolean(hasFax),
+    hasPrint: Boolean(hasPrint),
+    
+    // 特殊要求（字符串）
     terminologyText: boolText(reqs.terminology),
     referenceFilesText: boolText(reqs.referenceFiles),
     bilingualDeliveryText: boolText(reqs.bilingualDelivery),
     pureTranslationDeliveryText: boolText(reqs.pureTranslationDelivery),
     printSealExpressText: boolText(reqs.printSealExpress),
-    notesText: reqs.notes || '无',
-    members
+    notesText: ensureString(reqs.notes || '无'),
+    
+    // 项目成员（数组，用于循环）
+    members: formattedMembers,
+    hasMembers: Boolean(formattedMembers.length > 0),
   };
+  
+  return variables;
 }
 
-function heading1(text) {
-  return new Paragraph({
-    text,
-    heading: HeadingLevel.HEADING_1,
-    alignment: AlignmentType.CENTER,
-    spacing: { after: 200 }
-  });
+/**
+ * 获取角色名称
+ */
+function getRoleName(roleCode) {
+  const roleMap = {
+    pm: '项目经理',
+    translator: '翻译',
+    reviewer: '审校',
+    layout: '排版',
+    sales: '销售',
+    part_time_translator: '兼职翻译',
+    part_time_sales: '兼职销售',
+  };
+  return roleMap[roleCode] || roleCode;
 }
 
-function heading2(text) {
-  return new Paragraph({
-    text,
-    heading: HeadingLevel.HEADING_2,
-    spacing: { before: 200, after: 100 }
-  });
+/**
+ * 将付款状态转换为中文
+ * @param {String} status - 付款状态（英文）
+ * @returns {String} 中文状态
+ */
+function paymentStatusToChinese(status) {
+  if (!status) return '—';
+  
+  const statusMap = {
+    'paid': '已支付',
+    'partially_paid': '部分支付',
+    'unpaid': '未支付',
+  };
+  
+  return statusMap[status] || status;
 }
 
-function paragraph(text) {
-  return new Paragraph({
-    text,
-    spacing: { after: 120 }
-  });
-}
-
-function boldLine(text) {
-  return new Paragraph({
-    children: [new TextRun({ text, bold: true })],
-    spacing: { after: 120 }
-  });
-}
-
-function blankLine() {
-  return new Paragraph({ text: '', spacing: { after: 120 } });
-}
-
-function numbered(no, title, value) {
-  return new Paragraph({
-    children: [
-      new TextRun({ text: `${no} ${title}`, bold: true }),
-      new TextRun({ text: value ? ` ${value}` : '' })
-    ],
-    spacing: { after: 120 }
-  });
-}
-
-function bullet(text) {
-  return new Paragraph({
-    text: text || '',
-    bullet: { level: 0 },
-    spacing: { after: 60 }
-  });
-}
-
-function twoCols(label, value) {
-  return new Paragraph({
-    tabStops: [{ type: TabStopType.LEFT, position: TabStopPosition.MAX }],
-    children: [
-      new TextRun({ text: label, bold: true }),
-      new TextRun({ text: '\t' + (value || '—') })
-    ],
-    spacing: { after: 80 }
-  });
-}
-
-function separator() {
-  return new Paragraph({ text: '---', spacing: { after: 160 } });
-}
-
+/**
+ * 布尔值转文本
+ */
 function boolText(flag) {
   return flag ? '是' : '否';
 }
 
-function checkmark(condition) {
-  return condition ? '[x]' : '[ ]';
-}
-
+/**
+ * 业务类型标签
+ */
 function businessTypeLabel(code) {
   const map = {
     translation: '笔译',
     interpretation: '口译',
     transcription: '转录',
     localization: '本地化',
-    other: '其他'
+    other: '其他',
   };
   return map[code] || '—';
 }
 
+/**
+ * 项目类型标签
+ */
 function projectTypeLabel(code) {
   const map = {
     mtpe: 'MTPE',
     deepedit: '深度编辑',
     review: '审校',
-    mixed: '综合'
+    mixed: '综合',
   };
   return map[code] || '—';
 }
 
+/**
+ * 计算从今天到指定日期的天数
+ */
 function daysFromNow(date) {
   const d = new Date(date);
   const now = new Date();
@@ -296,6 +369,9 @@ function daysFromNow(date) {
   return diff > 0 ? `${diff} 个工作日` : '—';
 }
 
+/**
+ * 格式化日期
+ */
 function formatDate(value) {
   if (!value) return '—';
   const d = new Date(value);
@@ -307,6 +383,5 @@ function formatDate(value) {
 }
 
 module.exports = {
-  generateProjectContract
+  generateProjectContract,
 };
-

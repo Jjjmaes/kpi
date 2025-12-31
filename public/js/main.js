@@ -8,7 +8,7 @@ import { showSection, closeModal } from './core/ui.js';
 // 导入业务模块
 import { initAuth, checkAuth, showLogin, showMainApp, logout, bindAuthEvents, submitForcePasswordChange } from './modules/auth.js';
 import { loadDashboard, navigateFromDashboardCard, initDashboard, updateDashboardMonth } from './modules/dashboard.js';
-import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectPayments, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, acceptMember, rejectMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, exportProjectContract, createProject, updateProject, setLayoutCost, addMember, showAddMemberModal, showPaymentModalForProject, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter, showAddMemberModalForCreate, addMemberForCreate, removeCreateProjectMember, toggleCreateTranslatorFields, filterCreateUsersByRole, validateCreateMemberLayoutCost, updateCreateProjectMembersList, onMemberRoleChange, onCreateMemberRoleChange, onMemberUserChange, onCreateMemberUserChange, toggleTranslatorFields, filterUsersByRole, validateAddMemberLayoutCost, closeAddMemberModalAndReturnToCreate, addInlineMemberForCreate, onInlineCreateMemberRoleChange, filterInlineCreateUsersByRole, validateInlineCreateMemberLayoutCost, quickRequestInvoice, viewProjectInvoiceRequest, selectAllProjectsForInvoice, deselectAllProjectsForInvoice, batchRequestInvoice, toggleProjectForInvoice, toggleSelectAllProjects, initProjectRoleFilter, onProjectRoleFilterChange, removeProjectAttachment, removeAddMemberAttachment, showDeliveryModal, removeDeliveryAttachment, submitDelivery, removeFinalDeliveryAttachment, submitFinalDelivery, showPmDeliveryModal, removePmDeliveryAttachment, submitPmDelivery } from './modules/project.js';
+import { loadProjects, renderProjects, exportProjects, showCreateProjectModal, showEditProjectModal, viewProject, deleteProject, startProject, updateProjectStatus, addProjectPayment, addProjectInvoice, loadProjectPayments, loadProjectInvoices, loadRealtimeKPI, setRevision, setDelay, setComplaint, finishProject, deleteMember, acceptMember, rejectMember, addTargetLanguageRow, removeTargetLanguageRow, addEditTargetLanguageRow, removeEditTargetLanguageRow, showSetLayoutCostModal, exportProjectQuotation, exportProjectQuotationWord, exportProjectContract, createProject, updateProject, setLayoutCost, addMember, showAddMemberModal, showPaymentModalForProject, toggleProjectFields, calculateAmount, togglePartTimeSalesFields, calculatePartTimeSalesCommission, validateLayoutCost, toggleEditPartTimeSalesFields, calculateEditPartTimeSalesCommission, validateEditLayoutCost, jumpProjectPage, prevProjectPage, nextProjectPage, fillFinanceFilters, fillProjectCustomerFilter, showAddMemberModalForCreate, addMemberForCreate, removeCreateProjectMember, toggleCreateTranslatorFields, filterCreateUsersByRole, validateCreateMemberLayoutCost, updateCreateProjectMembersList, onMemberRoleChange, onCreateMemberRoleChange, onMemberUserChange, onCreateMemberUserChange, toggleTranslatorFields, filterUsersByRole, validateAddMemberLayoutCost, closeAddMemberModalAndReturnToCreate, addInlineMemberForCreate, onInlineCreateMemberRoleChange, filterInlineCreateUsersByRole, validateInlineCreateMemberLayoutCost, quickRequestInvoice, viewProjectInvoiceRequest, selectAllProjectsForInvoice, deselectAllProjectsForInvoice, batchRequestInvoice, toggleProjectForInvoice, toggleSelectAllProjects, initProjectRoleFilter, onProjectRoleFilterChange, removeProjectAttachment, removeAddMemberAttachment, showDeliveryModal, removeDeliveryAttachment, submitDelivery, removeFinalDeliveryAttachment, submitFinalDelivery, showPmDeliveryModal, removePmDeliveryAttachment, submitPmDelivery, addQuotationDetailRow, removeQuotationDetailRow, updateQuotationDetailAmount, updateQuotationDetailsSummary, addEditQuotationDetailRow, removeEditQuotationDetailRow, updateEditQuotationDetailAmount, updateEditQuotationDetailsSummary } from './modules/project.js';
 import { loadCustomers, searchCustomers, showCreateCustomerModal, showCreateCustomerModalFromProject, editCustomer, deleteCustomer, createCustomer, updateCustomer, updateCustomerInfo, addCustomerContactRow, removeCustomerContactRow } from './modules/customer.js';
 import { loadKPI, exportKPI, generateMonthlyKPI, showEvaluateModal, submitEvaluation, loadMyKpiConfirmations, confirmKpiRecord, disputeKpiRecord } from './modules/kpi.js';
 import { loadReceivables, renderReceivables, exportReceivables, loadInvoiceProjects, renderInvoiceProjects, addInvoice, addInvoiceForProject, loadPaymentRecordsProjects, renderPaymentRecordsProjects, addPaymentRecord, addPaymentRecordForProject, loadPaymentRecords, clearPaymentRecordFilter, showFinanceSection, loadFinanceSummary, exportFinanceSummary, loadPendingKpi, reviewKpiRecord, rejectKpiRecord, batchReviewKpiRecords, selectAllPendingKpi, deselectAllPendingKpi, toggleSelectAllPendingKpi, loadReconciliation, exportReconciliation, togglePaymentRecords, toggleInvoiceRecords, clearPaymentRecordsFilters, removePaymentRecord, jumpReceivablePage, prevReceivablePage, nextReceivablePage, jumpPaymentRecordsProjectsPage, prevPaymentRecordsProjectsPage, nextPaymentRecordsProjectsPage, jumpInvoiceProjectsPage, prevInvoiceProjectsPage, nextInvoiceProjectsPage, backToFinanceNav, showProjectSelector, filterProjectSelector, selectProject, loadInvoiceRequests, renderInvoiceRequests, loadMyInvoiceRequests, renderMyInvoiceRequests, viewInvoiceRequest, approveInvoiceRequest, rejectInvoiceRequest, deleteInvoiceRequest, showCreateInvoiceRequestModal, jumpInvoiceRequestPage, prevInvoiceRequestPage, nextInvoiceRequestPage, jumpMyInvoiceRequestPage, prevMyInvoiceRequestPage, nextMyInvoiceRequestPage, handlePaymentMethodChange } from './modules/finance.js';
@@ -554,6 +554,7 @@ const ACTIONS = Object.freeze({
     rejectMember: (projectId, memberId) => rejectMember(projectId, memberId),
     onProjectRoleFilterChange: () => onProjectRoleFilterChange(),
     exportProjectQuotation: (id) => exportProjectQuotation(id),
+    exportProjectQuotationWord: (id) => exportProjectQuotationWord(id),
     exportProjectContract: (id) => exportProjectContract(id),
     showSetLayoutCostModal: (projectId) => showSetLayoutCostModal(projectId),
 
@@ -562,6 +563,16 @@ const ACTIONS = Object.freeze({
     removeTargetLanguageRow: (idx) => removeTargetLanguageRow(idx),
     addEditTargetLanguageRow: () => addEditTargetLanguageRow(),
     removeEditTargetLanguageRow: (idx) => removeEditTargetLanguageRow(idx),
+    
+    // Quotation details
+    addQuotationDetailRow: () => addQuotationDetailRow(),
+    removeQuotationDetailRow: (rowId) => removeQuotationDetailRow(rowId),
+    updateQuotationDetailAmount: (rowId) => updateQuotationDetailAmount(rowId),
+    updateQuotationDetailsSummary: () => updateQuotationDetailsSummary(),
+    addEditQuotationDetailRow: (detail) => addEditQuotationDetailRow(detail),
+    removeEditQuotationDetailRow: (rowId) => removeEditQuotationDetailRow(rowId),
+    updateEditQuotationDetailAmount: (rowId) => updateEditQuotationDetailAmount(rowId),
+    updateEditQuotationDetailsSummary: () => updateEditQuotationDetailsSummary(),
 
     // Project form handlers
     createProject: (event) => createProject(event),
@@ -595,6 +606,9 @@ const ACTIONS = Object.freeze({
     togglePartTimeSalesFields: () => togglePartTimeSalesFields(),
     calculatePartTimeSalesCommission: () => calculatePartTimeSalesCommission(),
     validateLayoutCost: () => validateLayoutCost(),
+    toggleEditPartTimeSalesFields: () => toggleEditPartTimeSalesFields(),
+    calculateEditPartTimeSalesCommission: () => calculateEditPartTimeSalesCommission(),
+    validateEditLayoutCost: () => validateEditLayoutCost(),
     updateCustomerInfo: () => updateCustomerInfo(),
     jumpProjectPage: (val, total) => jumpProjectPage(val, total),
     prevProjectPage: () => prevProjectPage(),
