@@ -1070,7 +1070,7 @@ export async function showCreateProjectModal() {
                 <label style="display: block; margin-bottom: 8px; font-weight: 500;">项目附件（可选）</label>
                 <input type="file" id="projectAttachments" multiple style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" accept="*/*">
                 <small style="color: #666; font-size: 12px; display: block; margin-top: 4px;">
-                    可上传多个文件，总大小不超过 20MB。附件将通过邮件发送给项目成员，不会保存到服务器。
+                    可上传多个文件，总大小不超过 15MB（Base64 编码后约为 20MB）。附件将通过邮件发送给项目成员，不会保存到服务器。
                 </small>
                 <div id="projectAttachmentsList" style="margin-top: 10px; font-size: 12px; color: #666;"></div>
             </div>
@@ -1588,23 +1588,25 @@ export async function createProject(e) {
     }
     
     // 处理附件：将文件转换为 base64
+    // 注意：Base64 编码会使文件大小增加约 33%，所以前端限制需要更小
+    // 建议限制为 15MB，Base64 编码后约为 20MB，加上其他数据总大小约 25-30MB
     const attachmentsInput = document.getElementById('projectAttachments');
     let attachments = null;
     if (attachmentsInput && attachmentsInput.files && attachmentsInput.files.length > 0) {
         const files = Array.from(attachmentsInput.files);
-        const maxSize = 20 * 1024 * 1024; // 20MB
+        const maxSize = 15 * 1024 * 1024; // 15MB（Base64 编码后约 20MB）
         let totalSize = 0;
         
         // 检查文件大小
         for (const file of files) {
             totalSize += file.size;
             if (file.size > maxSize) {
-                showToast(`文件 "${file.name}" 超过 20MB 限制`, 'error');
+                showToast(`文件 "${file.name}" 超过 15MB 限制（Base64 编码后约为 20MB）`, 'error');
                 return;
             }
         }
         if (totalSize > maxSize) {
-            showToast(`所有附件总大小超过 20MB 限制`, 'error');
+            showToast(`所有附件总大小不超过 15MB 限制（Base64 编码后约为 20MB）`, 'error');
             return;
         }
         
@@ -1685,22 +1687,68 @@ export async function createProject(e) {
         }
     }
 
+    // 计算请求体大小（用于调试）
+    const requestBody = JSON.stringify(data);
+    const requestBodySize = new Blob([requestBody]).size;
+    const requestBodySizeMB = (requestBodySize / (1024 * 1024)).toFixed(2);
+    console.log('[createProject] 请求体大小:', requestBodySizeMB, 'MB');
+    console.log('[createProject] 附件数量:', attachments ? attachments.length : 0);
+    if (attachments && attachments.length > 0) {
+        attachments.forEach((att, index) => {
+            const attSize = (att.content.length * 3 / 4) / (1024 * 1024); // Base64 解码后大小
+            console.log(`[createProject] 附件 ${index + 1} (${att.filename}): ${attSize.toFixed(2)} MB (Base64: ${(att.content.length / (1024 * 1024)).toFixed(2)} MB)`);
+        });
+    }
+    console.log('[createProject] 报价明细数量:', data.quotationDetails ? data.quotationDetails.length : 0);
+
     try {
         const response = await apiFetch('/projects/create', {
             method: 'POST',
-            body: JSON.stringify(data)
+            body: requestBody
         });
-        const result = await response.json();
+
+        // 检查响应状态
+        if (response.status === 413) {
+            console.error('[createProject] 413 错误 - 请求体大小:', requestBodySizeMB, 'MB');
+            showToast(`请求数据过大 (${requestBodySizeMB}MB)。请减少附件大小或联系管理员检查服务器配置（Nginx client_max_body_size）。`, 'error');
+            return;
+        }
+
+        // 尝试解析 JSON 响应
+        let result;
+        try {
+            const text = await response.text();
+            if (!text) {
+                throw new Error('服务器返回空响应');
+            }
+            result = JSON.parse(text);
+        } catch (parseError) {
+            // 如果不是 JSON 响应，可能是错误页面或纯文本错误
+            console.error('[createProject] 响应解析失败:', parseError);
+            console.error('[createProject] 响应状态:', response.status);
+            console.error('[createProject] 响应文本前500字符:', text.substring(0, 500));
+            if (response.status >= 400) {
+                showToast(`创建失败: 服务器错误 (${response.status})。请求体大小: ${requestBodySizeMB}MB。如果包含附件，可能是文件过大或服务器配置限制。`, 'error');
+            } else {
+                showToast('创建失败: 服务器响应格式错误', 'error');
+            }
+            return;
+        }
         
         if (result.success) {
             closeModal();
             loadProjects();
             showToast('项目创建成功' + (members.length > 0 ? `，已添加 ${members.length} 名成员` : ''), 'success');
         } else {
-            alert(result.message);
+            showToast(result.message || '创建失败', 'error');
         }
     } catch (error) {
-        alert('创建失败: ' + error.message);
+        // 处理 413 错误
+        if (error.status === 413 || error.message.includes('413')) {
+            showToast('附件文件过大，请减少文件大小或数量。建议单个文件不超过 10MB，总大小不超过 15MB。', 'error');
+        } else {
+            showToast('创建失败: ' + (error.message || '未知错误'), 'error');
+        }
     }
 }
 

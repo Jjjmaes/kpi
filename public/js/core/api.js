@@ -31,8 +31,20 @@ export async function apiFetch(endpoint, options = {}) {
             }
             return response;
         }
+
+        // 处理请求体过大错误（413）
+        if (response.status === 413) {
+            const error = new Error('请求数据过大，请减少附件文件大小或数量。如果问题持续，请联系管理员检查服务器配置。');
+            error.status = 413;
+            throw error;
+        }
+
         return response;
     } catch (error) {
+        // 如果是我们抛出的 413 错误，直接抛出
+        if (error.status === 413) {
+            throw error;
+        }
         console.error('API Request Failed:', error);
         showToast('网络请求失败', 'error');
         throw error;
