@@ -4110,10 +4110,22 @@ async function addMember(e, projectId) {
             }
             showToast('成员添加成功', 'success');
         } else {
-            showToast(result.message, 'error');
+            // 处理错误信息：可能是 result.message 或 result.error.message
+            let errorMessage = '添加失败';
+            if (result.message) {
+                errorMessage = result.message;
+            } else if (result.error) {
+                if (typeof result.error === 'string') {
+                    errorMessage = result.error;
+                } else if (result.error.message) {
+                    errorMessage = result.error.message;
+                }
+            }
+            showToast(errorMessage, 'error');
         }
     } catch (error) {
-        showToast('添加失败: ' + error.message, 'error');
+        const errorMessage = error?.message || (typeof error === 'string' ? error : '未知错误');
+        showToast('添加失败: ' + errorMessage, 'error');
     }
 }
 

@@ -4509,8 +4509,19 @@ export async function addMember(e, projectId) {
             let errorMessage = '添加失败';
             try {
                 const errorData = await res.json();
-                if (errorData && (errorData.message || errorData.error || errorData.msg)) {
-                    errorMessage = errorData.message || errorData.error || errorData.msg;
+                // 处理错误信息：可能是 errorData.message 或 errorData.error.message
+                if (errorData) {
+                    if (errorData.message) {
+                        errorMessage = errorData.message;
+                    } else if (errorData.error) {
+                        if (typeof errorData.error === 'string') {
+                            errorMessage = errorData.error;
+                        } else if (errorData.error.message) {
+                            errorMessage = errorData.error.message;
+                        }
+                    } else if (errorData.msg) {
+                        errorMessage = errorData.msg;
+                    }
                 }
             } catch (parseErr) {
                 // 如果解析失败，就退回到状态码提示
@@ -4522,7 +4533,18 @@ export async function addMember(e, projectId) {
 
         const data = await res.json();
         if (!data.success) {
-            showToast(data.message || '添加失败', 'error');
+            // 处理错误信息：可能是 data.message 或 data.error.message
+            let errorMessage = '添加失败';
+            if (data.message) {
+                errorMessage = data.message;
+            } else if (data.error) {
+                if (typeof data.error === 'string') {
+                    errorMessage = data.error;
+                } else if (data.error.message) {
+                    errorMessage = data.error.message;
+                }
+            }
+            showToast(errorMessage, 'error');
             return;
         }
         closeModal();
@@ -4530,7 +4552,8 @@ export async function addMember(e, projectId) {
         await viewProject(projectId);
         showToast('成员已添加', 'success');
     } catch (err) {
-        showToast('添加失败: ' + err.message, 'error');
+        const errorMessage = err?.message || (typeof err === 'string' ? err : '未知错误');
+        showToast('添加失败: ' + errorMessage, 'error');
     }
 }
 
