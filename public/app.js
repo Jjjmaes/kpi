@@ -86,7 +86,7 @@ const PERMISSIONS = {
     pm: {
         'project.view': 'all',
         'project.edit': true,
-        'project.create': true,
+        'project.create': false,
         'kpi.view': 'all',
         'finance.view': false,
         'customer.view': true,
@@ -154,7 +154,7 @@ const PERMISSIONS = {
     admin_staff: {
         'project.view': 'all',
         'project.edit': true,
-        'project.create': true,
+        'project.create': false,
         'kpi.view': 'all',
         'finance.view': false,
         'customer.view': true,

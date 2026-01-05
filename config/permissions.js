@@ -55,7 +55,7 @@ function getDefaultPermissions() {
         // 项目经理：只看"分配给自己"的项目（通过成员表 ProjectMember）
         'project.view': "assigned",
         'project.edit': false,
-        'project.create': true,
+        'project.create': false,
         'project.delete': false,
         'project.member.manage': true,
         'kpi.view': "self",
@@ -153,7 +153,7 @@ function getDefaultPermissions() {
       'admin_staff': {
         'project.view': "all",
         'project.edit': false,
-        'project.create': true,
+        'project.create': false,
         'project.delete': false,
         'project.member.manage': true,
         'kpi.view': "self",
