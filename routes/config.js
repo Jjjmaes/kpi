@@ -65,6 +65,7 @@ router.post('/update', async (req, res) => {
       companyPhone,
       companyEmail,
       projectNumberPrefix, // 新增：项目编号前缀
+      allow_self_assignment, // 新增：允许自己分配给自己
       roleRatios, // 新增：动态角色系数配置
       reason
     } = req.body;
@@ -87,7 +88,8 @@ router.post('/update', async (req, res) => {
       companyContact: currentConfig.companyContact,
       companyPhone: currentConfig.companyPhone,
       companyEmail: currentConfig.companyEmail,
-      projectNumberPrefix: currentConfig.projectNumberPrefix
+      projectNumberPrefix: currentConfig.projectNumberPrefix,
+      allow_self_assignment: currentConfig.allow_self_assignment
     };
 
     // 更新配置
@@ -117,6 +119,10 @@ router.post('/update', async (req, res) => {
         });
       }
     }
+    // 更新允许自己分配给自己配置
+    if (allow_self_assignment !== undefined) {
+      currentConfig.allow_self_assignment = allow_self_assignment === true || allow_self_assignment === 'true';
+    }
     // 更新动态角色系数配置
     if (roleRatios !== undefined && typeof roleRatios === 'object') {
       currentConfig.roleRatios = roleRatios;
@@ -145,6 +151,7 @@ router.post('/update', async (req, res) => {
         companyPhone: currentConfig.companyPhone,
         companyEmail: currentConfig.companyEmail,
         projectNumberPrefix: currentConfig.projectNumberPrefix,
+        allow_self_assignment: currentConfig.allow_self_assignment,
         roleRatios: currentConfig.roleRatios
       },
       reason: reason || '未提供原因'

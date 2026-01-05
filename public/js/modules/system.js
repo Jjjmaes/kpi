@@ -71,6 +71,15 @@ export async function loadConfig() {
                         项目编号格式：前缀 + 年份(4位) + 月份(2位) + 序号(4位)，例如：PRJ2024010001
                     </small>
                 </div>
+                <div class="form-group">
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" name="allow_self_assignment" ${config.allow_self_assignment ? 'checked' : ''} style="width: auto;">
+                        <span>允许一人多角色时自己分配给自己</span>
+                    </label>
+                    <small style="color: #666; font-size: 12px; display: block; margin-top: 4px;">
+                        开启后，允许项目经理将自己同时分配为翻译或审校，允许销售将自己分配为项目经理（适用于只有一个人的情况）
+                    </small>
+                </div>
 
                 <h3 style="margin: 16px 0 10px;">KPI 系数</h3>
                 <div class="form-group">
@@ -155,6 +164,8 @@ export async function loadConfig() {
                 Object.keys(payload).forEach(k => {
                     if (numberFields.includes(k) && payload[k]) payload[k] = parseFloat(payload[k]);
                 });
+                // 处理 checkbox：如果选中则为 true，否则为 false
+                payload.allow_self_assignment = formData.has('allow_self_assignment');
                 
                 // 收集动态角色系数配置
                 const roleRatios = {};

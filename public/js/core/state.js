@@ -13,6 +13,7 @@ export const state = {
     notifications: [],
     unreadNotificationCount: 0,
     languagesCache: [],
+    systemConfig: null, // 系统配置缓存（包括 allow_self_assignment）
 
     // UI状态
     projectPage: 1,

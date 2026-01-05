@@ -271,7 +271,7 @@ class ProjectService {
   /**
    * 验证成员数据
    */
-  validateMembers(members, creator, lockedRatios) {
+  async validateMembers(members, creator, lockedRatios) {
     if (!members || !Array.isArray(members) || members.length === 0) {
       return [];
     }
@@ -291,25 +291,32 @@ class ProjectService {
       }
     }
 
+    // 获取配置：是否允许自己分配给自己
+    const config = await KpiConfig.getActiveConfig();
+    const allowSelfAssignment = config.allow_self_assignment || false;
+
     return members.map(member => {
       const { userId, role, translatorType, wordRatio } = member;
       const isSelfAssignment = userId.toString() === creator._id.toString();
       
-      // 校验1：PM不能将翻译或审校分配给自己
-      const isPM = creator.roles.includes('pm');
-      const isTranslator = creator.roles.includes('translator');
-      const isReviewer = creator.roles.includes('reviewer');
-      
-      if (isPM && isSelfAssignment) {
-        if ((role === 'translator' && isTranslator) || (role === 'reviewer' && isReviewer)) {
-          throw new AppError('作为项目经理，不能将翻译或审校任务分配给自己', 400, 'INVALID_SELF_ASSIGNMENT');
+      // 如果允许自己分配给自己，跳过验证
+      if (!allowSelfAssignment) {
+        // 校验1：PM不能将翻译或审校分配给自己
+        const isPM = creator.roles.includes('pm');
+        const isTranslator = creator.roles.includes('translator');
+        const isReviewer = creator.roles.includes('reviewer');
+        
+        if (isPM && isSelfAssignment) {
+          if ((role === 'translator' && isTranslator) || (role === 'reviewer' && isReviewer)) {
+            throw new AppError('作为项目经理，不能将翻译或审校任务分配给自己', 400, 'INVALID_SELF_ASSIGNMENT');
+          }
         }
-      }
-      
-      // 校验2：销售不能将PM角色分配给自己
-      const hasPMRole = creator.roles.includes('pm');
-      if (isSales && hasPMRole && isSelfAssignment && role === 'pm') {
-        throw new AppError('作为销售，不能将项目经理角色分配给自己', 400, 'INVALID_SELF_ASSIGNMENT');
+        
+        // 校验2：销售不能将PM角色分配给自己
+        const hasPMRole = creator.roles.includes('pm');
+        if (isSales && hasPMRole && isSelfAssignment && role === 'pm') {
+          throw new AppError('作为销售，不能将项目经理角色分配给自己', 400, 'INVALID_SELF_ASSIGNMENT');
+        }
       }
       
       // 确定使用的系数
@@ -422,7 +429,7 @@ class ProjectService {
 
     // 处理成员
     const members = data.members || [];
-    const validatedMembers = this.validateMembers(members, creator, lockedRatios);
+    const validatedMembers = await this.validateMembers(members, creator, lockedRatios);
     
     if (validatedMembers.length > 0) {
       await this.createProjectMembers(project._id, validatedMembers, lockedRatios);
@@ -499,24 +506,30 @@ class ProjectService {
       throw new AppError('项目不存在', 404, 'PROJECT_NOT_FOUND');
     }
 
-    // 校验自分配规则
-    const isSelfAssignment = userId.toString() === user._id.toString();
-    const isPM = user.roles.includes('pm');
-    const isTranslator = user.roles.includes('translator');
-    const isReviewer = user.roles.includes('reviewer');
+    // 获取配置：是否允许自己分配给自己
+    const config = await KpiConfig.getActiveConfig();
+    const allowSelfAssignment = config.allow_self_assignment || false;
     
-    // 校验1：PM不能将翻译或审校分配给自己
-    if (isPM && isSelfAssignment) {
-      if ((role === 'translator' && isTranslator) || (role === 'reviewer' && isReviewer)) {
-        throw new AppError('作为项目经理，不能将翻译或审校任务分配给自己', 400, 'INVALID_SELF_ASSIGNMENT');
+    // 校验自分配规则（如果允许自己分配给自己，跳过验证）
+    if (!allowSelfAssignment) {
+      const isSelfAssignment = userId.toString() === user._id.toString();
+      const isPM = user.roles.includes('pm');
+      const isTranslator = user.roles.includes('translator');
+      const isReviewer = user.roles.includes('reviewer');
+      
+      // 校验1：PM不能将翻译或审校分配给自己
+      if (isPM && isSelfAssignment) {
+        if ((role === 'translator' && isTranslator) || (role === 'reviewer' && isReviewer)) {
+          throw new AppError('作为项目经理，不能将翻译或审校任务分配给自己', 400, 'INVALID_SELF_ASSIGNMENT');
+        }
       }
-    }
-    
-    // 校验2：销售不能将PM角色分配给自己
-    const isSales = user.roles.includes('sales') || user.roles.includes('part_time_sales');
-    const hasPMRole = user.roles.includes('pm');
-    if (isSales && hasPMRole && isSelfAssignment && role === 'pm') {
-      throw new AppError('作为销售，不能将项目经理角色分配给自己', 400, 'INVALID_SELF_ASSIGNMENT');
+      
+      // 校验2：销售不能将PM角色分配给自己
+      const isSales = user.roles.includes('sales') || user.roles.includes('part_time_sales');
+      const hasPMRole = user.roles.includes('pm');
+      if (isSales && hasPMRole && isSelfAssignment && role === 'pm') {
+        throw new AppError('作为销售，不能将项目经理角色分配给自己', 400, 'INVALID_SELF_ASSIGNMENT');
+      }
     }
 
     // 获取项目的锁定系数（使用项目创建时的配置）

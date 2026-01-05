@@ -1423,27 +1423,7 @@ export async function createProject(e) {
         return member;
     });
     
-    // 验证成员分配规则
-    for (const member of members) {
-        if (state.currentUser) {
-            const isPM = state.currentUser.roles?.includes('pm');
-            const isTranslator = state.currentUser.roles?.includes('translator');
-            const isReviewer = state.currentUser.roles?.includes('reviewer');
-            const isSelfAssignment = member.userId === state.currentUser._id;
-            if (isPM && isSelfAssignment) {
-                if ((member.role === 'translator' && isTranslator) || (member.role === 'reviewer' && isReviewer)) {
-                    showToast('作为项目经理，不能将翻译或审校任务分配给自己', 'error');
-                    return;
-                }
-            }
-            const isSales = state.currentUser.roles?.includes('sales') || state.currentUser.roles?.includes('part_time_sales');
-            const hasPMRole = state.currentUser.roles?.includes('pm');
-            if (isSales && hasPMRole && isSelfAssignment && member.role === 'pm') {
-                showToast('作为销售，不能将项目经理角色分配给自己', 'error');
-                return;
-            }
-        }
-    }
+    // 注意：自分配限制检查已移至后端，后端会根据配置（allow_self_assignment）决定是否允许
     
     const specialRequirements = {
         terminology: formData.get('specialRequirements.terminology') === 'on',
@@ -3573,25 +3553,7 @@ export function addInlineMemberForCreate() {
         return;
     }
     
-    // 自我分配限制
-    const me = state.currentUser;
-    if (me) {
-        const isSelf = userId === me._id;
-        if (isSelf && me.roles?.includes('pm')) {
-            const isTranslator = me.roles?.includes('translator');
-            const isReviewer = me.roles?.includes('reviewer');
-            if ((role === 'translator' && isTranslator) || (role === 'reviewer' && isReviewer)) {
-                showToast('作为项目经理，不能将翻译或审校任务分配给自己', 'error');
-                return;
-            }
-        }
-        const isSales = me.roles?.includes('sales') || me.roles?.includes('part_time_sales');
-        const hasPMRole = me.roles?.includes('pm');
-        if (isSelf && role === 'pm' && isSales && hasPMRole) {
-            showToast('作为销售，不能将项目经理角色分配给自己', 'error');
-            return;
-        }
-    }
+    // 注意：自分配限制检查已移至后端，后端会根据配置（allow_self_assignment）决定是否允许
     
     const userInfo = (state.allUsers || []).find(u => u._id === userId);
     const member = {
@@ -3839,25 +3801,7 @@ export async function addMemberForCreate(e) {
         return;
     }
     
-    // 自我分配限制
-    const me = state.currentUser;
-    if (me) {
-        const isSelf = userId === me._id;
-        if (isSelf && me.roles?.includes('pm')) {
-            const isTranslator = me.roles?.includes('translator');
-            const isReviewer = me.roles?.includes('reviewer');
-            if ((role === 'translator' && isTranslator) || (role === 'reviewer' && isReviewer)) {
-                showToast('作为项目经理，不能将翻译或审校任务分配给自己', 'error');
-                return;
-            }
-        }
-        const isSales = me.roles?.includes('sales') || me.roles?.includes('part_time_sales');
-        const hasPMRole = me.roles?.includes('pm');
-        if (isSelf && role === 'pm' && isSales && hasPMRole) {
-            showToast('作为销售，不能将项目经理角色分配给自己', 'error');
-            return;
-        }
-    }
+    // 注意：自分配限制检查已移至后端，后端会根据配置（allow_self_assignment）决定是否允许
     
     const member = {
         userId,
@@ -4080,28 +4024,8 @@ export function filterCreateUsersByRole() {
         return u.roles.includes(role);
     });
     
-    // 自身限制
-    const me = state.currentUser;
-    if (me && (role === 'translator' || role === 'reviewer')) {
-        const isPM = me.roles?.includes('pm');
-        const isTranslator = me.roles?.includes('translator');
-        const isReviewer = me.roles?.includes('reviewer');
-        if (isPM) {
-            if (role === 'translator' && isTranslator) {
-                filteredUsers = filteredUsers.filter(u => u._id !== me._id);
-            }
-            if (role === 'reviewer' && isReviewer) {
-                filteredUsers = filteredUsers.filter(u => u._id !== me._id);
-            }
-        }
-    }
-    if (me && role === 'pm') {
-        const isSales = me.roles?.includes('sales') || me.roles?.includes('part_time_sales');
-        const hasPMRole = me.roles?.includes('pm');
-        if (isSales && hasPMRole) {
-            filteredUsers = filteredUsers.filter(u => u._id !== me._id);
-        }
-    }
+    // 注意：自分配限制检查已移至后端，后端会根据配置（allow_self_assignment）决定是否允许
+    // 前端不再过滤用户列表，以保持与后端配置的一致性
     
     if (filteredUsers.length === 0) {
         userIdSelect.innerHTML = '<option value="">没有可用的用户</option>';
@@ -4424,35 +4348,10 @@ export function filterUsersByRole() {
         return hasRole;
     });
     
-    console.log(`角色 ${role} 的可用用户 (过滤前):`, filteredUsers.length, filteredUsers.map(u => u.name));
+    console.log(`角色 ${role} 的可用用户:`, filteredUsers.length, filteredUsers.map(u => u.name));
     
-    // 自身限制
-    const me = state.currentUser;
-    if (me && (role === 'translator' || role === 'reviewer')) {
-        const isPM = me.roles?.includes('pm');
-        const isTranslator = me.roles?.includes('translator');
-        const isReviewer = me.roles?.includes('reviewer');
-        if (isPM) {
-            if (role === 'translator' && isTranslator) {
-                console.log('过滤掉自己（PM不能分配翻译给自己）');
-                filteredUsers = filteredUsers.filter(u => u._id !== me._id);
-            }
-            if (role === 'reviewer' && isReviewer) {
-                console.log('过滤掉自己（PM不能分配审校给自己）');
-                filteredUsers = filteredUsers.filter(u => u._id !== me._id);
-            }
-        }
-    }
-    if (me && role === 'pm') {
-        const isSales = me.roles?.includes('sales') || me.roles?.includes('part_time_sales');
-        const hasPMRole = me.roles?.includes('pm');
-        if (isSales && hasPMRole) {
-            console.log('过滤掉自己（销售不能分配PM给自己）');
-            filteredUsers = filteredUsers.filter(u => u._id !== me._id);
-        }
-    }
-    
-    console.log(`角色 ${role} 的可用用户 (过滤后):`, filteredUsers.length, filteredUsers.map(u => u.name));
+    // 注意：自分配限制检查已移至后端，后端会根据配置（allow_self_assignment）决定是否允许
+    // 前端不再过滤用户列表，以保持与后端配置的一致性
     
     if (filteredUsers.length === 0) {
         userIdSelect.innerHTML = '<option value="">没有可用的用户</option>';
@@ -4511,25 +4410,7 @@ export async function addMember(e, projectId) {
     const userId = formData.get('userId');
     if (!role || !userId) return alert('请选择角色和用户');
 
-    // 自我分配限制
-    const me = state.currentUser;
-    if (me) {
-        const isSelf = userId === me._id;
-        if (isSelf && me.roles?.includes('pm')) {
-            const isTranslator = me.roles?.includes('translator');
-            const isReviewer = me.roles?.includes('reviewer');
-            if ((role === 'translator' && isTranslator) || (role === 'reviewer' && isReviewer)) {
-                showToast('作为项目经理，不能将翻译或审校任务分配给自己', 'error');
-                return;
-            }
-        }
-        const isSales = me.roles?.includes('sales') || me.roles?.includes('part_time_sales');
-        const hasPMRole = me.roles?.includes('pm');
-        if (isSelf && role === 'pm' && isSales && hasPMRole) {
-            showToast('作为销售，不能将项目经理角色分配给自己', 'error');
-            return;
-        }
-    }
+    // 注意：自分配限制检查已移至后端，后端会根据配置（allow_self_assignment）决定是否允许
 
     // 检查用户是否为兼职（除兼职销售外）
     const selectedUser = (state.allUsers || []).find(u => u._id === userId);

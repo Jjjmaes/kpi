@@ -99,6 +99,12 @@ const kpiConfigSchema = new mongoose.Schema({
     trim: true,
     maxlength: 10
   },
+  // 业务规则配置
+  // 允许一人多角色时自己分配给自己（默认不允许）
+  allow_self_assignment: {
+    type: Boolean,
+    default: false
+  },
   // 版本号和变更记录
   version: {
     type: Number,
