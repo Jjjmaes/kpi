@@ -4359,68 +4359,100 @@ export function onMemberUserChange() {
 }
 
 export function filterUsersByRole() {
-    console.log('filterUsersByRole 被调用');
+    console.log('[filterUsersByRole] 被调用');
     const role = document.getElementById('memberRole')?.value;
     const userIdSelect = document.getElementById('memberUserId');
     
-    console.log('选择的角色:', role);
-    console.log('用户列表长度:', state.allUsers?.length || 0);
-    console.log('当前用户:', state.currentUser?.name);
+    console.log('[filterUsersByRole] 选择的角色:', role);
+    console.log('[filterUsersByRole] 用户列表长度:', state.allUsers?.length || 0);
+    console.log('[filterUsersByRole] 当前用户:', state.currentUser?.name);
+    console.log('[filterUsersByRole] 当前角色:', state.currentRole);
+    console.log('[filterUsersByRole] 用户角色列表:', state.currentUser?.roles);
     
     if (!role || !userIdSelect) {
-        console.log('角色或用户选择框不存在');
+        console.warn('[filterUsersByRole] 角色或用户选择框不存在', { role, userIdSelect: !!userIdSelect });
         if (userIdSelect) userIdSelect.innerHTML = '<option value="">请先选择角色</option>';
         return;
     }
     
     // 确保用户列表已加载
     if (!state.allUsers || state.allUsers.length === 0) {
-        console.warn('用户列表未加载，尝试重新加载...');
+        console.warn('[filterUsersByRole] 用户列表未加载，尝试重新加载...');
+        console.log('[filterUsersByRole] 当前请求头信息:', {
+            currentRole: state.currentRole,
+            token: state.token ? '已设置' : '未设置'
+        });
         if (userIdSelect) userIdSelect.innerHTML = '<option value="">加载用户列表中...</option>';
         // 尝试重新加载用户列表
         apiFetch('/users').then(res => {
+            console.log('[filterUsersByRole] API响应状态:', res.status, res.statusText);
             if (!res.ok) {
-                console.error('加载用户列表失败，HTTP状态:', res.status);
-                if (userIdSelect) userIdSelect.innerHTML = `<option value="">加载失败: ${res.status === 403 ? '权限不足' : '服务器错误'}</option>`;
-                return;
+                console.error('[filterUsersByRole] 加载用户列表失败，HTTP状态:', res.status);
+                // 尝试读取错误信息
+                return res.json().then(errData => {
+                    console.error('[filterUsersByRole] 错误详情:', errData);
+                    if (userIdSelect) {
+                        const errorMsg = res.status === 403 
+                            ? `权限不足: ${errData.message || errData.error?.message || '当前角色无权访问用户列表'}`
+                            : `服务器错误 (${res.status})`;
+                        userIdSelect.innerHTML = `<option value="">${errorMsg}</option>`;
+                    }
+                    throw new Error(`HTTP ${res.status}: ${errData.message || errData.error?.message || '未知错误'}`);
+                }).catch(parseErr => {
+                    console.error('[filterUsersByRole] 解析错误响应失败:', parseErr);
+                    if (userIdSelect) {
+                        userIdSelect.innerHTML = `<option value="">加载失败: ${res.status === 403 ? '权限不足' : '服务器错误'}</option>`;
+                    }
+                    throw parseErr;
+                });
             }
             return res.json();
         }).then(data => {
             if (data && data.success) {
                 state.allUsers = data.data;
-                console.log('用户列表已重新加载，数量:', state.allUsers.length);
+                console.log('[filterUsersByRole] 用户列表已重新加载，数量:', state.allUsers.length);
+                console.log('[filterUsersByRole] 用户列表示例（前3个）:', data.data.slice(0, 3).map(u => ({ name: u.name, roles: u.roles })));
                 // 重新过滤
                 filterUsersByRole();
             } else if (data) {
-                console.error('加载用户列表失败:', data.message || '未知错误');
-                if (userIdSelect) userIdSelect.innerHTML = '<option value="">用户列表加载失败</option>';
+                console.error('[filterUsersByRole] 加载用户列表失败:', data.message || data.error || '未知错误');
+                if (userIdSelect) userIdSelect.innerHTML = `<option value="">用户列表加载失败: ${data.message || data.error?.message || '未知错误'}</option>`;
             }
         }).catch(err => {
-            console.error('加载用户列表失败:', err);
-            if (userIdSelect) userIdSelect.innerHTML = '<option value="">用户列表加载失败</option>';
+            console.error('[filterUsersByRole] 加载用户列表异常:', err);
+            if (userIdSelect) userIdSelect.innerHTML = `<option value="">用户列表加载失败: ${err.message || '网络错误'}</option>`;
         });
         return;
     }
     
     // 显示所有用户信息（用于调试）
-    console.log('所有用户:', state.allUsers.map(u => ({ name: u.name, roles: u.roles, isActive: u.isActive })));
+    console.log('[filterUsersByRole] 所有用户数量:', state.allUsers.length);
+    console.log('[filterUsersByRole] 所有用户角色分布:', 
+        state.allUsers.reduce((acc, u) => {
+            (u.roles || []).forEach(r => acc[r] = (acc[r] || 0) + 1);
+            return acc;
+        }, {})
+    );
     
     let filteredUsers = (state.allUsers || []).filter(u => {
         if (!u.isActive) {
-            console.log(`用户 ${u.name} 未激活`);
+            console.log(`[filterUsersByRole] 用户 ${u.name} 未激活`);
             return false;
         }
         // roles 是数组，检查是否包含该角色
         if (!u.roles || !Array.isArray(u.roles)) {
-            console.log(`用户 ${u.name} 没有角色或角色不是数组:`, u.roles);
+            console.warn(`[filterUsersByRole] 用户 ${u.name} 没有角色或角色不是数组:`, u.roles);
             return false;
         }
         const hasRole = u.roles.includes(role);
-        console.log(`用户 ${u.name} 角色:`, u.roles, `包含 ${role}:`, hasRole);
+        if (hasRole) {
+            console.log(`[filterUsersByRole] ✓ 用户 ${u.name} 拥有角色 ${role}`);
+        }
         return hasRole;
     });
     
-    console.log(`角色 ${role} 的可用用户:`, filteredUsers.length, filteredUsers.map(u => u.name));
+    console.log(`[filterUsersByRole] 角色 ${role} 的可用用户数量:`, filteredUsers.length);
+    console.log(`[filterUsersByRole] 可用用户列表:`, filteredUsers.map(u => u.name));
     
     // 注意：自分配限制检查已移至后端，后端会根据配置（allow_self_assignment）决定是否允许
     // 前端不再过滤用户列表，以保持与后端配置的一致性
