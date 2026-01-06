@@ -4378,13 +4378,21 @@ export function filterUsersByRole() {
         console.warn('用户列表未加载，尝试重新加载...');
         if (userIdSelect) userIdSelect.innerHTML = '<option value="">加载用户列表中...</option>';
         // 尝试重新加载用户列表
-        apiFetch('/users').then(res => res.json()).then(data => {
-            if (data.success) {
+        apiFetch('/users').then(res => {
+            if (!res.ok) {
+                console.error('加载用户列表失败，HTTP状态:', res.status);
+                if (userIdSelect) userIdSelect.innerHTML = `<option value="">加载失败: ${res.status === 403 ? '权限不足' : '服务器错误'}</option>`;
+                return;
+            }
+            return res.json();
+        }).then(data => {
+            if (data && data.success) {
                 state.allUsers = data.data;
                 console.log('用户列表已重新加载，数量:', state.allUsers.length);
                 // 重新过滤
                 filterUsersByRole();
-            } else {
+            } else if (data) {
+                console.error('加载用户列表失败:', data.message || '未知错误');
                 if (userIdSelect) userIdSelect.innerHTML = '<option value="">用户列表加载失败</option>';
             }
         }).catch(err => {

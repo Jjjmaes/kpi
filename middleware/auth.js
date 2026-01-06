@@ -80,14 +80,24 @@ const authorize = (...roles) => {
       });
     }
 
-    // 如果指定了当前角色，检查当前角色是否在允许的角色列表中
+    // 如果指定了当前角色，必须检查当前角色是否在允许的角色列表中
     if (req.currentRole) {
       if (roles.includes(req.currentRole)) {
         return next();
+      } else {
+        // 当前角色不在允许列表中，拒绝访问
+        return res.status(403).json({ 
+          success: false, 
+          error: {
+            code: 'INSUFFICIENT_PERMISSIONS',
+            message: '当前角色权限不足',
+            statusCode: 403
+          }
+        });
       }
     }
     
-    // 向后兼容：检查用户是否拥有任一允许的角色
+    // 向后兼容：如果没有指定当前角色，检查用户是否拥有任一允许的角色
     const userRoles = req.user.roles || [];
     const hasRole = roles.some(role => userRoles.includes(role));
 
