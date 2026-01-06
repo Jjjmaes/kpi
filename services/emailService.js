@@ -367,7 +367,7 @@ ${projectUrl || 'http://localhost:3000'}/#backup
       'reviewer': '审校',
       'layout': '排版',
       'sales': '销售',
-      'part_time_sales': '兼职销售',
+      'part_time_sales': '客户经理',
       'admin_staff': '综合岗',
       'part_time_translator': '兼职翻译'
     };

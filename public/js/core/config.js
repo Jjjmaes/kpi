@@ -17,7 +17,7 @@ export const ROLE_NAMES = {
     finance: '财务',
     pm: '项目经理',
     sales: '销售',
-    part_time_sales: '兼职销售',
+    part_time_sales: '客户经理',
     translator: '翻译',
     reviewer: '审校',
     layout: '排版',

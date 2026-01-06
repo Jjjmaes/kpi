@@ -303,7 +303,7 @@ function getRoleName(roleCode) {
     layout: '排版',
     sales: '销售',
     part_time_translator: '兼职翻译',
-    part_time_sales: '兼职销售',
+    part_time_sales: '客户经理',
   };
   return roleMap[roleCode] || roleCode;
 }

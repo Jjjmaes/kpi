@@ -301,12 +301,12 @@ const projectSchema = new mongoose.Schema({
       default: 'unpaid'
     }
   },
-  // 兼职销售相关字段
+  // 客户经理相关字段
   partTimeSales: {
-    isPartTime: { type: Boolean, default: false }, // 是否为兼职销售项目
+    isPartTime: { type: Boolean, default: false }, // 是否为客户经理项目
     companyReceivable: { type: Number, default: 0 }, // 公司应收金额（含税）
     taxRate: { type: Number, default: 0, min: 0, max: 1 }, // 税率（0-1之间，如0.1表示10%）
-    partTimeSalesCommission: { type: Number, default: 0 } // 兼职销售员佣金（税后部分，自动计算）
+    partTimeSalesCommission: { type: Number, default: 0 } // 客户经理佣金（税后部分，自动计算）
   },
   // 兼职排版相关字段
   partTimeLayout: {
@@ -351,7 +351,7 @@ projectSchema.methods.calculateCompletionFactor = function() {
   return Math.max(0, factor);
 };
 
-// 计算兼职销售佣金
+// 计算客户经理佣金
 projectSchema.methods.calculatePartTimeSalesCommission = function() {
   if (!this.partTimeSales?.isPartTime) {
     return 0;
@@ -417,7 +417,7 @@ projectSchema.pre('save', function(next) {
     }
   }
   
-  // 自动计算兼职销售佣金
+  // 自动计算客户经理佣金
   if (this.partTimeSales?.isPartTime) {
     this.partTimeSales.partTimeSalesCommission = this.calculatePartTimeSalesCommission();
   }

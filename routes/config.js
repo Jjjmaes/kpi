@@ -59,6 +59,7 @@ router.post('/update', async (req, res) => {
       sales_commission_ratio,
       admin_ratio,
       completion_factor,
+      part_time_sales_tax_rate,
       companyName,
       companyAddress,
       companyContact,
@@ -83,6 +84,7 @@ router.post('/update', async (req, res) => {
       sales_commission_ratio: currentConfig.sales_commission_ratio,
       admin_ratio: currentConfig.admin_ratio,
       completion_factor: currentConfig.completion_factor,
+      part_time_sales_tax_rate: currentConfig.part_time_sales_tax_rate,
       companyName: currentConfig.companyName,
       companyAddress: currentConfig.companyAddress,
       companyContact: currentConfig.companyContact,
@@ -101,6 +103,7 @@ router.post('/update', async (req, res) => {
     if (sales_commission_ratio !== undefined) currentConfig.sales_commission_ratio = sales_commission_ratio;
     if (admin_ratio !== undefined) currentConfig.admin_ratio = admin_ratio;
     if (completion_factor !== undefined) currentConfig.completion_factor = completion_factor;
+    if (part_time_sales_tax_rate !== undefined) currentConfig.part_time_sales_tax_rate = part_time_sales_tax_rate;
     if (companyName !== undefined) currentConfig.companyName = companyName;
     if (companyAddress !== undefined) currentConfig.companyAddress = companyAddress;
     if (companyContact !== undefined) currentConfig.companyContact = companyContact;
@@ -145,6 +148,7 @@ router.post('/update', async (req, res) => {
         sales_commission_ratio: currentConfig.sales_commission_ratio,
         admin_ratio: currentConfig.admin_ratio,
         completion_factor: currentConfig.completion_factor,
+        part_time_sales_tax_rate: currentConfig.part_time_sales_tax_rate,
         companyName: currentConfig.companyName,
         companyAddress: currentConfig.companyAddress,
         companyContact: currentConfig.companyContact,

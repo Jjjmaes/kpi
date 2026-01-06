@@ -63,6 +63,14 @@ const kpiConfigSchema = new mongoose.Schema({
     min: 0,
     max: 1
   },
+  // 客户经理佣金税率（适用于 part_time_sales 角色），用于计算扣税后佣金
+  // 例如：0.1 表示 10%
+  part_time_sales_tax_rate: {
+    type: Number,
+    default: 0.1,
+    min: 0,
+    max: 1
+  },
   // 动态角色系数配置（JSON对象）
   // 格式：{ roleCode: { base: 0.08, mtpe: 0.12, deepedit: 0.18, bonus: 0.02, commission: 0.10 } }
   // 用于支持新增角色的系数配置，无需修改代码

@@ -7,7 +7,7 @@ const customerService = require('../services/customerService');
 // 所有客户路由需要认证
 router.use(authenticate);
 
-// 获取所有客户（销售、兼职销售、管理员、财务可见）
+// 获取所有客户（销售、客户经理、管理员、财务可见）
 router.get('/', authorize('admin', 'finance', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
   const customers = await customerService.getAllCustomers(req.query, { ...req.user.toObject(), currentRole: req.currentRole });
 

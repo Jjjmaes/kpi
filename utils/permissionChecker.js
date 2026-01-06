@@ -28,7 +28,7 @@ function isFinance(req) {
 }
 
 /**
- * 检查是否为销售角色（包括兼职销售）
+ * 检查是否为销售角色（包括客户经理）
  * @param {Object} req - Express请求对象
  * @returns {Boolean}
  */
@@ -37,7 +37,7 @@ function isSales(req) {
 }
 
 /**
- * 检查是否为兼职销售角色
+ * 检查是否为客户经理角色
  * @param {Object} req - Express请求对象
  * @returns {Boolean}
  */
@@ -146,7 +146,7 @@ function canManageFinance(req) {
 
 /**
  * 检查是否可以查看项目金额（成交额）
- * 管理员、财务、销售和兼职销售可以查看
+ * 管理员、财务、销售和客户经理可以查看
  * @param {Object} req - Express请求对象
  * @returns {Boolean}
  */

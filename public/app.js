@@ -28,6 +28,7 @@ let previousUnreadCount = 0; // 上一次的未读数量，用于检测新通知
 let notificationPoller = null;
 let notificationPanelPoller = null; // 通知面板打开时的刷新定时器
 let notificationSoundEnabled = true; // 通知声音开关，默认开启
+let systemConfig = null; // 系统配置缓存（包括 part_time_sales_tax_rate）
 const NOTIFICATION_POLL_INTERVAL = 60000;
 
 // 角色管理
@@ -39,7 +40,7 @@ const roleNames = {
     'finance': '财务',
     'pm': '项目经理',
     'sales': '销售',
-    'part_time_sales': '兼职销售',
+    'part_time_sales': '客户经理',
     'translator': '翻译',
     'reviewer': '审校',
     'layout': '排版',
@@ -111,7 +112,7 @@ const PERMISSIONS = {
         'project.edit': 'sales',
         'project.create': true,
         'kpi.view': 'self',
-        // 兼职销售无财务模块权限
+        // 客户经理无财务模块权限
         'finance.view': false,
         'customer.view': true,
         'customer.edit': false,
@@ -639,7 +640,7 @@ let orgInfo = {
 
 // 判断当前用户是否应该看到项目金额和单价信息
 // 业务要求：项目经理、专/兼职翻译、专/兼职排版、审校都不该看到项目金额
-// 允许看到的：管理员、财务、销售、兼职销售、综合岗（如需调整可在此扩展）
+// 允许看到的：管理员、财务、销售、客户经理、综合岗（如需调整可在此扩展）
 const canViewProjectAmount = () => {
     if (!currentRole) return false;
     const allowedRoles = ['admin', 'finance', 'sales', 'part_time_sales', 'admin_staff'];
@@ -1029,6 +1030,9 @@ function showMainApp() {
         loadUsers();
         loadConfig();
     }
+
+    // 加载系统配置（所有用户都需要，用于客户经理佣金计算等）
+    loadSystemConfig();
 
     // 加载用户列表（用于下拉选择）
     if (isAdmin || isFinance) {
@@ -2189,7 +2193,7 @@ function fillFinanceFilters() {
     }
     const salesSel = document.getElementById('financeSales');
     if (salesSel && allUsers?.length) {
-        // 包含销售和兼职销售
+        // 包含销售和客户经理
         const sales = allUsers.filter(u => {
             const roles = u.roles || [];
             return roles.includes('sales') || roles.includes('part_time_sales');
@@ -2207,7 +2211,7 @@ function fillFinanceFilters() {
     }
     const paymentSalesSel = document.getElementById('paymentSales');
     if (paymentSalesSel && allUsers?.length) {
-        // 包含销售和兼职销售
+        // 包含销售和客户经理
         const sales = allUsers.filter(u => {
             const roles = u.roles || [];
             return roles.includes('sales') || roles.includes('part_time_sales');
@@ -2225,7 +2229,7 @@ function fillFinanceFilters() {
     }
     const invoiceSalesSel = document.getElementById('invoiceSales');
     if (invoiceSalesSel && allUsers?.length) {
-        // 包含销售和兼职销售
+        // 包含销售和客户经理
         const sales = allUsers.filter(u => {
             const roles = u.roles || [];
             return roles.includes('sales') || roles.includes('part_time_sales');
@@ -2496,21 +2500,17 @@ async function showCreateProjectModal() {
             </div>
             
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
-                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">兼职销售（可选）</h4>
+                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">客户经理（可选）</h4>
                 <label style="display: flex; align-items: center; gap: 5px; font-weight: normal; margin-bottom: 10px;">
                     <input type="checkbox" name="partTimeSales.isPartTime" id="partTimeSalesEnabled" onchange="togglePartTimeSalesFields()">
-                    启用兼职销售
+                    启用客户经理
                 </label>
                 <div id="partTimeSalesFields" style="display: none; padding-left: 20px; border-left: 2px solid #667eea;">
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label>公司应收金额（元）</label>
                         <input type="number" name="partTimeSales.companyReceivable" id="companyReceivable" step="0.01" min="0" onchange="calculatePartTimeSalesCommission()" style="width: 100%;">
                     </div>
-                    <div class="form-group" style="margin-bottom: 10px;">
-                        <label>税率（%）</label>
-                        <input type="number" name="partTimeSales.taxRate" id="taxRate" step="0.01" min="0" max="100" value="10" onchange="calculatePartTimeSalesCommission()" style="width: 100%;">
-                        <small style="color: #666; font-size: 12px;">例如：10 表示 10%</small>
-                    </div>
+                    <!-- 税率不再由前端填写，统一从系统配置中读取 -->
                     <div class="form-group" style="background: #f0f9ff; padding: 10px; border-radius: 4px; margin-top: 10px;">
                         <label style="font-weight: 600; color: #0369a1;">返还佣金（自动计算）</label>
                         <div id="partTimeSalesCommissionDisplay" style="font-size: 18px; color: #0369a1; font-weight: bold; margin-top: 5px;">
@@ -2522,7 +2522,7 @@ async function showCreateProjectModal() {
             </div>
             
             ${(() => {
-                // 判断是否是销售或兼职销售（销售创建项目时不能设置兼职排版，由项目经理添加）
+                // 判断是否是销售或客户经理（销售创建项目时不能设置兼职排版，由项目经理添加）
                 const isSales = currentUser?.roles?.includes('sales') || currentUser?.roles?.includes('part_time_sales');
                 const isAdmin = currentUser?.roles?.includes('admin');
                 // 只有管理员和项目经理可以在创建项目时设置兼职排版
@@ -2782,7 +2782,7 @@ async function addMemberRow() {
         }
     }
     
-    // 判断当前用户是否是销售或兼职销售（创建项目时只能添加项目经理）
+    // 判断当前用户是否是销售或客户经理（创建项目时只能添加项目经理）
     const isSales = currentUser?.roles?.includes('sales') || currentUser?.roles?.includes('part_time_sales');
     
     memberRowIndex++;
@@ -2801,7 +2801,7 @@ async function addMemberRow() {
         { value: 'pm', label: '项目经理' },
         { value: 'sales', label: '销售' },
         { value: 'admin_staff', label: '综合岗' },
-        { value: 'part_time_sales', label: '兼职销售' },
+        { value: 'part_time_sales', label: '客户经理' },
         { value: 'layout', label: '兼职排版' }
     ];
     const combinedRoles = [
@@ -2951,12 +2951,12 @@ function calculateAmount() {
         }
     }
     
-    // 重新计算兼职销售佣金和排版费用校验
+    // 重新计算客户经理佣金和排版费用校验
     calculatePartTimeSalesCommission();
     validateLayoutCost();
 }
 
-// 切换兼职销售字段显示
+// 切换客户经理字段显示
 function togglePartTimeSalesFields() {
     const enabled = document.getElementById('partTimeSalesEnabled')?.checked;
     const fields = document.getElementById('partTimeSalesFields');
@@ -2968,7 +2968,7 @@ function togglePartTimeSalesFields() {
     }
 }
 
-// 计算兼职销售佣金
+// 计算客户经理佣金
 function calculatePartTimeSalesCommission() {
     const enabled = document.getElementById('partTimeSalesEnabled')?.checked;
     if (!enabled) {
@@ -2979,8 +2979,8 @@ function calculatePartTimeSalesCommission() {
     
     const totalAmount = parseFloat(document.getElementById('projectAmount')?.value || 0);
     const companyReceivable = parseFloat(document.getElementById('companyReceivable')?.value || 0);
-    const taxRatePercent = parseFloat(document.getElementById('taxRate')?.value || 0);
-    const taxRate = taxRatePercent / 100; // 转换为小数
+    // 税率统一来自系统配置（systemConfig.part_time_sales_tax_rate，以 0-1 存储）
+    const taxRate = (systemConfig?.part_time_sales_tax_rate ?? 0);
     
     if (totalAmount <= 0) {
         const display = document.getElementById('partTimeSalesCommissionDisplay');
@@ -3016,7 +3016,7 @@ function togglePartTimeLayoutFields() {
     }
 }
 
-// 编辑表单：切换兼职销售字段显示
+// 编辑表单：切换客户经理字段显示
 function toggleEditPartTimeSalesFields() {
     const enabled = document.getElementById('editPartTimeSalesEnabled')?.checked;
     const fields = document.getElementById('editPartTimeSalesFields');
@@ -3028,7 +3028,7 @@ function toggleEditPartTimeSalesFields() {
     }
 }
 
-// 编辑表单：计算兼职销售佣金
+// 编辑表单：计算客户经理佣金（税率由系统配置统一控制）
 function calculateEditPartTimeSalesCommission() {
     const enabled = document.getElementById('editPartTimeSalesEnabled')?.checked;
     if (!enabled) {
@@ -3039,8 +3039,8 @@ function calculateEditPartTimeSalesCommission() {
     
     const totalAmount = parseFloat(document.querySelector('#editProjectForm [name="projectAmount"]')?.value || 0);
     const companyReceivable = parseFloat(document.getElementById('editCompanyReceivable')?.value || 0);
-    const taxRatePercent = parseFloat(document.getElementById('editTaxRate')?.value || 0);
-    const taxRate = taxRatePercent / 100;
+    // 税率统一来自系统配置（systemConfig.part_time_sales_tax_rate，以 0-1 存储）
+    const taxRate = (systemConfig?.part_time_sales_tax_rate ?? 0);
     
     if (totalAmount <= 0) {
         const display = document.getElementById('editPartTimeSalesCommissionDisplay');
@@ -3412,8 +3412,8 @@ async function createProject(e) {
     const partTimeSalesEnabled = formData.get('partTimeSales.isPartTime') === 'on';
     const partTimeSales = partTimeSalesEnabled ? {
         isPartTime: true,
-        companyReceivable: parseFloat(formData.get('partTimeSales.companyReceivable') || 0),
-        taxRate: parseFloat(formData.get('partTimeSales.taxRate') || 0) / 100 // 转换为小数
+        companyReceivable: parseFloat(formData.get('partTimeSales.companyReceivable') || 0)
+        // 税率不再由前端提交，统一由后端根据系统配置注入
     } : undefined;
     
     // 收集兼职排版信息
@@ -3499,10 +3499,10 @@ async function viewProject(projectId) {
             const isSales = currentUser.roles.includes('sales');
             const isPartTimeSales = currentUser.roles.includes('part_time_sales');
 
-            const canStart = isAdmin || isSales || isPartTimeSales; // 开始：管理员、销售、兼职销售
+            const canStart = isAdmin || isSales || isPartTimeSales; // 开始：管理员、销售、客户经理
             const canSchedule = isAdmin || isPM; // 已安排：管理员、PM
             const canQualityOps = isAdmin || isPM || isSales || isPartTimeSales; // 返修/延期/客诉
-            // 交付仅管理员/销售/兼职销售，且不含PM身份
+            // 交付仅管理员/销售/客户经理，且不含PM身份
             const canDeliver = (isAdmin || isSales || isPartTimeSales) && !isPM;
             // 编辑/删除/导出：仅管理员、销售、兼职销售，且用户不能含PM角色
             const canEditDeleteExport = (isAdmin || isSales || isPartTimeSales) && !isPM;
@@ -3616,12 +3616,12 @@ async function viewProject(projectId) {
                         ` : ''}
                         ${project.partTimeSales?.isPartTime && canViewProjectAmount() ? `
                             <div class="detail-row" style="background: #f0f9ff; padding: 10px; border-radius: 4px; margin-top: 10px;">
-                                <div class="detail-label" style="font-weight: 600; color: #0369a1;">兼职销售信息:</div>
-                                <div class="detail-value" style="color: #0369a1;">
-                                    <div>公司应收金额: ¥${(project.partTimeSales.companyReceivable || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                                    <div>税率: ${((project.partTimeSales.taxRate || 0) * 100).toFixed(2)}%</div>
-                                    <div style="font-weight: bold; margin-top: 5px;">返还佣金: ¥${(project.partTimeSales.partTimeSalesCommission || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                                </div>
+                                <div class="detail-label" style="font-weight: 600; color: #0369a1;">客户经理信息:</div>
+                    <div class="detail-value" style="color: #0369a1;">
+                        <div>公司应收金额: ¥${(project.partTimeSales.companyReceivable || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        <div>税率: ${((project.partTimeSales.taxRate || 0) * 100).toFixed(2)}%</div>
+                        <div style="font-weight: bold; margin-top: 5px;">返还佣金: ¥${(project.partTimeSales.partTimeSalesCommission || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                    </div>
                             </div>
                         ` : ''}
                         ${project.partTimeLayout?.isPartTime || project.partTimeLayout?.layoutAssignedTo ? `
@@ -3893,7 +3893,7 @@ async function showAddMemberModal(projectId) {
         { value: 'pm', label: '项目经理' },
         { value: 'sales', label: '销售' },
         { value: 'admin_staff', label: '综合岗' },
-        { value: 'part_time_sales', label: '兼职销售' },
+        { value: 'part_time_sales', label: '客户经理' },
         { value: 'layout', label: '兼职排版' }
     ];
     if (isAdmin) {
@@ -4380,21 +4380,17 @@ async function showEditProjectModal() {
             </div>
             
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
-                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">兼职销售（可选）</h4>
+                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">客户经理（可选）</h4>
                 <label style="display: flex; align-items: center; gap: 5px; font-weight: normal; margin-bottom: 10px;">
                     <input type="checkbox" name="partTimeSales.isPartTime" id="editPartTimeSalesEnabled" ${p.partTimeSales?.isPartTime ? 'checked' : ''} onchange="toggleEditPartTimeSalesFields()">
-                    启用兼职销售
+                    启用客户经理
                 </label>
                 <div id="editPartTimeSalesFields" style="display: ${p.partTimeSales?.isPartTime ? 'block' : 'none'}; padding-left: 20px; border-left: 2px solid #667eea;">
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label>公司应收金额（元）</label>
                         <input type="number" name="partTimeSales.companyReceivable" id="editCompanyReceivable" step="0.01" min="0" value="${p.partTimeSales?.companyReceivable || 0}" onchange="calculateEditPartTimeSalesCommission()" style="width: 100%;">
                     </div>
-                    <div class="form-group" style="margin-bottom: 10px;">
-                        <label>税率（%）</label>
-                        <input type="number" name="partTimeSales.taxRate" id="editTaxRate" step="0.01" min="0" max="100" value="${(p.partTimeSales?.taxRate || 0) * 100}" onchange="calculateEditPartTimeSalesCommission()" style="width: 100%;">
-                        <small style="color: #666; font-size: 12px;">例如：10 表示 10%</small>
-                    </div>
+                    <!-- 税率不再由前端填写，统一从系统配置中读取 -->
                     <div class="form-group" style="background: #f0f9ff; padding: 10px; border-radius: 4px; margin-top: 10px;">
                         <label style="font-weight: 600; color: #0369a1;">返还佣金（自动计算）</label>
                         <div id="editPartTimeSalesCommissionDisplay" style="font-size: 18px; color: #0369a1; font-weight: bold; margin-top: 5px;">
@@ -5105,6 +5101,36 @@ async function exportKPI() {
 }
 
 // ==================== 配置管理 ====================
+// 加载系统配置（用于客户经理佣金计算等，所有用户都需要）
+async function loadSystemConfig() {
+    try {
+        const response = await apiFetch(`${API_BASE}/config`);
+        const data = await response.json();
+        if (data.success && data.data) {
+            systemConfig = data.data;
+            // 为了兼容性，也保存到 window.state（如果存在）
+            if (window.state) {
+                window.state.systemConfig = systemConfig;
+            }
+            // 如果 state.js 模块已加载，也更新它
+            if (window.setSystemConfig && typeof window.setSystemConfig === 'function') {
+                window.setSystemConfig(systemConfig);
+            }
+            console.log('[System] 系统配置已加载:', systemConfig);
+        }
+    } catch (error) {
+        console.error('[System] 加载系统配置失败:', error);
+        // 失败时使用默认值
+        systemConfig = { part_time_sales_tax_rate: 0.1 };
+        if (window.state) {
+            window.state.systemConfig = systemConfig;
+        }
+        if (window.setSystemConfig && typeof window.setSystemConfig === 'function') {
+            window.setSystemConfig(systemConfig);
+        }
+    }
+}
+
 async function loadConfig() {
     try {
         const response = await apiFetch(`${API_BASE}/config`);
@@ -5318,7 +5344,7 @@ function getRoleText(role) {
         'translator': '翻译',
         'reviewer': '审校',
         'admin_staff': '综合岗',
-        'part_time_sales': '兼职销售',
+        'part_time_sales': '客户经理',
         'layout': '兼职排版'
     };
     return roleMap[role] || role;

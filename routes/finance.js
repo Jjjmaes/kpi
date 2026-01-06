@@ -6,7 +6,10 @@ const {
   isFinance, 
   isAdminOrFinance, 
   canViewAllFinance, 
-  canManageFinance 
+  canManageFinance,
+  isSales,
+  isProjectCreator,
+  isProjectMember
 } = require('../utils/permissionChecker');
 const Project = require('../models/Project');
 const ProjectMember = require('../models/ProjectMember');
@@ -14,9 +17,39 @@ const PaymentRecord = require('../models/PaymentRecord');
 const Invoice = require('../models/Invoice');
 const KpiRecord = require('../models/KpiRecord');
 const User = require('../models/User');
+const { createNotification, NotificationTypes } = require('../services/notificationService');
 
 // 财务模块需要认证
 router.use(authenticate);
+
+// 获取当前用户的待确认收款记录
+router.get('/payment/pending', authenticate, async (req, res) => {
+  try {
+    const pendingRecords = await PaymentRecord.find({
+      receivedBy: req.user._id,
+      status: 'pending'
+    })
+      .populate('projectId', 'projectNumber projectName customerId')
+      .populate('projectId.customerId', 'name')
+      .populate('initiatedBy', 'name')
+      .sort({ createdAt: -1 })
+      .limit(50);
+
+    res.json({
+      success: true,
+      data: pendingRecords
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
+  }
+});
 
 // 角色分级：查看（含销售）、管理（仅财务/管理员）
 const allowViewFinance = authorize('admin', 'finance', 'sales', 'part_time_sales');
@@ -52,7 +85,7 @@ router.get('/receivables', allowViewFinance, async (req, res) => {
       baseConditions.status = { $ne: 'cancelled' };
     }
     
-    // 销售/兼职销售仅能查看自己创建的项目（不包含其他人的项目）
+    // 销售/客户经理仅能查看自己创建的项目（不包含其他人的项目）
     
     // 收集需要 $or 的条件
     const orConditions = [];
@@ -209,7 +242,336 @@ router.get('/receivables', allowViewFinance, async (req, res) => {
   }
 });
 
-// 新增回款记录并更新项目回款
+// 销售发起收款（非对公转账）
+router.post('/payment/:projectId/initiate', authorize('sales', 'part_time_sales'), async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { amount, receivedAt, method, reference, note, receivedBy } = req.body;
+
+    if (!amount || amount <= 0 || !receivedAt) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'MISSING_REQUIRED_FIELDS',
+          message: '回款金额和日期必填',
+          statusCode: 400
+        }
+      });
+    }
+
+    // 只能发起非对公转账
+    const allowedMethods = ['cash', 'alipay', 'wechat'];
+    if (!allowedMethods.includes(method)) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_METHOD',
+          message: '只能发起现金/支付宝/微信收款',
+          statusCode: 400
+        }
+      });
+    }
+
+    if (!receivedBy) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'RECEIVED_BY_REQUIRED',
+          message: '需选择收款人',
+          statusCode: 400
+        }
+      });
+    }
+
+    // 检查项目是否存在
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'PROJECT_NOT_FOUND',
+          message: '项目不存在',
+          statusCode: 404
+        }
+      });
+    }
+
+    // 检查权限：只能发起自己负责的项目（项目创建人或项目成员）
+    const isCreator = isProjectCreator(req, project);
+    const isMember = await isProjectMember(req, projectId);
+    if (!isCreator && !isMember) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: '只能发起自己负责的项目收款',
+          statusCode: 403
+        }
+      });
+    }
+
+    // 校验收款人
+    const receiverUser = await User.findById(receivedBy).select('name roles isActive');
+    if (!receiverUser || !receiverUser.isActive) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_RECEIVED_BY',
+          message: '收款人不存在或已停用',
+          statusCode: 400
+        }
+      });
+    }
+
+    // 创建收款记录（状态为 pending）
+    const paymentRecord = await PaymentRecord.create({
+      projectId,
+      amount: Number(amount),
+      receivedAt: new Date(receivedAt),
+      method,
+      reference,
+      note,
+      receivedBy: receiverUser._id,
+      initiatedBy: req.user._id,
+      status: 'pending' // 待确认
+    });
+
+    // 注意：pending 状态的记录不更新项目回款金额
+
+    // 发送通知给收款人
+    try {
+      const methodText = method === 'cash' ? '现金' : method === 'alipay' ? '支付宝' : method === 'wechat' ? '微信' : method;
+      await createNotification({
+        userId: receiverUser._id,
+        type: NotificationTypes.PAYMENT_PENDING_CONFIRMATION,
+        message: `${req.user.name} 发起了收款确认：项目 ${project.projectNumber || project.projectName}，金额 ¥${Number(amount).toLocaleString()}，支付方式 ${methodText}`,
+        link: `/projects/${projectId}`,
+        projectId: projectId
+      });
+    } catch (notifError) {
+      console.error('[PaymentInitiate] 发送通知失败:', notifError);
+      // 通知失败不影响主流程
+    }
+
+    res.json({
+      success: true,
+      message: '收款记录已发起，等待收款人确认',
+      data: {
+        paymentRecord: {
+          id: paymentRecord._id,
+          status: paymentRecord.status,
+          initiatedBy: paymentRecord.initiatedBy,
+          receivedBy: paymentRecord.receivedBy
+        }
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
+  }
+});
+
+// 收款人确认/拒绝收款
+router.post('/payment/:paymentId/confirm', authenticate, async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    const { action, note } = req.body; // action: 'confirm' 或 'reject'
+
+    if (!action || !['confirm', 'reject'].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_ACTION',
+          message: '操作类型必须是 confirm 或 reject',
+          statusCode: 400
+        }
+      });
+    }
+
+    const paymentRecord = await PaymentRecord.findById(paymentId)
+      .populate('projectId', 'projectAmount payment');
+    
+    if (!paymentRecord) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'PAYMENT_NOT_FOUND',
+          message: '收款记录不存在',
+          statusCode: 404
+        }
+      });
+    }
+
+    // 检查权限：只能确认自己作为收款人的记录
+    if (paymentRecord.receivedBy?.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: '只能确认自己作为收款人的记录',
+          statusCode: 403
+        }
+      });
+    }
+
+    // 检查状态：只能确认 pending 状态的记录
+    if (paymentRecord.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_STATUS',
+          message: '该记录已处理，无法再次确认',
+          statusCode: 400
+        }
+      });
+    }
+
+    const project = paymentRecord.projectId;
+    const newStatus = action === 'confirm' ? 'confirmed' : 'rejected';
+
+    // 更新收款记录状态
+    paymentRecord.status = newStatus;
+    paymentRecord.confirmedBy = req.user._id;
+    paymentRecord.confirmedAt = new Date();
+    if (note) {
+      paymentRecord.confirmNote = note;
+    }
+    await paymentRecord.save();
+
+    // 发送通知给发起人
+    try {
+      const actionText = action === 'confirm' ? '已确认' : '已拒绝';
+      if (paymentRecord.initiatedBy) {
+        await createNotification({
+          userId: paymentRecord.initiatedBy,
+          type: action === 'confirm' ? NotificationTypes.PAYMENT_CONFIRMED : NotificationTypes.PAYMENT_REJECTED,
+          message: `${req.user.name} ${actionText}了你的收款：项目 ${project.projectNumber || project.projectName}，金额 ¥${paymentRecord.amount.toLocaleString()}`,
+          link: `/projects/${project._id}`,
+          projectId: project._id.toString()
+        });
+      }
+    } catch (notifError) {
+      console.error('[PaymentConfirm] 发送通知失败:', notifError);
+      // 通知失败不影响主流程
+    }
+
+    // 只有 confirmed 状态才更新项目回款金额
+    if (newStatus === 'confirmed') {
+      const paymentAmount = paymentRecord.amount || 0;
+      const projectAmount = project.projectAmount || 0;
+      const totalReceived = (project.payment?.receivedAmount || 0) + paymentAmount;
+      const remainingAmount = Math.max(0, projectAmount - totalReceived);
+
+      project.payment.receivedAmount = totalReceived;
+      project.payment.remainingAmount = remainingAmount;
+      project.payment.receivedAt = paymentRecord.receivedAt;
+      project.payment.isFullyPaid = totalReceived >= projectAmount;
+
+      // 自动判断回款状态
+      if (totalReceived >= projectAmount) {
+        project.payment.paymentStatus = 'paid';
+      } else if (totalReceived > 0) {
+        project.payment.paymentStatus = 'partially_paid';
+      } else {
+        project.payment.paymentStatus = 'unpaid';
+      }
+
+      await project.save();
+    }
+
+    res.json({
+      success: true,
+      message: action === 'confirm' ? '收款已确认' : '收款已拒绝',
+      data: {
+        paymentRecord: {
+          id: paymentRecord._id,
+          status: paymentRecord.status,
+          confirmedBy: paymentRecord.confirmedBy,
+          confirmedAt: paymentRecord.confirmedAt
+        },
+        project: newStatus === 'confirmed' ? {
+          paymentStatus: project.payment.paymentStatus,
+          receivedAmount: project.payment.receivedAmount
+        } : null
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
+  }
+});
+
+// 财务检查收款记录
+router.post('/payment/:paymentId/review', allowManageFinance, async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    const { reviewed, note } = req.body;
+
+    const paymentRecord = await PaymentRecord.findById(paymentId);
+    if (!paymentRecord) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'PAYMENT_NOT_FOUND',
+          message: '收款记录不存在',
+          statusCode: 404
+        }
+      });
+    }
+
+    // 更新财务检查状态
+    paymentRecord.financeReviewed = reviewed !== false; // 默认为 true
+    if (paymentRecord.financeReviewed) {
+      paymentRecord.financeReviewedBy = req.user._id;
+      paymentRecord.financeReviewedAt = new Date();
+      if (note) {
+        paymentRecord.financeReviewNote = note;
+      }
+      // 可选：将状态标记为 approved（不影响回款金额）
+      if (paymentRecord.status === 'confirmed') {
+        paymentRecord.status = 'approved';
+      }
+    }
+    await paymentRecord.save();
+
+    res.json({
+      success: true,
+      message: '已标记为已检查',
+      data: {
+        paymentRecord: {
+          id: paymentRecord._id,
+          financeReviewed: paymentRecord.financeReviewed,
+          financeReviewedBy: paymentRecord.financeReviewedBy,
+          financeReviewedAt: paymentRecord.financeReviewedAt,
+          status: paymentRecord.status
+        }
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: error.message || '服务器内部错误',
+        statusCode: 500
+      }
+    });
+  }
+});
+
+// 新增回款记录并更新项目回款（财务/管理员创建，对公转账直接生效）
 router.post('/payment/:projectId', allowManageFinance, async (req, res) => {
   try {
     const { projectId } = req.params;
@@ -254,7 +616,7 @@ router.post('/payment/:projectId', allowManageFinance, async (req, res) => {
     const paymentAmount = Number(amount);
     const projectAmount = project.projectAmount || 0;
 
-    // 校验收款人（仅现金/支付宝/微信需要），允许财务/销售/兼职销售/管理员，不再限制必须为项目成员
+    // 校验收款人（仅现金/支付宝/微信需要），允许财务/销售/客户经理/管理员，不再限制必须为项目成员
     let receivedByUserId = null;
     if (manualMethods.includes(method || 'bank')) {
       const allowedRoles = ['finance', 'sales', 'part_time_sales', 'admin'];
@@ -264,7 +626,7 @@ router.post('/payment/:projectId', allowManageFinance, async (req, res) => {
           success: false,
           error: {
             code: 'INVALID_RECEIVED_BY',
-            message: '收款人需为在职的财务/销售/兼职销售/管理员',
+            message: '收款人需为在职的财务/销售/客户经理/管理员',
             statusCode: 400
           }
         });
@@ -272,38 +634,50 @@ router.post('/payment/:projectId', allowManageFinance, async (req, res) => {
       receivedByUserId = receiverUser._id;
     }
 
+    const paymentMethod = method || 'bank';
+    const isBankTransfer = paymentMethod === 'bank';
+    
     // 创建回款记录
+    // 对公转账直接生效（confirmed），其他方式需要确认流程（pending）
     const paymentRecord = await PaymentRecord.create({
       projectId,
       amount: paymentAmount,
       receivedAt: new Date(receivedAt),
-      method: method || 'bank',
+      method: paymentMethod,
       reference,
       invoiceNumber, // 关联发票号
       note,
       receivedBy: receivedByUserId,
-      recordedBy: req.user._id
+      recordedBy: req.user._id,
+      // 对公转账由财务/管理员创建，直接生效
+      status: isBankTransfer ? 'confirmed' : 'pending',
+      initiatedBy: isBankTransfer ? null : req.user._id, // 对公转账不需要发起人
+      // 对公转账直接确认
+      confirmedBy: isBankTransfer ? req.user._id : null,
+      confirmedAt: isBankTransfer ? new Date() : null
     });
 
-    // 更新项目累计回款
-    const totalReceived = (project.payment?.receivedAmount || 0) + paymentAmount;
-    const remainingAmount = Math.max(0, projectAmount - totalReceived);
-    
-    project.payment.receivedAmount = totalReceived;
-    project.payment.remainingAmount = remainingAmount;
-    project.payment.receivedAt = new Date(receivedAt);
-    project.payment.isFullyPaid = totalReceived >= projectAmount;
-    
-    // 自动判断回款状态
-    if (totalReceived >= projectAmount) {
-      project.payment.paymentStatus = 'paid'; // 已支付
-    } else if (totalReceived > 0) {
-      project.payment.paymentStatus = 'partially_paid'; // 部分支付
-    } else {
-      project.payment.paymentStatus = 'unpaid'; // 未支付
+    // 只有 confirmed 状态的记录才更新项目回款金额
+    if (paymentRecord.status === 'confirmed') {
+      const totalReceived = (project.payment?.receivedAmount || 0) + paymentAmount;
+      const remainingAmount = Math.max(0, projectAmount - totalReceived);
+      
+      project.payment.receivedAmount = totalReceived;
+      project.payment.remainingAmount = remainingAmount;
+      project.payment.receivedAt = new Date(receivedAt);
+      project.payment.isFullyPaid = totalReceived >= projectAmount;
+      
+      // 自动判断回款状态
+      if (totalReceived >= projectAmount) {
+        project.payment.paymentStatus = 'paid'; // 已支付
+      } else if (totalReceived > 0) {
+        project.payment.paymentStatus = 'partially_paid'; // 部分支付
+      } else {
+        project.payment.paymentStatus = 'unpaid'; // 未支付
+      }
+      
+      await project.save();
     }
-    
-    await project.save();
 
     // 如果关联了发票号，更新发票状态为已支付
     if (invoiceNumber) {
@@ -342,11 +716,11 @@ router.post('/payment/:projectId', allowManageFinance, async (req, res) => {
   }
 });
 
-// 查询项目回款记录（支持按回款状态筛选）
+// 查询项目回款记录（支持按回款状态筛选和确认状态筛选）
 router.get('/payment/:projectId', allowViewFinance, async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { paymentStatus, startDate, endDate } = req.query;
+    const { paymentStatus, startDate, endDate, status } = req.query; // status: pending, confirmed, rejected, approved
     
     // 获取项目信息
     const project = await Project.findById(projectId).select('projectAmount payment createdBy');
@@ -375,7 +749,7 @@ router.get('/payment/:projectId', allowViewFinance, async (req, res) => {
       }
     }
     
-    // 构建查询条件（支持日期范围筛选）
+    // 构建查询条件（支持日期范围筛选和确认状态筛选）
     const paymentQuery = { projectId };
     if (startDate || endDate) {
       paymentQuery.receivedAt = {};
@@ -388,14 +762,22 @@ router.get('/payment/:projectId', allowViewFinance, async (req, res) => {
         paymentQuery.receivedAt.$lte = end;
       }
     }
+    // 支持按确认状态筛选（pending, confirmed, rejected, approved）
+    if (status && ['pending', 'confirmed', 'rejected', 'approved'].includes(status)) {
+      paymentQuery.status = status;
+    }
     
     // 获取所有回款记录（按时间正序，以便计算累计状态）
     let records = await PaymentRecord.find(paymentQuery)
       .populate('recordedBy', 'name')
       .populate('receivedBy', 'name roles')
+      .populate('initiatedBy', 'name')
+      .populate('confirmedBy', 'name')
+      .populate('financeReviewedBy', 'name')
       .sort({ receivedAt: 1, createdAt: 1 }); // 按时间正序
     
     // 如果指定了回款状态筛选，需要根据累计回款金额判断每条记录发生时的状态
+    // 注意：只计算 confirmed 状态的记录
     if (paymentStatus) {
       const projectAmount = project.projectAmount || 0;
       
@@ -403,11 +785,13 @@ router.get('/payment/:projectId', allowViewFinance, async (req, res) => {
       if (projectAmount <= 0) {
         records = [];
       } else {
-        let cumulativeAmount = 0; // 累计回款金额
+        let cumulativeAmount = 0; // 累计回款金额（只计算 confirmed 状态）
         
         records = records.filter(record => {
-          // 先加上当前记录的金额，计算该记录发生后的累计金额
-          cumulativeAmount += record.amount || 0;
+          // 只有 confirmed 状态的记录才计入累计回款
+          if (record.status === 'confirmed') {
+            cumulativeAmount += record.amount || 0;
+          }
           
           // 判断该记录发生后的回款状态
           let recordStatus;
@@ -459,30 +843,35 @@ router.delete('/payment/:recordId', allowManageFinance, async (req, res) => {
     const amount = rec.amount || 0;
     await PaymentRecord.deleteOne({ _id: recordId });
     
-    // 回滚项目回款累计
-    const project = await Project.findById(projectId);
-    if (project) {
-      const current = project.payment?.receivedAmount || 0;
-      const newReceived = Math.max(0, current - amount);
-      const projectAmount = project.projectAmount || 0;
-      const remainingAmount = Math.max(0, projectAmount - newReceived);
-      
-      project.payment.receivedAmount = newReceived;
-      project.payment.remainingAmount = remainingAmount;
-      project.payment.isFullyPaid = newReceived >= projectAmount;
-      
-      // 重新判断回款状态
-      if (newReceived >= projectAmount) {
-        project.payment.paymentStatus = 'paid';
-      } else if (newReceived > 0) {
-        project.payment.paymentStatus = 'partially_paid';
-      } else {
-        project.payment.paymentStatus = 'unpaid';
+    // 只有 confirmed 状态的记录才影响项目回款，删除时需要回滚
+    // 如果是 pending 或 rejected 状态，不需要回滚
+    if (rec.status === 'confirmed') {
+      const project = await Project.findById(projectId);
+      if (project) {
+        const current = project.payment?.receivedAmount || 0;
+        const newReceived = Math.max(0, current - amount);
+        const projectAmount = project.projectAmount || 0;
+        const remainingAmount = Math.max(0, projectAmount - newReceived);
+        
+        project.payment.receivedAmount = newReceived;
+        project.payment.remainingAmount = remainingAmount;
+        project.payment.isFullyPaid = newReceived >= projectAmount;
+        
+        // 重新判断回款状态
+        if (newReceived >= projectAmount) {
+          project.payment.paymentStatus = 'paid';
+        } else if (newReceived > 0) {
+          project.payment.paymentStatus = 'partially_paid';
+        } else {
+          project.payment.paymentStatus = 'unpaid';
+        }
+        
+        await project.save();
       }
-      
-      await project.save();
+      res.json({ success: true, message: '回款记录已删除并已回滚项目回款' });
+    } else {
+      res.json({ success: true, message: '回款记录已删除（该记录未确认，不影响项目回款）' });
     }
-    res.json({ success: true, message: '回款记录已删除并已回滚项目回款' });
   } catch (error) {
     res.status(500).json({ 
       success: false, 
@@ -973,7 +1362,7 @@ router.get('/receivables/export', allowViewFinance, async (req, res) => {
       baseConditions.status = { $ne: 'cancelled' };
     }
     
-    // 销售/兼职销售仅能导出自己创建的项目
+    // 销售/客户经理仅能导出自己创建的项目
     
     const orConditions = [];
     // 预期回款日期筛选（支持日期范围）

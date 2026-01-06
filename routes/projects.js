@@ -65,7 +65,7 @@ router.use(authenticate);
 
 // 项目编号生成已移至 projectService
 
-// 创建项目（销售角色和兼职销售）
+// 创建项目（销售角色和客户经理）
 router.post('/create', 
   authorize('sales', 'admin', 'part_time_sales'),
   createProjectValidation,
@@ -81,7 +81,7 @@ router.post('/create',
     });
 }));
 
-// 更新项目（管理员、销售、兼职销售；含PM身份的销售也不可编辑）
+// 更新项目（管理员、销售、客户经理；含PM身份的销售也不可编辑）
 router.put('/:id', authorize('admin', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
   // 权限检查：管理员或纯销售可修改
   if (!canModifyProjectCheck(req)) {
@@ -98,7 +98,7 @@ router.put('/:id', authorize('admin', 'sales', 'part_time_sales'), asyncHandler(
   });
 }));
 
-// 取消/删除项目（管理员、销售、兼职销售；含PM身份的销售也不可删除）
+// 取消/删除项目（管理员、销售、客户经理；含PM身份的销售也不可删除）
 router.delete('/:id', authorize('admin', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
   // 权限检查：管理员或纯销售可删除
   if (!canDeleteProject(req)) {
@@ -130,7 +130,7 @@ router.get('/', asyncHandler(async (req, res) => {
       // 查看所有项目：管理员、财务、PM、综合岗
       // 不需要额外过滤
     } else if (viewPermission === 'sales') {
-      // 只看自己创建的项目：销售、兼职销售
+      // 只看自己创建的项目：销售、客户经理
       query.createdBy = req.user._id;
     } else if (viewPermission === 'assigned') {
       // 只看分配给我的项目：翻译、审校、排版
@@ -271,7 +271,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
   const isDeliveryOnly = isDeliveryOnlyUser(req.user, req.currentRole);
   const baseProjectData = isDeliveryOnly ? scrubCustomerInfo(project) : rawProject;
 
-  // 2) 新逻辑：客户联系人信息更严格——仅管理员或“当前以销售/兼职销售角色访问且为创建人”可见
+  // 2) 新逻辑：客户联系人信息更严格——仅管理员或"当前以销售/客户经理角色访问且为创建人"可见
   const isAdmin = req.user.roles.includes('admin');
   const currentRole = req.currentRole || (req.user.roles[0] || null);
   const isSalesRole = currentRole === 'sales' || currentRole === 'part_time_sales';
@@ -580,7 +580,7 @@ router.post('/:id/add-member', asyncHandler(async (req, res) => {
   }
 }));
 
-// 项目开始执行（管理员、销售、兼职销售）
+// 项目开始执行（管理员、销售、客户经理）
 router.post('/:id/start', authorize('admin', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
   // 使用服务层开始项目
   const project = await projectService.startProject(req.params.id, req.user);
@@ -611,7 +611,7 @@ router.post('/:id/status', authorize('admin', 'pm', 'translator', 'reviewer', 'l
   });
 }));
 
-// 标记返修（PM、管理员、销售、兼职销售）
+// 标记返修（PM、管理员、销售、客户经理）
 router.post('/:id/set-revision', authorize('pm', 'admin', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
   const { count } = req.body;
   
@@ -625,7 +625,7 @@ router.post('/:id/set-revision', authorize('pm', 'admin', 'sales', 'part_time_sa
   });
 }));
 
-// 标记延期（PM、管理员、销售、兼职销售）
+// 标记延期（PM、管理员、销售、客户经理）
 router.post('/:id/set-delay', authorize('pm', 'admin', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
   // 使用服务层标记延期
   const project = await projectService.setDelay(req.params.id, req.user);
@@ -637,7 +637,7 @@ router.post('/:id/set-delay', authorize('pm', 'admin', 'sales', 'part_time_sales
   });
 }));
 
-// 标记客户投诉（PM、管理员、销售、兼职销售）
+// 标记客户投诉（PM、管理员、销售、客户经理）
 router.post('/:id/set-complaint', authorize('pm', 'admin', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
   // 使用服务层标记客户投诉
   const project = await projectService.setComplaint(req.params.id, req.user);
@@ -649,7 +649,7 @@ router.post('/:id/set-complaint', authorize('pm', 'admin', 'sales', 'part_time_s
   });
 }));
 
-// 标记项目交付（仅当前角色为 管理员 / 销售 / 兼职销售 时可交付）
+// 标记项目交付（仅当前角色为 管理员 / 销售 / 客户经理 时可交付）
 router.post('/:id/finish', authorize('admin', 'sales', 'part_time_sales'), asyncHandler(async (req, res) => {
   // 使用当前角色（X-Role）判断，而不是用户所有角色，避免一人多角色情况下被错误拒绝
   const currentRole = req.currentRole || ((req.user.roles || [])[0] || null);
@@ -659,7 +659,7 @@ router.post('/:id/finish', authorize('admin', 'sales', 'part_time_sales'), async
   const canDeliver = isAdmin || isSales || isPartTimeSales;
 
   if (!canDeliver) {
-    throw new AppError('仅管理员、销售或兼职销售可交付项目（请切换到对应角色）', 403, 'PERMISSION_DENIED');
+    throw new AppError('仅管理员、销售或客户经理可交付项目（请切换到对应角色）', 403, 'PERMISSION_DENIED');
   }
 
   // 使用服务层完成项目（支持最终交付附件）
@@ -772,7 +772,7 @@ router.get('/:id/quotation', authenticate, asyncHandler(async (req, res) => {
     throw new AppError('项目不存在', 404, 'PROJECT_NOT_FOUND');
   }
   
-  // 检查权限：创建者、管理员、销售、兼职销售、财务可以导出
+  // 检查权限：创建者、管理员、销售、客户经理、财务可以导出
   // 业务调整：即使用户同时拥有 PM 角色，只要是项目创建人也允许导出报价单
   const isCreator = project.createdBy._id.toString() === req.user._id.toString();
   const isAdmin = req.user.roles.includes('admin');
@@ -781,7 +781,7 @@ router.get('/:id/quotation', authenticate, asyncHandler(async (req, res) => {
   const isPartTimeSales = req.user.roles.includes('part_time_sales');
   const isPM = req.user.roles.includes('pm');
 
-  // 角色维度的导出权限：管理员 / 财务 / 销售 / 兼职销售（非创建者时，如果同时是 PM，则不允许）
+  // 角色维度的导出权限：管理员 / 财务 / 销售 / 客户经理（非创建者时，如果同时是 PM，则不允许）
   const canViewByRole = (isAdmin || isFinance || isSales || isPartTimeSales) && !isPM;
   // 创建者始终可以导出，与是否同时是 PM 无关
   const canView = isCreator || canViewByRole;
@@ -813,7 +813,7 @@ router.get('/:id/quotation/word', authenticate, asyncHandler(async (req, res) =>
     throw new AppError('项目不存在', 404, 'PROJECT_NOT_FOUND');
   }
   
-  // 检查权限：创建者、管理员、销售、兼职销售、财务可以导出
+  // 检查权限：创建者、管理员、销售、客户经理、财务可以导出
   const isCreator = project.createdBy._id.toString() === req.user._id.toString();
   const isAdmin = req.user.roles.includes('admin');
   const isFinance = req.user.roles.includes('finance');
@@ -821,7 +821,7 @@ router.get('/:id/quotation/word', authenticate, asyncHandler(async (req, res) =>
   const isPartTimeSales = req.user.roles.includes('part_time_sales');
   const isPM = req.user.roles.includes('pm');
   
-  // 角色维度的导出权限：管理员 / 财务 / 销售 / 兼职销售（非创建者时，如果同时是 PM，则不允许）
+  // 角色维度的导出权限：管理员 / 财务 / 销售 / 客户经理（非创建者时，如果同时是 PM，则不允许）
   const canViewByRole = (isAdmin || isFinance || isSales || isPartTimeSales) && !isPM;
   // 创建者始终可以导出，与是否同时是 PM 无关
   const canView = isCreator || canViewByRole;
@@ -854,7 +854,7 @@ router.get('/:id/contract', authenticate, asyncHandler(async (req, res) => {
     throw new AppError('项目不存在', 404, 'PROJECT_NOT_FOUND');
   }
   
-  // 检查权限：创建者、管理员、销售、兼职销售、财务、项目经理可以导出
+  // 检查权限：创建者、管理员、销售、客户经理、财务、项目经理可以导出
   const isCreator = project.createdBy._id.toString() === req.user._id.toString();
   const isAdmin = req.user.roles.includes('admin');
   const isFinance = req.user.roles.includes('finance');
@@ -862,7 +862,7 @@ router.get('/:id/contract', authenticate, asyncHandler(async (req, res) => {
   const isPartTimeSales = req.user.roles.includes('part_time_sales');
   const isPM = req.user.roles.includes('pm');
   
-  // 角色维度的导出权限：管理员 / 财务 / 销售 / 兼职销售 / 项目经理
+  // 角色维度的导出权限：管理员 / 财务 / 销售 / 客户经理 / 项目经理
   const canViewByRole = isAdmin || isFinance || isSales || isPartTimeSales || isPM;
   // 创建者始终可以导出
   const canView = isCreator || canViewByRole;

@@ -149,6 +149,7 @@ export async function loadDashboard() {
         renderDashboardCards(data);
         renderDashboardCharts(data);
         syncWarningsToNotifications(data);
+        renderPendingPayments(data);
     } catch (error) {
         showAlert('dashboardCards', '加载业务看板失败: ' + error.message, 'error');
     } finally {
@@ -452,6 +453,16 @@ function renderDashboardCards(data) {
                     <div class="card-desc">近7天交付逾期项目</div>
                 </div>
             </div>
+            ${data.pendingPaymentCount > 0 ? `
+            <div class="card stat-card stat-warning" data-click="showPendingPayments()">
+                <div class="stat-icon">💰</div>
+                <div class="stat-content">
+                    <div class="card-title">待确认收款</div>
+                    <div class="card-value">${data.pendingPaymentCount}</div>
+                    <div class="card-desc">需要我确认的收款记录</div>
+                </div>
+            </div>
+            ` : ''}
         </div>
     `;
 
@@ -1140,6 +1151,87 @@ function loadPaymentWarningProjects(onlyRecent = false) {
         showToast('加载回款预警项目失败', 'error');
     });
 }
+
+// 显示待确认收款列表
+function renderPendingPayments(data) {
+    const pendingPayments = data.pendingPaymentRecords || [];
+    const container = document.getElementById('dashboardPendingPayments');
+    if (!container) return;
+    
+    if (pendingPayments.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+    
+    const methodText = {
+        cash: '现金',
+        alipay: '支付宝',
+        wechat: '微信',
+        bank: '银行转账'
+    };
+    
+    const listHtml = pendingPayments.map(r => `
+        <div class="card" style="margin-bottom: 10px; padding: 12px; background: #fff3cd; border-left: 4px solid #ffc107;">
+            <div style="display: flex; justify-content: space-between; align-items: start;">
+                <div style="flex: 1;">
+                    <div style="font-weight: 600; margin-bottom: 6px;">
+                        ${r.projectNumber || r.projectName || '未知项目'}
+                    </div>
+                    <div style="font-size: 12px; color: #666; margin-bottom: 4px;">
+                        金额：¥${(r.amount || 0).toLocaleString()} | 
+                        支付方式：${methodText[r.method] || r.method} | 
+                        发起人：${r.initiatedBy || '未知'}
+                    </div>
+                    <div style="font-size: 12px; color: #999;">
+                        回款日期：${new Date(r.receivedAt).toLocaleDateString()} | 
+                        发起时间：${new Date(r.createdAt).toLocaleString()}
+                    </div>
+                </div>
+                <div style="display: flex; gap: 8px; margin-left: 12px;">
+                    <button class="btn-small btn-success" data-click="confirmPaymentFromDashboard('${r.id}', '${r.projectId}', 'confirm')" style="background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; white-space: nowrap;">确认</button>
+                    <button class="btn-small btn-danger" data-click="confirmPaymentFromDashboard('${r.id}', '${r.projectId}', 'reject')" style="background: #dc2626; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; white-space: nowrap;">拒绝</button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+    
+    container.innerHTML = `
+        <div class="card" style="margin-bottom: 15px;">
+            <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>待确认收款（${pendingPayments.length}）</span>
+                ${pendingPayments[0]?.projectId ? `<button class="btn-small" data-click="viewProject('${pendingPayments[0].projectId}')" style="font-size: 12px;">查看项目</button>` : ''}
+            </div>
+            <div style="max-height: 400px; overflow-y: auto;">
+                ${listHtml}
+            </div>
+        </div>
+    `;
+}
+
+// 从dashboard确认/拒绝收款
+export async function confirmPaymentFromDashboard(recordId, projectId, action) {
+    try {
+        const { confirmPaymentRecord } = await import('./project.js');
+        const result = await confirmPaymentRecord(recordId, projectId, action);
+        if (result !== false) {
+            // 刷新dashboard
+            await loadDashboard();
+        }
+    } catch (error) {
+        console.error('[Dashboard] 确认收款失败:', error);
+        showToast('操作失败: ' + error.message, 'error');
+    }
+}
+
+// 显示待确认收款（供卡片点击）
+window.showPendingPayments = function() {
+    const container = document.getElementById('dashboardPendingPayments');
+    if (container && container.innerHTML) {
+        container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+        loadDashboard();
+    }
+};
 
 // 挂载到 Window 供 HTML 调用
 

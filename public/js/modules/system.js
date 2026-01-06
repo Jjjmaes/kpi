@@ -1,6 +1,7 @@
 import { apiFetch } from '../core/api.js';
 import { showAlert, showToast, hasPermission } from '../core/utils.js';
 import { showModal } from '../core/ui.js';
+import { state, setSystemConfig } from '../core/state.js';
 
 // 缓存配置历史
 let configHistoryCache = [];
@@ -30,6 +31,25 @@ export async function loadOrgInfo() {
     if (loginTitle) loginTitle.textContent = titleText;
     const mainTitle = document.getElementById('mainTitle');
     if (mainTitle) mainTitle.textContent = titleText;
+}
+
+// 加载系统配置（用于客户经理佣金计算等，所有用户都需要）
+export async function loadSystemConfig() {
+    try {
+        const response = await apiFetch('/config');
+        const data = await response.json();
+        if (data.success && data.data) {
+            const config = data.data;
+            // 更新 state.systemConfig
+            setSystemConfig(config);
+            console.log('[System] 系统配置已加载:', config);
+        }
+    } catch (error) {
+        console.error('[System] 加载系统配置失败:', error);
+        // 失败时使用默认值
+        const defaultConfig = { part_time_sales_tax_rate: 0.1 };
+        setSystemConfig(defaultConfig);
+    }
 }
 
 export async function loadConfig() {
@@ -114,6 +134,11 @@ export async function loadConfig() {
                     <label>完成系数（基础值）</label>
                     <input type="number" step="0.001" value="${config.completion_factor}" name="completion_factor" required>
                 </div>
+                <div class="form-group">
+                    <label>客户经理佣金税率（%）</label>
+                    <input type="number" step="0.01" min="0" max="100" value="${(config.part_time_sales_tax_rate || 0) * 100}" name="part_time_sales_tax_rate" required>
+                    <small style="color: #666; font-size: 12px;">用于计算客户经理佣金：佣金 = (项目总金额 - 公司应收金额) × (1 - 税率)</small>
+                </div>
                 
                 <h3 style="margin: 20px 0 10px; color: #333; border-bottom: 2px solid #667eea; padding-bottom: 8px;">角色KPI系数配置</h3>
                 <p style="color: #666; font-size: 14px; margin-bottom: 12px; background: #f0f4ff; padding: 10px; border-radius: 4px; border-left: 4px solid #667eea;">
@@ -164,6 +189,13 @@ export async function loadConfig() {
                 Object.keys(payload).forEach(k => {
                     if (numberFields.includes(k) && payload[k]) payload[k] = parseFloat(payload[k]);
                 });
+                // 客户经理税率单独处理：前端以百分比展示，提交时转换为 0-1 小数
+                if (payload.part_time_sales_tax_rate !== undefined && payload.part_time_sales_tax_rate !== '') {
+                    const ratePercent = parseFloat(payload.part_time_sales_tax_rate);
+                    if (!isNaN(ratePercent)) {
+                        payload.part_time_sales_tax_rate = ratePercent / 100;
+                    }
+                }
                 // 处理 checkbox：如果选中则为 true，否则为 false
                 payload.allow_self_assignment = formData.has('allow_self_assignment');
                 

@@ -612,7 +612,11 @@ export function togglePartTimeSalesFields() {
 }
 
 export function calculatePartTimeSalesCommission() {
-    const isPartTimeSales = document.querySelector('input[name="partTimeSales.isPartTime"]')?.checked;
+    // 检查客户经理是否启用：可能是 checkbox（普通用户）或 hidden input（客户经理角色）
+    const checkbox = document.querySelector('input[name="partTimeSales.isPartTime"][type="checkbox"]');
+    const hiddenInput = document.querySelector('input[name="partTimeSales.isPartTime"][type="hidden"]');
+    const isPartTimeSales = (checkbox?.checked === true) || (hiddenInput?.value === 'on');
+    
     const companyReceivableInput = document.getElementById('partTimeCompanyReceivable');
     const preview = document.getElementById('partTimeSalesCommissionPreview');
     if (!isPartTimeSales || !companyReceivableInput || !preview) {
@@ -621,13 +625,20 @@ export function calculatePartTimeSalesCommission() {
     }
     const amount = parseFloat(document.getElementById('projectAmount')?.value || 0);
     const companyReceivable = parseFloat(companyReceivableInput.value || 0);
-    const taxRate = parseFloat(document.getElementById('partTimeTaxRate')?.value || 0) / 100;
+    // 税率统一来自系统配置（KpiConfig.part_time_sales_tax_rate，以 0-1 存储）
+    const taxRate = (state.systemConfig?.part_time_sales_tax_rate ?? 0);
     if (!amount) {
         preview.textContent = '当前预估佣金：--（请先填写项目金额）';
         return;
     }
+    if (companyReceivable <= 0) {
+        preview.textContent = '当前预估佣金：--（请先填写公司应收金额）';
+        return;
+    }
+    // 如果系统配置未加载，使用默认税率 10%
+    const effectiveTaxRate = taxRate > 0 ? taxRate : 0.1;
     const receivableAmount = amount - companyReceivable;
-    const taxAmount = receivableAmount * taxRate;
+    const taxAmount = receivableAmount * effectiveTaxRate;
     const commission = receivableAmount - taxAmount;
     preview.textContent = `当前预估佣金：¥${Math.max(0, commission).toFixed(2)}`;
 }
@@ -937,9 +948,9 @@ export async function showCreateProjectModal() {
             </div>
 
             ${isPartTimeSalesRole ? `
-            <!-- 当前登录人本身是兼职销售：必须录入自己的分成信息，无需再勾选 -->
+            <!-- 当前登录人本身是客户经理：必须录入自己的分成信息，无需再勾选（税率由系统配置统一控制） -->
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
-                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">兼职销售（当前角色）</h4>
+                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">客户经理（当前角色）</h4>
                 <input type="hidden" name="partTimeSales.isPartTime" value="on">
                 <div id="partTimeSalesFields" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
                     <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -947,23 +958,20 @@ export async function showCreateProjectModal() {
                             <label>公司应收（含税） *</label>
                             <input type="number" id="partTimeCompanyReceivable" name="partTimeSales.companyReceivable" step="0.01" min="0" required placeholder="请输入公司应收" data-change="calculatePartTimeSalesCommission()">
                         </div>
-                        <div style="flex:1;min-width:220px;">
-                            <label>税率(%)</label>
-                            <input type="number" id="partTimeTaxRate" name="partTimeSales.taxRate" step="0.01" min="0" max="100" value="0" data-change="calculatePartTimeSalesCommission()">
-                        </div>
+                        <!-- 税率不再由前端填写，统一从系统配置中读取 -->
                     </div>
-                    <small style="color:#666;font-size:12px;">佣金 = 项目金额 - 公司应收 - 税费（仅用于预估分成展示，不影响项目金额）。</small>
+                    <small style="color:#666;font-size:12px;">佣金 = 项目金额 - 公司应收 - 税费（税率由系统配置统一控制，仅用于预估分成展示）。</small>
                     <div id="partTimeSalesCommissionPreview" style="font-size:12px;color:#0369a1;margin-top:4px;">当前预估佣金：--</div>
                 </div>
             </div>
             ` : (
-                // 普通销售账号不允许在这里配置“兼职销售”，由管理员/PM 在需要时启用
+                // 普通销售账号不允许在这里配置"客户经理"，由管理员/PM 在需要时启用（税率由系统配置统一控制）
                 isSalesRole ? '' : `
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
-                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">兼职销售</h4>
+                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">客户经理</h4>
                 <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
                     <input type="checkbox" name="partTimeSales.isPartTime" id="partTimeSalesCheckbox" data-change="togglePartTimeSalesFields()">
-                    启用兼职销售
+                    启用客户经理
                 </label>
                 <div id="partTimeSalesFields" style="display:none;flex-direction:column;gap:8px;margin-top:8px;">
                     <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -971,12 +979,9 @@ export async function showCreateProjectModal() {
                             <label>公司应收（含税）</label>
                             <input type="number" id="partTimeCompanyReceivable" name="partTimeSales.companyReceivable" step="0.01" min="0" placeholder="请输入公司应收">
                         </div>
-                        <div style="flex:1;min-width:220px;">
-                            <label>税率(%)</label>
-                            <input type="number" id="partTimeTaxRate" name="partTimeSales.taxRate" step="0.01" min="0" max="100" value="0" data-change="calculatePartTimeSalesCommission()">
-                        </div>
+                        <!-- 税率不再由前端填写，统一从系统配置中读取 -->
                     </div>
-                    <small style="color:#666;font-size:12px;">佣金 = 项目金额 - 公司应收 - 税费（仅在勾选兼职销售时计算）。</small>
+                    <small style="color:#666;font-size:12px;">佣金 = 项目金额 - 公司应收 - 税费（税率由系统配置统一控制，仅在勾选客户经理时计算）。</small>
                     <div id="partTimeSalesCommissionPreview" style="font-size:12px;color:#0369a1;margin-top:4px;">当前预估佣金：--</div>
                 </div>
             </div>
@@ -1096,7 +1101,7 @@ export async function showCreateProjectModal() {
             updateCreateProjectMembersList();
         }
         toggleProjectFields();
-        // 兼职销售角色：自动计算佣金，显示兼职销售区域
+        // 客户经理角色：自动计算佣金，显示客户经理区域
         if (isPartTimeSalesRole) {
             calculatePartTimeSalesCommission();
         }
@@ -1488,7 +1493,7 @@ export async function createProject(e) {
     const isSalesRole = currentRole === 'sales';
     const partTimeSalesEnabled = isPartTimeSalesRole ? true : isSalesRole ? false : formData.get('partTimeSales.isPartTime') === 'on';
     
-    // 兼职销售创建项目时，验证必填字段
+    // 客户经理创建项目时，验证必填字段
     if (isPartTimeSalesRole) {
         const companyReceivable = parseFloat(formData.get('partTimeSales.companyReceivable') || 0);
         const projectAmount = parseFloat(formData.get('projectAmount') || 0);
@@ -1506,8 +1511,8 @@ export async function createProject(e) {
     
     const partTimeSales = partTimeSalesEnabled ? {
         isPartTime: true,
-        companyReceivable: parseFloat(formData.get('partTimeSales.companyReceivable') || 0),
-        taxRate: parseFloat(formData.get('partTimeSales.taxRate') || 0) / 100
+        companyReceivable: parseFloat(formData.get('partTimeSales.companyReceivable') || 0)
+        // 税率不再由前端提交，统一由后端根据系统配置注入
     } : undefined;
     
     const partTimeLayoutEnabled = formData.get('partTimeLayout.isPartTime') === 'on';
@@ -1812,8 +1817,8 @@ export function calculateEditPartTimeSalesCommission() {
     }
     const totalAmount = parseFloat(document.querySelector('#editProjectForm [name="projectAmount"]')?.value || 0);
     const companyReceivable = parseFloat(document.getElementById('editCompanyReceivable')?.value || 0);
-    const taxRatePercent = parseFloat(document.getElementById('editTaxRate')?.value || 0);
-    const taxRate = taxRatePercent / 100;
+    // 税率统一来自系统配置（KpiConfig.part_time_sales_tax_rate，以 0-1 存储）
+    const taxRate = (state.systemConfig?.part_time_sales_tax_rate ?? 0);
     if (totalAmount <= 0) {
         const display = document.getElementById('editPartTimeSalesCommissionDisplay');
         if (display) display.textContent = '¥0.00';
@@ -2027,21 +2032,17 @@ export async function showEditProjectModal() {
             </div>
             
             <div class="form-group" style="border-top: 1px solid #ddd; padding-top: 15px; margin-top: 20px;">
-                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">兼职销售（可选）</h4>
+                <h4 style="margin-bottom: 15px; font-size: 14px; color: #667eea;">客户经理（可选）</h4>
                 <label style="display: flex; align-items: center; gap: 5px; font-weight: normal; margin-bottom: 10px;">
                     <input type="checkbox" name="partTimeSales.isPartTime" id="editPartTimeSalesEnabled" ${p.partTimeSales?.isPartTime ? 'checked' : ''} onchange="toggleEditPartTimeSalesFields()">
-                    启用兼职销售
+                    启用客户经理
                 </label>
                 <div id="editPartTimeSalesFields" style="display: ${p.partTimeSales?.isPartTime ? 'block' : 'none'}; padding-left: 20px; border-left: 2px solid #667eea;">
                     <div class="form-group" style="margin-bottom: 10px;">
                         <label>公司应收金额（元）</label>
                         <input type="number" name="partTimeSales.companyReceivable" id="editCompanyReceivable" step="0.01" min="0" value="${p.partTimeSales?.companyReceivable || 0}" onchange="calculateEditPartTimeSalesCommission()" style="width: 100%;">
                     </div>
-                    <div class="form-group" style="margin-bottom: 10px;">
-                        <label>税率（%）</label>
-                        <input type="number" name="partTimeSales.taxRate" id="editTaxRate" step="0.01" min="0" max="100" value="${(p.partTimeSales?.taxRate || 0) * 100}" onchange="calculateEditPartTimeSalesCommission()" style="width: 100%;">
-                        <small style="color: #666; font-size: 12px;">例如：10 表示 10%</small>
-                    </div>
+                    <!-- 税率不再由前端填写，统一从系统配置中读取 -->
                     <div class="form-group" style="background: #f0f9ff; padding: 10px; border-radius: 4px; margin-top: 10px;">
                         <label style="font-weight: 600; color: #0369a1;">返还佣金（自动计算）</label>
                         <div id="editPartTimeSalesCommissionDisplay" style="font-size: 18px; color: #0369a1; font-weight: bold; margin-top: 5px;">
@@ -2438,8 +2439,8 @@ export async function updateProject(e, projectId) {
     const editPartTimeSalesEnabled = formData.get('partTimeSales.isPartTime') === 'on';
     const editPartTimeSales = editPartTimeSalesEnabled ? {
         isPartTime: true,
-        companyReceivable: parseFloat(formData.get('partTimeSales.companyReceivable') || 0),
-        taxRate: parseFloat(formData.get('partTimeSales.taxRate') || 0) / 100
+        companyReceivable: parseFloat(formData.get('partTimeSales.companyReceivable') || 0)
+        // 税率不再由前端提交，统一由后端根据系统配置注入
     } : { isPartTime: false, companyReceivable: 0, taxRate: 0 };
     const editPartTimeLayoutEnabled = formData.get('partTimeLayout.isPartTime') === 'on';
     const editLayoutCost = parseFloat(formData.get('partTimeLayout.layoutCost') || 0);
@@ -2566,7 +2567,7 @@ export async function viewProject(projectId) {
         const canStart = isAdmin || isSales || isPartTimeSales;
         const canSchedule = isAdmin || isPM;
         const canQualityOps = isAdmin || isPM || isSales || isPartTimeSales;
-        // 对外交付（面向客户）：仅管理员 / 销售 / 兼职销售
+        // 对外交付（面向客户）：仅管理员 / 销售 / 客户经理
         const canDeliver = (isAdmin || isSales || isPartTimeSales) && !isPM;
         const canEditDeleteExport = (isAdmin || isSales || isPartTimeSales) && !isPM;
         const canExportContract = isAdmin || isSales || isPartTimeSales || isPM;
@@ -2577,8 +2578,11 @@ export async function viewProject(projectId) {
 
         // 销售只能查看回款信息，不能修改；只有财务和管理员可以修改回款
         // 这里仍然使用 hasFinanceRole，因为后端权限检查基于用户拥有的角色
+        // 但是发起收款表单应该基于当前选择的角色，而不是用户拥有的所有角色
         const canManagePayment = hasFinanceRole;
         const canViewPayment = canManagePayment || project.createdBy?._id === state.currentUser?._id;
+        // 销售发起收款：当前角色是销售/客户经理，且不是财务/管理员角色（基于当前角色）
+        const canInitiatePayment = (isSales || isPartTimeSales) && !isFinance && !isAdmin;
 
         const memberRoles = (project.members || []).reduce((acc, m) => {
             if (!m || !m.userId || !state.currentUser?._id) return acc;
@@ -2633,7 +2637,7 @@ export async function viewProject(projectId) {
                     ${project.needInvoice ? `<div class="detail-row"><div class="detail-label">发票:</div><div class="detail-value"><span class="badge badge-info">需要发票</span></div></div>` : ''}
                     ${project.partTimeSales?.isPartTime && canViewProjectAmount() ? `
                         <div class="detail-row" style="background: #f0f9ff; padding: 10px; border-radius: 4px; margin-top: 10px;">
-                            <div class="detail-label" style="font-weight: 600; color: #0369a1;">兼职销售信息:</div>
+                            <div class="detail-label" style="font-weight: 600; color: #0369a1;">客户经理信息:</div>
                             <div class="detail-value" style="color: #0369a1;">
                                 <div>公司应收金额: ¥${(project.partTimeSales.companyReceivable || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                                 <div>税率: ${((project.partTimeSales.taxRate || 0) * 100).toFixed(2)}%</div>
@@ -2701,6 +2705,53 @@ export async function viewProject(projectId) {
                     <div class="detail-row"><div class="detail-label">已回款金额:</div><div class="detail-value">¥${(project.payment?.receivedAmount || 0).toLocaleString()}</div></div>
                     <div class="detail-row"><div class="detail-label">回款日期:</div><div class="detail-value">${project.payment?.receivedAt ? new Date(project.payment.receivedAt).toLocaleDateString() : '-'}</div></div>
                     <div class="detail-row"><div class="detail-label">是否回款完成:</div><div class="detail-value">${project.payment?.isFullyPaid ? '<span class="badge badge-success">是</span>' : '<span class="badge badge-warning">否</span>'}</div></div>
+                    ${canInitiatePayment ? `
+                        <div style="margin-top: 15px; padding: 15px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
+                            <div style="font-weight: 600; margin-bottom: 10px;">发起收款（销售）</div>
+                            <div style="font-size: 12px; color: #666; margin-bottom: 10px;">发起后，收款人需要确认，确认后才会更新项目回款状态</div>
+                            <form id="initiatePaymentForm_${projectId}" data-submit="initiatePaymentRecord(event, '${projectId}')" style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
+                                <div style="width: 180px; min-width: 150px;">
+                                    <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">回款日期 <span style="color: #e74c3c;">*</span></label>
+                                    <input type="date" id="initiatePaymentDate_${projectId}" required style="padding: 6px; width: 100%;" value="${new Date().toISOString().split('T')[0]}">
+                                </div>
+                                <div style="width: 140px; min-width: 120px;">
+                                    <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">金额 <span style="color: #e74c3c;">*</span></label>
+                                    <input type="number" step="0.01" id="initiatePaymentAmount_${projectId}" required style="padding: 6px; width: 100%;" placeholder="0.00">
+                                </div>
+                                <div style="width: 140px; min-width: 120px;">
+                                    <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">支付方式 <span style="color: #e74c3c;">*</span></label>
+                                    <select id="initiatePaymentMethod_${projectId}" required style="padding: 6px; width: 100%;" data-change="handleInitiatePaymentMethodChange('${projectId}')">
+                                        <option value="cash">现金</option>
+                                        <option value="alipay">支付宝</option>
+                                        <option value="wechat">微信</option>
+                                    </select>
+                                </div>
+                                <div id="initiatePaymentReceiverWrap_${projectId}" style="width: 160px; min-width: 140px;">
+                                    <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">收款人 <span style="color: #e74c3c;">*</span></label>
+                                    <select id="initiatePaymentReceivedBy_${projectId}" required style="padding: 6px; width: 100%;">
+                                        <option value="">加载中...</option>
+                                    </select>
+                                </div>
+                                <div style="width: 160px; min-width: 140px;">
+                                    <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">凭证号</label>
+                                    <input type="text" id="initiatePaymentReference_${projectId}" style="padding: 6px; width: 100%;" placeholder="可选">
+                                </div>
+                                <div style="width: 200px; min-width: 180px;">
+                                    <label style="font-size: 12px; color: #666; display: block; margin-bottom: 4px;">备注</label>
+                                    <input type="text" id="initiatePaymentNote_${projectId}" style="padding: 6px; width: 100%;" placeholder="可选">
+                                </div>
+                                <div>
+                                    <button type="submit" style="padding: 6px 16px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">发起收款</button>
+                                </div>
+                            </form>
+                        </div>
+                    ` : ''}
+                    ${canViewPayment ? `
+                        <div style="margin-top: 15px;">
+                            <div style="font-weight: 600; margin-bottom: 10px;">回款记录</div>
+                            <div id="projectPaymentRecordsList_${projectId}"><div class="card-desc">加载中...</div></div>
+                        </div>
+                    ` : ''}
                 </div>
 
                 <div class="detail-section">
@@ -2941,6 +2992,19 @@ export async function viewProject(projectId) {
             // 只有当有财务权限时才加载回款和发票数据
             loadProjectPayments(projectId);
             loadProjectInvoices(projectId);
+        }
+        // 销售可以查看回款记录
+        if (canViewPayment && (isSales || isPartTimeSales)) {
+            loadProjectPaymentRecords(projectId);
+            // 加载收款人选项（如果发起收款表单存在）
+            setTimeout(() => {
+                const selectEl = document.getElementById(`initiatePaymentReceivedBy_${projectId}`);
+                if (selectEl) {
+                    handleInitiatePaymentMethodChange(projectId).catch(err => {
+                        console.warn('[viewProject] 加载收款人选项失败:', err);
+                    });
+                }
+            }, 100);
         }
     } catch (error) {
         alert('加载项目详情失败: ' + error.message);
@@ -3388,7 +3452,7 @@ async function initInlineCreateMemberForm() {
         { value: 'pm', label: '项目经理' },
         { value: 'sales', label: '销售' },
         { value: 'admin_staff', label: '综合岗' },
-        { value: 'part_time_sales', label: '兼职销售' },
+        { value: 'part_time_sales', label: '客户经理' },
         { value: 'layout', label: '兼职排版' }
     ];
 
@@ -3701,7 +3765,7 @@ export async function showAddMemberModalForCreate() {
             { value: 'pm', label: '项目经理' },
             { value: 'sales', label: '销售' },
             { value: 'admin_staff', label: '综合岗' },
-            { value: 'part_time_sales', label: '兼职销售' },
+            { value: 'part_time_sales', label: '客户经理' },
             { value: 'layout', label: '兼职排版' }
         ];
         availableRoles = [
@@ -4091,7 +4155,7 @@ export async function showAddMemberModal(projectId) {
         { value: 'pm', label: '项目经理' },
         { value: 'sales', label: '销售' },
         { value: 'admin_staff', label: '综合岗' },
-        { value: 'part_time_sales', label: '兼职销售' },
+        { value: 'part_time_sales', label: '客户经理' },
         { value: 'layout', label: '兼职排版' }
     ];
     if (isAdmin) {
@@ -6155,6 +6219,132 @@ window.showEvaluationModalForPM = async function(projectId, pmId, pmName) {
 
 window.showProjectEvaluationsList = async function(projectId) {
     await showProjectEvaluationsList(projectId);
+}
+
+// 加载项目回款记录（供销售查看）
+async function loadProjectPaymentRecords(projectId) {
+    const containerId = `projectPaymentRecordsList_${projectId}`;
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    try {
+        const res = await apiFetch(`/finance/payment/${projectId}`);
+        const data = await res.json();
+        if (!data.success) {
+            container.innerHTML = `<div style="color: #ef4444;">加载失败: ${data.message || '未知错误'}</div>`;
+            return;
+        }
+        
+        const records = data.data || [];
+        if (records.length === 0) {
+            container.innerHTML = '<div class="card-desc">暂无回款记录</div>';
+            return;
+        }
+        
+        // 状态标签映射
+        const statusText = {
+            pending: '待确认',
+            confirmed: '已确认',
+            rejected: '已拒绝',
+            approved: '已检查'
+        };
+        const statusBadgeClass = {
+            pending: 'badge-warning',
+            confirmed: 'badge-success',
+            rejected: 'badge-danger',
+            approved: 'badge-info'
+        };
+        
+        const currentUserId = state.currentUser?._id;
+        
+        const rows = records.map(r => {
+            const status = r.status || 'confirmed';
+            const statusBadge = `<span class="badge ${statusBadgeClass[status] || 'badge-secondary'}">${statusText[status] || status}</span>`;
+            
+            // 判断是否可以确认
+            const receivedById = r.receivedBy?._id || r.receivedBy;
+            const canConfirm = r.status === 'pending' && receivedById && receivedById.toString() === currentUserId?.toString();
+            
+            let actionButtons = '';
+            if (canConfirm) {
+                actionButtons = `
+                    <button class="btn-small btn-success" data-click="confirmPaymentRecord('${r._id}', '${projectId}', 'confirm')" style="margin-right: 4px;">确认</button>
+                    <button class="btn-small btn-danger" data-click="confirmPaymentRecord('${r._id}', '${projectId}', 'reject')">拒绝</button>
+                `;
+            }
+            
+            return `
+                <tr>
+                    <td>${new Date(r.receivedAt).toLocaleDateString()}</td>
+                    <td>¥${(r.amount || 0).toLocaleString()}</td>
+                    <td>${r.method === 'bank' ? '银行转账' : r.method === 'cash' ? '现金' : r.method === 'alipay' ? '支付宝' : r.method === 'wechat' ? '微信' : r.method || '-'}</td>
+                    <td>${r.receivedBy?.name || '-'}</td>
+                    <td>${r.reference || '-'}</td>
+                    <td>${r.initiatedBy?.name || r.recordedBy?.name || '-'}</td>
+                    <td>${statusBadge}</td>
+                    ${actionButtons ? `<td>${actionButtons}</td>` : '<td>-</td>'}
+                </tr>
+            `;
+        }).join('');
+        
+        container.innerHTML = `
+            <table class="table-sticky" style="width: 100%;">
+                <thead>
+                    <tr>
+                        <th>回款日期</th><th>金额</th><th>支付方式</th><th>收款人</th>
+                        <th>凭证号</th><th>发起人</th><th>状态</th><th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    } catch (error) {
+        container.innerHTML = `<div style="color: #ef4444;">加载失败: ${error.message}</div>`;
+    }
+}
+
+// 发起收款（供项目详情页使用）
+export async function initiatePaymentRecord(e, projectId) {
+    const { initiatePaymentRecord: financeInitiatePaymentRecord } = await import('./finance.js');
+    const result = await financeInitiatePaymentRecord(e, projectId);
+    // 刷新项目详情页的回款记录
+    if (result !== false) {
+        loadProjectPaymentRecords(projectId);
+        // 刷新项目详情（更新回款金额）
+        viewProject(projectId);
+    }
+    return result;
+}
+
+// 处理发起收款支付方式变更
+export async function handleInitiatePaymentMethodChange(projectId) {
+    const { handleInitiatePaymentMethodChange: financeHandleMethodChange, populatePaymentReceiverOptions } = await import('./finance.js');
+    await financeHandleMethodChange(projectId);
+    // 确保收款人选项已加载（如果元素存在）
+    const selectEl = document.getElementById(`initiatePaymentReceivedBy_${projectId}`);
+    if (selectEl) {
+        populatePaymentReceiverOptions(projectId, `initiatePaymentReceivedBy_${projectId}`, `initiatePaymentReceiverWrap_${projectId}`, `initiatePaymentMethod_${projectId}`);
+    }
+}
+
+// 确认/拒绝收款记录
+export async function confirmPaymentRecord(recordId, projectId, action) {
+    const { confirmPaymentRecord: financeConfirmPaymentRecord } = await import('./finance.js');
+    const result = await financeConfirmPaymentRecord(recordId, projectId, action);
+    // 刷新项目详情页的回款记录（如果项目详情页已打开）
+    if (result !== false) {
+        // 检查项目详情页是否已打开
+        const modalOverlay = document.getElementById('modalOverlay');
+        const isProjectDetailOpen = modalOverlay && modalOverlay.classList.contains('active');
+        
+        if (isProjectDetailOpen) {
+            // 刷新项目详情页的回款记录
+            loadProjectPaymentRecords(projectId);
+            // 刷新项目详情（更新回款金额）
+            viewProject(projectId);
+        }
+    }
+    return result;
 }
 
 // --- 暴露给 Window ---

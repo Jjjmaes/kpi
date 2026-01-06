@@ -21,7 +21,7 @@ const paymentRecordSchema = new mongoose.Schema({
     enum: ['bank', 'cash', 'alipay', 'wechat', 'other'],
     default: 'bank'
   },
-  // 收款人（现金/支付宝/微信需填写），需为项目成员，且角色为销售/兼职销售/财务
+  // 收款人（现金/支付宝/微信需填写），需为项目成员，且角色为销售/客户经理/财务
   receivedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
@@ -36,6 +36,49 @@ const paymentRecordSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now
+  },
+  // 收款确认流程相关字段
+  status: {
+    type: String,
+    enum: ['pending', 'confirmed', 'rejected', 'approved'],
+    default: 'pending', // 待确认
+    index: true
+  },
+  // 发起人（销售/客户经理）
+  initiatedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  // 确认人（收款人/现金保管员）
+  confirmedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  // 确认时间
+  confirmedAt: {
+    type: Date
+  },
+  // 确认备注
+  confirmNote: {
+    type: String
+  },
+  // 财务是否已检查
+  financeReviewed: {
+    type: Boolean,
+    default: false
+  },
+  // 财务检查人
+  financeReviewedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  // 财务检查时间
+  financeReviewedAt: {
+    type: Date
+  },
+  // 财务检查备注
+  financeReviewNote: {
+    type: String
   }
 });
 

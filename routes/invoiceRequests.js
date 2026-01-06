@@ -12,12 +12,12 @@ const emailService = require('../services/emailService');
 // 所有路由需要认证
 router.use(authenticate);
 
-// 权限：销售/兼职销售可以创建和查看自己的申请，财务可以查看所有并审批
+// 权限：销售/客户经理可以创建和查看自己的申请，财务可以查看所有并审批
 const allowSales = authorize('admin', 'sales', 'part_time_sales');
 const allowFinance = authorize('admin', 'finance');
 
 /**
- * 创建发票申请（销售/兼职销售）
+ * 创建发票申请（销售/客户经理）
  * POST /api/invoice-requests
  */
 router.post('/', allowSales, asyncHandler(async (req, res) => {
@@ -170,7 +170,7 @@ router.get('/by-projects', asyncHandler(async (req, res) => {
 }));
 
 /**
- * 获取我的发票申请列表（销售/兼职销售）
+ * 获取我的发票申请列表（销售/客户经理）
  * GET /api/invoice-requests/my
  */
 router.get('/my', allowSales, asyncHandler(async (req, res) => {

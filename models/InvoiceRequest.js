@@ -72,7 +72,7 @@ const invoiceRequestSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
-  // 申请人（销售/兼职销售）
+  // 申请人（销售/客户经理）
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

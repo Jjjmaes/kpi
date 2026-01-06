@@ -16,6 +16,7 @@ const MonthlyRoleKPI = require('../models/MonthlyRoleKPI');
 const Project = require('../models/Project');
 const ProjectMember = require('../models/ProjectMember');
 const User = require('../models/User');
+const PaymentRecord = require('../models/PaymentRecord');
 const { calculateKPIByRole } = require('../utils/kpiCalculator');
 const { calculateAdminStaff, calculateFinance } = require('../utils/kpiCalculator');
 const { generateMonthlyKPIRecords, generateProjectKPI, calculateProjectRealtime, calculateProjectsRealtimeBatch } = require('../services/kpiService');
@@ -517,7 +518,7 @@ router.get('/dashboard', async (req, res) => {
       }
     }
 
-    // KPI 趋势（近3个月）- 销售和兼职销售显示成交额趋势
+    // KPI 趋势（近3个月）- 销售和客户经理显示成交额趋势
     const trendMonths = [];
     const baseDate = new Date(target.getFullYear(), target.getMonth(), 1);
     for (let i = 2; i >= 0; i--) {
@@ -528,7 +529,7 @@ router.get('/dashboard', async (req, res) => {
     
     let kpiTrend = [];
     if (isSales(req) && !isAdmin(req) && !isFinance(req)) {
-      // 销售和兼职销售：计算成交额趋势（基于项目金额）
+      // 销售和客户经理：计算成交额趋势（基于项目金额）
       for (const month of trendMonths) {
         const [year, monthNum] = month.split('-');
         const trendStartDate = new Date(parseInt(year), parseInt(monthNum) - 1, 1);
@@ -635,18 +636,33 @@ router.get('/dashboard', async (req, res) => {
     const recentPaymentOverdue = canViewFinance ? paymentWarnings.filter(w => w.expectedAt && w.expectedAt >= sevenDaysAgo).length : 0;
     const recentDeliveryOverdue = deliveryWarnings.filter(w => w.deadline && w.deadline >= sevenDaysAgo).length;
 
+    // 待确认收款记录（当前用户作为收款人）
+    const pendingPaymentRecords = await PaymentRecord.find({
+      receivedBy: req.user._id,
+      status: 'pending'
+    })
+      .populate('projectId', 'projectNumber projectName')
+      .populate('initiatedBy', 'name')
+      .sort({ createdAt: -1 })
+      .limit(10);
+    
+    const pendingPaymentCount = await PaymentRecord.countDocuments({
+      receivedBy: req.user._id,
+      status: 'pending'
+    });
+
     // 今日指标（根据角色不同）
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    let todayDeals = null; // 今日成交（销售和兼职销售）
-    let todayDelivery = null; // 今日进入交付（销售和兼职销售）
+    let todayDeals = null; // 今日成交（销售和客户经理）
+    let todayDelivery = null; // 今日进入交付（销售和客户经理）
     let todayMyDueProjects = null; // 今日本人应完成项目（翻译、审校、排版）
 
     if (isSales(req) && !isAdmin(req) && !isFinance(req)) {
-      // 销售和兼职销售：今日成交和进入交付
+      // 销售和客户经理：今日成交和进入交付
       // 今日成交：今天创建的项目
       const todayCreatedQuery = { ...projectQuery };
       todayCreatedQuery.createdAt = { $gte: today, $lt: tomorrow };
@@ -801,6 +817,18 @@ router.get('/dashboard', async (req, res) => {
         todayDeals,
         todayDelivery,
         todayMyDueProjects,
+        pendingPaymentRecords: pendingPaymentRecords.map(r => ({
+          id: r._id,
+          projectId: r.projectId?._id,
+          projectNumber: r.projectId?.projectNumber,
+          projectName: r.projectId?.projectName,
+          amount: r.amount,
+          receivedAt: r.receivedAt,
+          method: r.method,
+          initiatedBy: r.initiatedBy?.name,
+          createdAt: r.createdAt
+        })),
+        pendingPaymentCount,
         ...adminStaffData
       }
     });

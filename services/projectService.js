@@ -97,12 +97,13 @@ class ProjectService {
       throw new AppError('交付时间不能早于今天', 400, 'INVALID_DEADLINE');
     }
 
-    // 兼职销售字段校验
+    // 客户经理字段校验 + 税率注入（统一从系统配置读取，前端不再填写税率）
+    let normalizedPartTimeSales = partTimeSales;
     if (partTimeSales && partTimeSales.isPartTime) {
       const companyReceivable = parseFloat(partTimeSales.companyReceivable || 0);
       if (!companyReceivable || companyReceivable <= 0) {
         throw new AppError(
-          '兼职销售创建项目时，公司应收金额必须大于0',
+          '客户经理创建项目时，公司应收金额必须大于0',
           400,
           'INVALID_PART_TIME_SALES'
         );
@@ -114,6 +115,17 @@ class ProjectService {
           'INVALID_PART_TIME_SALES'
         );
       }
+
+      // 使用 KPI 配置中的客户经理税率，忽略前端传入的 taxRate
+      const config = await KpiConfig.getActiveConfig();
+      const taxRateFromConfig = typeof config.part_time_sales_tax_rate === 'number'
+        ? config.part_time_sales_tax_rate
+        : 0;
+
+      normalizedPartTimeSales = {
+        ...partTimeSales,
+        taxRate: taxRateFromConfig
+      };
     }
 
     // 兼职排版字段校验
@@ -243,7 +255,7 @@ class ProjectService {
         completionChecks: {
           hasAmount: true
         },
-        partTimeSales: partTimeSales || {
+        partTimeSales: normalizedPartTimeSales || {
           isPartTime: false,
           companyReceivable: 0,
           taxRate: 0,
@@ -535,13 +547,13 @@ class ProjectService {
     // 获取项目的锁定系数（使用项目创建时的配置）
     const lockedRatios = project.locked_ratios;
 
-    // 兼职角色费用校验（除兼职销售外，所有兼职角色都需要输入费用）
-    // 兼职销售通过项目配置计算，不需要在这里输入费用
+    // 兼职角色费用校验（除客户经理外，所有兼职角色都需要输入费用）
+    // 客户经理通过项目配置计算，不需要在这里输入费用
     const isPartTime = employmentType === 'part_time';
     const isPartTimeSales = role === 'part_time_sales' || (role === 'sales' && isPartTime);
     
     if (isPartTime && !isPartTimeSales) {
-      // 所有兼职角色（除兼职销售外）都需要输入费用
+      // 所有兼职角色（除客户经理外）都需要输入费用
       const fee = parseFloat(partTimeFee || 0);
       const roleName = roleDoc.name || role;
       if (!fee || fee <= 0) {
@@ -640,7 +652,7 @@ class ProjectService {
         ? (typeof wordRatio === 'number' ? (wordRatio || 1.0) : 1.0)
         : 1.0,
       ratio_locked: ratio,
-      // 兼职角色（除兼职销售外）都使用partTimeFee字段
+      // 兼职角色（除客户经理外）都使用partTimeFee字段
       partTimeFee: (isPartTime && !isPartTimeSales)
         ? (parseFloat(partTimeFee || 0) || 0)
         : (role === 'part_time_translator' ? (parseFloat(partTimeFee || 0) || 0) : 0),
@@ -739,7 +751,7 @@ class ProjectService {
         'layout': '排版',
         'sales': '销售',
         'admin_staff': '综合岗',
-        'part_time_sales': '兼职销售'
+        'part_time_sales': '客户经理'
       };
       const roleName = roleNames[member.role] || member.role;
       

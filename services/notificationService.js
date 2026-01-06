@@ -80,7 +80,10 @@ const NotificationTypes = {
   EXPENSE_REQUEST: 'expense_request',           // 报销申请（通知财务/管理员）
   EXPENSE_APPROVED: 'expense_approved',          // 报销申请已批准（通知申请人）
   EXPENSE_REJECTED: 'expense_rejected',          // 报销申请已拒绝（通知申请人）
-  EXPENSE_PAID: 'expense_paid'                  // 报销申请已支付（通知申请人）
+  EXPENSE_PAID: 'expense_paid',                  // 报销申请已支付（通知申请人）
+  PAYMENT_PENDING_CONFIRMATION: 'payment_pending_confirmation', // 待确认收款（通知收款人）
+  PAYMENT_CONFIRMED: 'payment_confirmed',        // 收款已确认（通知发起人）
+  PAYMENT_REJECTED: 'payment_rejected'          // 收款已拒绝（通知发起人）
 };
 
 /**

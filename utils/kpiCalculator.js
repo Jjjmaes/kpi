@@ -148,10 +148,10 @@ function calculateKPIByRole(params) {
       break;
 
     case 'part_time_sales':
-      // 兼职销售：按 PM 录入的兼职销售费用直接记入 KPI
-      // 此时调用方应将 projectAmount 传入为「兼职销售费用」
+      // 客户经理：按 PM 录入的客户经理费用直接记入 KPI
+      // 此时调用方应将 projectAmount 传入为「客户经理费用」
       kpiValue = projectAmount;
-      formula = `兼职销售费用(${projectAmount})`;
+      formula = `客户经理费用(${projectAmount})`;
       break;
 
     case 'finance':

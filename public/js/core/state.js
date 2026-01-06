@@ -43,3 +43,11 @@ export function setCurrentRole(role) {
     if (role) localStorage.setItem('currentRole', role);
 }
 
+export function setSystemConfig(config) {
+    state.systemConfig = config;
+    // 为了兼容性，也保存到 window.state（如果存在）
+    if (window.state) {
+        window.state.systemConfig = config;
+    }
+}
+

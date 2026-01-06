@@ -96,7 +96,7 @@ function getDefaultPermissions() {
         'kpi.config': false,
         'finance.view': false,
         'finance.edit': false,
-        // 兼职销售：默认只能查看自己创建的客户，不允许编辑
+        // 客户经理：默认只能查看自己创建的客户，不允许编辑
         'customer.view': 'self',
         'customer.edit': false,
         'user.manage': false,
@@ -183,7 +183,7 @@ function getDefaultPermissions() {
       'finance': "财务",
       'pm': "项目经理",
       'sales': "销售",
-      'part_time_sales': "兼职销售",
+      'part_time_sales': "客户经理",
       'translator': "翻译",
       'reviewer': "审校",
       'layout': "排版",

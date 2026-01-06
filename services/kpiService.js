@@ -273,7 +273,7 @@ async function generateMonthlyKPIRecords(month, force = false) {
 
             let kpiResult;
 
-            // 判断是否为兼职角色（除兼职销售外）
+            // 判断是否为兼职角色（除客户经理外）
             const isPartTime = member.employmentType === 'part_time';
             const isPartTimeSales = roleForCalc === 'part_time_sales';
 
@@ -288,7 +288,7 @@ async function generateMonthlyKPIRecords(month, force = false) {
                 formula: salesResult.formula
               };
             } else if (roleForCalc === 'part_time_sales') {
-              // 兼职销售：成交额 - 公司应收 - 税费 = 返还佣金
+              // 客户经理：成交额 - 公司应收 - 税费 = 返还佣金
               const commission = project.calculatePartTimeSalesCommission();
               const totalAmount = project.projectAmount || 0;
               const companyReceivable = project.partTimeSales?.companyReceivable || 0;
@@ -301,7 +301,7 @@ async function generateMonthlyKPIRecords(month, force = false) {
                 formula: `成交额(${totalAmount}) - 公司应收(${companyReceivable}) = 应收金额(${receivableAmount})；应收金额(${receivableAmount}) - 税费(${taxAmount.toFixed(2)}) = 返还佣金(${commission})`
               };
             } else if (isPartTime && !isPartTimeSales) {
-              // 所有兼职角色（除兼职销售外）：直接使用partTimeFee，不计算KPI
+              // 所有兼职角色（除客户经理外）：直接使用partTimeFee，不计算KPI
               const fee = member.partTimeFee || 0;
               const roleName = member.role;
               kpiResult = {
@@ -792,7 +792,7 @@ async function generateProjectKPI(projectId) {
           formula: roleForCalc === 'sales' ? kpiResult.formula : appendComplaintNote(kpiResult.formula, project),
           complaintPenalty: roleForCalc === 'sales' ? 0 : (project.hasComplaint ? 0.2 : 0),
           hasComplaint: roleForCalc === 'sales' ? false : !!project.hasComplaint,
-          // 兼职销售相关
+          // 客户经理相关
           partTimeSalesCommission: roleForCalc === 'part_time_sales' ? kpiResult.kpiValue : undefined,
           // 兼职费用相关（统一使用partTimeFee，不再单独保存layoutCost）
           partTimeFee: isPartTime && !isPartTimeSales ? member.partTimeFee : undefined
@@ -849,7 +849,7 @@ async function calculateProjectRealtime(projectId) {
     }
   }
 
-  // 如果未显式添加兼职销售成员，但创建人具备兼职销售角色，自动补充一条兼职销售成员用于预估分成
+  // 如果未显式添加客户经理成员，但创建人具备客户经理角色，自动补充一条客户经理成员用于预估分成
   const hasPartTimeSalesMember = members.some(m => m.role === 'part_time_sales');
   if (!hasPartTimeSalesMember && project.createdBy) {
     const creator = await User.findById(project.createdBy);
@@ -938,7 +938,7 @@ async function calculateProjectRealtime(projectId) {
         commissionPart: salesResult.commissionPart
       };
       } else if (roleForCalc === 'part_time_sales') {
-        // 兼职销售：成交额 - 公司应收 - 税费 = 返还佣金（直接作为"预估分成金额"）
+        // 客户经理：成交额 - 公司应收 - 税费 = 返还佣金（直接作为"预估分成金额"）
         const commission = project.calculatePartTimeSalesCommission();
         const totalAmount = project.projectAmount || 0;
         const companyReceivable = project.partTimeSales?.companyReceivable || 0;
@@ -1147,7 +1147,7 @@ async function calculateProjectsRealtimeBatch(projectIds) {
           commissionPart: salesResult.commissionPart
         };
       } else if (isPartTimeSales) {
-        // 兼职销售
+        // 客户经理
         const commission = project.calculatePartTimeSalesCommission();
         const totalAmount = project.projectAmount || 0;
         const companyReceivable = project.partTimeSales?.companyReceivable || 0;
