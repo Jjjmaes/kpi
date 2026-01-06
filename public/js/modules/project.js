@@ -4233,7 +4233,37 @@ export async function showAddMemberModal(projectId) {
     showModal({ title: '添加项目成员', body: content });
     
     // 如果已经选择了角色，立即过滤用户列表，并初始化附件列表
-    setTimeout(() => {
+    setTimeout(async () => {
+        // 强制重新加载用户列表，避免缓存问题（每次都重新加载，确保数据最新）
+        console.log('[showAddMemberModal] 强制重新加载用户列表...');
+        try {
+            const res = await apiFetch('/users');
+            if (!res.ok) {
+                console.error('[showAddMemberModal] 加载用户列表失败，HTTP状态:', res.status);
+                const errData = await res.json();
+                console.error('[showAddMemberModal] 错误详情:', errData);
+                showToast(`加载用户列表失败: ${errData.message || errData.error?.message || '权限不足'}`, 'error');
+                return;
+            }
+            const data = await res.json();
+            if (data && data.success) {
+                state.allUsers = data.data;
+                console.log('[showAddMemberModal] 用户列表已加载，数量:', state.allUsers.length);
+                console.log('[showAddMemberModal] 用户角色分布:', 
+                    state.allUsers.reduce((acc, u) => {
+                        (u.roles || []).forEach(r => acc[r] = (acc[r] || 0) + 1);
+                        return acc;
+                    }, {})
+                );
+            } else {
+                console.error('[showAddMemberModal] 加载用户列表失败:', data);
+                showToast('加载用户列表失败', 'error');
+            }
+        } catch (err) {
+            console.error('[showAddMemberModal] 加载用户列表异常:', err);
+            showToast('加载用户列表失败: ' + err.message, 'error');
+        }
+        
         const roleSelect = document.getElementById('memberRole');
         if (roleSelect && roleSelect.value) {
             filterUsersByRole();
